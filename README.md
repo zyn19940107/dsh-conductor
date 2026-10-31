@@ -184,7 +184,7 @@ Agent loop 是个链。每一轮都是一次完整的模型往返：
 ```yaml
 - insert:
     - id: refine-loop
-      name: '@zyn19940107/refine-loop'
+      name: '@zyn19940107/dsh-refine-loop'
       config:
         enabled: true                    # 整个插件挂不挂
         chainLimit: 2                    # 连续几次「一步一件」之后才提醒
@@ -267,7 +267,7 @@ dsh plugin add /path/to/dsh-refine-loop
 
 # 或者打包
 pnpm pack
-dsh plugin add ./zyn19940107-refine-loop-0.1.0.tgz
+dsh plugin add ./zyn19940107-dsh-refine-loop-0.1.0.tgz
 ```
 
 **装完请开一个新会话** —— 已经开着的会话不会刷新模型看到的工具表。

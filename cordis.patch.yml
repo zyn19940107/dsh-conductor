@@ -12,7 +12,7 @@
 
 - insert:
     - id: refine-loop
-      name: '@zyn19940107/refine-loop'
+      name: '@zyn19940107/dsh-refine-loop'
       config:
         enabled: true
         chainLimit: 2

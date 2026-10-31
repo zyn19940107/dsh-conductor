@@ -9,7 +9,7 @@
  * the whole shape of the work before it starts, so the shape is one thing it
  * decided rather than a thing it re-decided at every step.
  *
- * @module @local/dsh-refine-loop/plan
+ * @module @zyn19940107/dsh-refine-loop/plan
  */
 
 /** The kinds of node a plan may hold. */

@@ -5,6 +5,6 @@
 # tool or its prompt section. The tool table, the guidance, and the rules are
 # then exactly what a profile without the plugin would have.
 - id: refine-loop
-  name: '@zyn19940107/refine-loop'
+  name: '@zyn19940107/dsh-refine-loop'
   config:
     enabled: false

@@ -13,7 +13,7 @@
  *
  * The command is a human command: the UI runs it and the model never sees it.
  *
- * @module @local/dsh-refine-loop/policy
+ * @module @zyn19940107/dsh-refine-loop/policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'

@@ -1,5 +1,5 @@
 /**
- * Standalone build for @zyn19940107/refine-loop.
+ * Standalone build for @zyn19940107/dsh-refine-loop.
  *
  * The host half is plain ESM with the harness packages left as imports: the
  * Loader resolves them from the profile, exactly as it does for an official

@@ -12,7 +12,7 @@
  * step and pays for the whole history each time. In a plan it decides the
  * shape once, and the shape runs.
  *
- * @module @local/dsh-refine-loop/tool
+ * @module @zyn19940107/dsh-refine-loop/tool
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'

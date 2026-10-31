@@ -18,7 +18,7 @@
  * The shell answer is the risky one, so it errs hard: a command the classifier
  * cannot read as a reader stays on its own.
  *
- * @module @local/dsh-refine-loop/concurrency
+ * @module @zyn19940107/dsh-refine-loop/concurrency
  */
 
 /**

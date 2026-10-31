@@ -17,7 +17,7 @@
  * never refuses a call, so an agent whose items genuinely depend on each other
  * can keep taking one step at a time.
  *
- * @module @local/dsh-refine-loop/gate
+ * @module @zyn19940107/dsh-refine-loop/gate
  */
 
 import type { Context } from '@deepseek-ai/cordis'
