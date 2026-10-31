@@ -1,0 +1,57 @@
+{
+  "criteria": [
+    "调查 1 产出:DeepSeek Harness 的 GitHub 仓库 URL、star 数、最后一次提交的日期与提交信息,三者均带可点击来源链接",
+    "调查 2 产出:一个 npm 上其他 DeepSeek Harness 插件包的清单(包名、版本、发布时间或最近更新、链接),能区分官方包与第三方包",
+    "调查 3 产出:GitHub 上 DSH 教程/实践文章的清单(标题、仓库或文章 URL),并说明每篇覆盖什么",
+    "全部三条调查都标注了数据来源 URL 与抓取时间,不确定或查不到的部分明确说明而不是编造",
+    "最终简报包含三个独立小节 + 汇总,每个结论后面直接跟来源链接"
+  ],
+  "nodes": [
+    {
+      "id": "local",
+      "kind": "tools",
+      "calls": [
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "ls \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/\" 2>&1 | head -50; echo '---PKG---'; cat \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/package.json\" 2>&1 | head -60",
+            "description": "Inspect local DSH checkout package metadata"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "cd \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/\" && ls packages apps 2>&1 | head -60",
+            "description": "List DSH workspace packages and apps"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gh-repo",
+      "kind": "subagent",
+      "task": "调查 DeepSeek Harness(简称 DSH)在 GitHub 上的官方仓库情况。这是一个由 DeepSeek 发布的 AI 编码 agent / 命令行 harness 运行时,带插件系统(插件分为 host 半边 / client 半边、cordis.patch.yml 补丁、typert 清单等),npm 上有 `dsh-plugin-*` 之类的包。\n\n请只做只读调查,不要修改任何文件。你的任务:\n1. 找到 DeepSeek Harness 的官方 GitHub 仓库(候选可能包括 deepseek-ai/DeepSeek-Harness、deepseek-ai/dsh、deepseek-ai/harness 等,请实际访问 GitHub 确认,不要凭猜测)。\n2. 报告该仓库的:star 数、fork 数、watcher 数(能看到多少报多少)、仓库描述、license、主要语言、创建时间。\n3. 报告**最后一次 commit 的日期与提交标题**(以及作者/分支),尽量精确到日期(YYYY-MM-DD),并说明你是从哪个页面或 API 拿到的。\n4. 顺便报告:最近一次 release / tag 的版本号与日期(如果存在)、仓库是否公开可见。\n5. 如果 GitHub API 可用(curl https://api.github.com/repos/OWNER/REPO),可以直接用 API 取 stargazers_count 和 pushed_at / updated_at,更准确。\n\n方法建议:用 web_search 搜索 \"DeepSeek Harness github\",再用 web_fetch 或 read_page 打开 GitHub 仓库页和 https://api.github.com/repos/<owner>/<repo>。\n\n输出格式(纯文本,可含 markdown):\n- 仓库 URL\n- Star / Fork / Watcher 数(注明数据来源 URL 与抓取时间)\n- 最后一次提交:日期 + 标题 + 分支(注明来源 URL)\n- 最近 release/tag\n- 备注:仓库是否还有其他相关仓库(issues、discussions、模板仓库等),若发现一并列出 URL\n- 明确列出你不确定的地方\n\n所有数字和日期必须带来源链接。不要编造数字。"
+    },
+    {
+      "id": "npm-plugins",
+      "kind": "subagent",
+      "task": "调查 npm registry 上有哪些「DeepSeek Harness」(简称 DSH)的插件包在发布。\n\n背景:DSH 是一个带插件系统的 AI agent harness。已知 npm 上存在形如 `dsh-plugin-*` 的包命名约定。已知的官方/相关包名可能包括 `dsh`、`dsh-plugin-*` 系列、以及 `@deepseek/*` 之类的 scope。\n\n请只做只读调查,不要修改任何文件。任务:\n1. 找出 npm 上所有与 DeepSeek Harness 相关的已发布包。重点查:\n   - npmjs.com 搜索页 https://www.npmjs.com/search?q=dsh-plugin\n   - https://www.npmjs.com/search?q=deepseek+harness\n   - npm registry 搜索 API: https://registry.npmjs.org/-/v1/search?text=dsh-plugin&size=50\n   - https://registry.npmjs.org/-/v1/search?text=keywords:dsh&size=50\n   - 也可以查 https://www.npmjs.com/org/deepseek-ai 之类的组织页\n2. 对每个找到的包,报告:包名、最新版本、最后发布时间(用 registry API: https://registry.npmjs.org/<pkg> 取 time.modified)、仓库主页/主页链接、简述。\n3. 区分「官方包」和「第三方包」——第三方通常自带自己的 repo URL;官方包可能指向同一个 DeepSeek Harness 仓库。\n4. 如果某类包很多,至少给出完整清单表格;不要只给示例就停。\n5. 注意区分同名但无关的包(例如别的项目也叫 dsh)。\n\n可用工具:web_fetch 可直接抓 registry.npmjs.org 的 JSON(用 URL 形式的 text= 查询参数),也可以用 web_search 找 npmjs.com 页面。npm CLI 不可用时不要尝试安装。\n\n输出格式(纯文本,可含 markdown 表格):\n- 每个包一行:包名 | 版本 | 最后修改时间 | 主页/仓库链接 | 官方/第三方 | 一句话说明\n- 最后给一句总结:一共找到几个包,分别属于几类\n- 每行都带来源 URL;标注抓取时间\n- 明确列出查不到或不确定的部分"
+    },
+    {
+      "id": "gh-articles",
+      "kind": "subagent",
+      "task": "调查 GitHub 上有没有人写过关于 DeepSeek Harness(简称 DSH)的教程或实践文章。\n\n背景:DSH 是 DeepSeek 发布的 AI 编码 agent harness / 命令行运行时,带插件系统(插件分 host 半边与 client 半边,支持 cordis.patch.yml 补丁和 typert 清单),以 npm 包形式分发(如 `dsh-plugin-*`)。2025 年前后开始有人关注。\n\n请只做只读调查,不要修改任何文件。任务:\n1. 在 GitHub 上搜索 DSH 相关教程/实践文章。重点搜索方向:\n   - 仓库搜索:site:github.com \"DeepSeek Harness\" tutorial / guide / plugin\n   - GitHub 搜索 API: https://api.github.com/search/repositories?q=deepseek+harness ; https://api.github.com/search/code 需要认证,可改用 https://api.github.com/search/repositories?q=dsh-plugin\n   - 搜索 README 里带 \"DeepSeek Harness\" 的仓库: https://api.github.com/search/repositories?q=%22DeepSeek+Harness%22+in:readme\n   - 尝试 GitHub 网页搜索: https://github.com/search?q=%22DeepSeek+Harness%22&type=repositories 与 type=code\n   - 也可搜 \"dsh-plugin\"、\"dsh plugin tutorial\"、\"DeepSeek Harness 插件\"\n2. 对每个命中,报告:仓库/文章标题、作者、URL、语言/star(能看到就报)、以及**这篇内容具体覆盖了什么**(比如:写插件的完整教程、踩坑记录、配置示例、示例项目)。\n3. 注意区分「DSH 官方文档」和「第三方作者写的实践文章」;也要注意区分 DeepSeek-V3/R1 模型本身的教程(那不是 DSH)。\n4. 如果找不到真正的教程文章,如实说「基本没有找到第三方教程,只有官方 README/文档」,这也是有价值的结论 —— 请确认这个判断的证据(例如搜索了哪些 query、GitHub 上带 dsh-plugin 的仓库都只有什么)。\n\n可用工具:web_search、web_fetch、read_page。GitHub REST API 无需认证也能有较低速率限制地使用。\n\n输出格式(纯文本,可含 markdown):\n- 每条命中:标题 | 作者 | URL | star(可查则报) | 覆盖内容一句话 | 类型(官方文档/第三方教程/示例项目/无关)\n- 结论段:GitHub 上 DSH 教程的整体稀缺程度,列出你实际跑过的搜索 query 作为证据\n- 每条带来源 URL;标注抓取时间"
+    },
+    {
+      "id": "brief",
+      "kind": "subagent_fork",
+      "task": "把前面三条调查结果汇总成一份中文《DSH 生态简报》。\n\n要求:\n- 开头一段 3-5 行的摘要:DSH 生态当前的整体状态。\n- 三个独立小节,分别对应:① GitHub 仓库情况(star 数、最后一次提交日期等) ② npm 上的其他插件包 ③ GitHub 上的教程/实践文章。每节都要有「结论」和「来源链接」。\n- 所有具体数字/日期/包名后面直接跟 markdown 链接,格式 [来源](url)。\n- 单独一节「交叉观察」:把三条线索串起来看,例如 star 数 vs 生态丰富度 vs 教程稀缺度之间的张力,只写能被调查数据支撑的推论,明确区分「事实」和「推测」。\n- 最后一节「数据可信度与缺口」:说明每个数字的来源、抓取时间、以及哪些地方查不到或有不确定性。\n- 全文用中文,简洁、克制,不要客套话和空洞形容词。事实为主。\n\n如果某条调查没有拿到结果,照实写「未查到」,不要用其他来源编造。",
+      "after": [
+        "local",
+        "gh-repo",
+        "npm-plugins",
+        "gh-articles"
+      ]
+    }
+  ]
+}

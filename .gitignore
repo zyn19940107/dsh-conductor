@@ -1,0 +1,15 @@
+# Build output — `pnpm build` produces it.
+lib/
+
+# Dependencies
+node_modules/
+
+# Editor and OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Benchmark scratch: the runner writes one JSON record per run here, and the
+# records that back the README's table are kept on purpose. Nothing else.
+bench/results/*.tmp

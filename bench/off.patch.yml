@@ -1,0 +1,10 @@
+# The benchmark's "plugin off" overlay.
+#
+# The loader applies this after the profile layer, so the plugin's own row is
+# mounted but inert: `enabled: false` makes it return before it registers its
+# tool or its prompt section. The tool table, the guidance, and the rules are
+# then exactly what a profile without the plugin would have.
+- id: refine-loop
+  name: '@zyn19940107/refine-loop'
+  config:
+    enabled: false

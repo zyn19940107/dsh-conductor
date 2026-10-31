@@ -1,0 +1,30 @@
+# The bundle's own Loader patch, applied after dsh-base and dsh-web-app.
+#
+# One row mounts this package. It replaces nothing: every tool the profile
+# already had stays mounted and stays visible. This plugin adds one tool
+# (`refine_plan`), the guidance that says when to use it, the rule that
+# makes a turn open with a plan, and the rule that intercepts a chain of
+# one-call steps.
+#
+# The plugin never chooses a search backend and never decides what a call
+# means — it only decides how many calls travel together, and how a turn
+# opens.
+
+- insert:
+    - id: refine-loop
+      name: '@zyn19940107/refine-loop'
+      config:
+        enabled: true
+        chainLimit: 2
+        maxBatchSize: 8
+        maxBatchTimeoutMs: 600000
+        maxAgentDepth: 1
+        agentNodeTimeoutMs: 300000
+        requirePlan: true
+        planPullbacks: 2
+        respectConcurrencySafety: true
+        concurrentTools:
+          - glob
+          - grep
+        concurrentShell: true
+        shellTool: ops_bash
