@@ -6,6 +6,10 @@
  * accounting on every step. Nothing here estimates a number the provider did
  * not report.
  *
+ * The run needs a DSH home of its own: it must not share a profile with the
+ * DSH the person is using. Point DSH_SANDBOX_HOME at one, and DSH_BENCH_CWD
+ * at the directory the task reads.
+ *
  * Usage: node bench/run-one.mjs <condition> <index>
  *   condition: on | off
  */
@@ -19,8 +23,8 @@ import { TASK, judge } from './task.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EXE = 'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe'
 const CLI = 'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'
-const SANDBOX_HOME = 'D:/code/vibe/dsh-sandbox/home'
-const CWD = 'D:/code/vibe'
+const SANDBOX_HOME = process.env.DSH_SANDBOX_HOME ?? 'D:/code/vibe/dsh-sandbox/home'
+const CWD = process.env.DSH_BENCH_CWD ?? 'D:/code/vibe'
 
 const condition = process.argv[2] ?? 'on'
 const index = process.argv[3] ?? '1'

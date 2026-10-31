@@ -51,6 +51,8 @@ Agent loop 是个链。每一轮都是一次完整的模型往返：
 省下来的是 `cacheRead`（−50%）：步数少一半，每一步就不用重读上一轮攒下的历史。
 
 复现：`pnpm bench`；原始记录在 `bench/results/`，任务和判据在 `bench/task.mjs`。
+基准要一个**自己的** DSH home（别跟正在用的那个共用 profile）：
+`DSH_SANDBOX_HOME=<你的隔离 DSH_HOME> DSH_BENCH_CWD=<任务要读的目录> pnpm bench`。
 
 ---
 
