@@ -25,32 +25,116 @@ Agent loop 是个链。每一轮都是一次完整的模型往返：
 ## 对比：开插件 vs 不开插件
 
 同一个二进制、同一份 profile、同一个模型、同一个任务 —— 只差插件自己的 `enabled` 开关。
-每组 3 次，**串行**跑（并行跑测出来的是 provider 的争用，不是插件），取中位数。
+每个任务每组 3 次，**串行**跑（并行跑测出来的是 provider 的争用，不是插件），取中位数。
+
+三个任务，三种形状：
+
+| 任务 | 形状 |
+|---|---|
+| `survey` | 五件互不依赖的查找 + 一次评价 |
+| `chain` | 三步，每一步都要用上一步的结果 |
+| `review` | 三个部分各自独立审查 + 一次汇总 |
+
+### survey
 
 | 指标 | 关掉插件 | 开着插件 | 变化 |
 |---|---:|---:|---:|
-| 步数（模型往返） | 12 | 6 | **−50%** |
-| 工具调用（顶层） | 29 | 16 | −45% |
-| 工具调用（含计划内） | 29 | 22 | −24% |
-| 总 tokens | 293,356 | 163,282 | **−44%** |
-| ├ input | 20,362 | 24,768 | +22% |
-| ├ cacheRead | 267,008 | 132,480 | −50% |
-| └ output | 5,986 | 6,385 | +7% |
-| 墙钟 | 71s | 47s | **−34%** |
+| 总耗时 | 66s | 54s | −19% |
+| 总 token（整个编队） | 352,086 | 358,498 | +2% |
+| ├ input | 42,680 | 30,117 | −29% |
+| ├ cacheRead | 302,592 | 334,555 | +11% |
+| └ output | 5,263 | 5,706 | +8% |
+| 主 agent 的 context | 56,447 | 46,533 | **−18%** |
+| 编队人数 | 1 人 | 1 人 | 0% |
+| 模型往返步数 | 12 | 10 | −17% |
 | 正确性（命中判据） | 6/6 | 6/6 | 持平 |
+
+### chain
+
+| 指标 | 关掉插件 | 开着插件 | 变化 |
+|---|---:|---:|---:|
+| 总耗时 | 17s | 50s | **+190%** |
+| 总 token（整个编队） | 85,215 | 166,814 | **+96%** |
+| ├ input | 17,494 | 49,802 | +185% |
+| ├ cacheRead | 58,368 | 106,066 | +82% |
+| └ output | 1,849 | 10,946 | +492% |
+| 主 agent 的 context | 24,592 | 25,952 | +6% |
+| 编队人数 | 1 人 | 2 人 | +100% |
+| 模型往返步数 | 5 | 7 | +40% |
+| 正确性（命中判据） | 4/4 | 4/4 | 持平 |
+
+### review
+
+| 指标 | 关掉插件 | 开着插件 | 变化 |
+|---|---:|---:|---:|
+| 总耗时 | 49s | 120s | **+147%** |
+| 总 token（整个编队） | 336,578 | 502,090 | +49% |
+| ├ input | 48,286 | 105,110 | +118% |
+| ├ cacheRead | 281,362 | 362,642 | +29% |
+| └ output | 8,201 | 34,338 | +319% |
+| 主 agent 的 context | 48,414 | 42,626 | **−12%** |
+| 编队人数 | 1 人 | 4 人 | +300% |
+| 模型往返步数 | 10 | 17 | +70% |
+| 正确性（命中判据） | 4/4 | 4/4 | 持平 |
 
 **这些数是怎么来的**
 
-- **耗时** = 从进程启动到最终回答写出的墙钟时间。
-- **token** = provider 自己上报的用量（input / cacheRead / output），不是估算。
-- **步数** = 模型往返次数。关掉插件时模型一步一个工具调用；开着插件时整轮的工作是一张计划，一次调用交出去。
-- **正确性** = 任务要回答的 6 项事实（两个文件数、14 个文件名、两个符号定义在哪个文件）有没有全部出现在最终回答里。判据是机械的，不是「读起来不错」。
-- **工具调用**分两行：计划内部的调用不产生顶层 `tool/call` 事件，所以只数顶层会低估计划干的活，第二行把它加回来。
+- **总耗时** = 从进程启动到最终回答写出的墙钟时间。
+- **总 token** = **整个编队**的 token：主会话加上它派生出的每一个子会话的 `input + cacheRead + output`。
+  子代理有自己的会话日志，它的用量**不在**主会话的 `--json` 投影里 —— 只数投影等于漏账。
+  这个合计和 harness 自己的投影缓存 `tokenUsage.totals` 逐项相等，两条独立算出来的路给出同一个数。
+- **主 agent 的 context** = 主会话最后一次请求读到的全部 token（`input + cacheRead`），
+  也就是它最后一轮背着多少上下文。这个数和 harness 的 `contextPressure.pressureTokens` 相等。
+- **编队人数** = 这一轮派生出的会话数（主会话 + 子代理）。
+- **正确性** = 任务要回答的事实有没有全部出现在最终回答里。判据是机械的，不是「读起来不错」。
 
-**六次运行全部 6/6。** 开着插件时 `input` 反而多了 22% —— 计划本身要占 token；
-省下来的是 `cacheRead`（−50%）：步数少一半，每一步就不用重读上一轮攒下的历史。
+### 结论要照实说
 
-复现：`pnpm bench`；原始记录在 `bench/results/`，任务和判据在 `bench/task.mjs`。
+**开着插件，这一轮不一定更便宜。** 三个任务里，整队 token 分别是 +2% / +96% / +49%，耗时有两项明显更久。
+原因不是插件做多了活，而是**模型变了决定**：
+
+| | 关掉插件 | 开着插件 |
+|---|---:|---:|
+| 派生出编队的运行 | 1 / 9 | **5 / 9** |
+
+开着插件时，第一个工具调用必须是一张计划，而计划里放一个代理节点是最自然的写法 ——
+所以模型**更常**把活分出去。分出去是有代价的：子代理要从零读一遍，父会话要等它回来，
+总 token 因此上去。**但主 agent 的 context 反而小了**（survey −18%、review −12%）：
+它不用自己背着所有细节，只拿结论。
+
+这个插件不做的是「让每一轮更省」。它做的是**把这一轮怎么切、先做哪件、哪件值得派出去，
+交回给模型在动手前决定**。省不省，取决于模型决定切多大。
+
+### 每一次运行
+
+一次运行就是一次抽样，模型的行为方差很大 —— 所以把每一次都列出来：
+
+```
+survey  off 1: 66.2s agents=1 tokens=493540 mainCtx=56515 correct=6/6 plan=n/0
+survey  off 2: 55.7s agents=1 tokens=250455 mainCtx=31809 correct=6/6 plan=n/0
+survey  off 3: 79.3s agents=1 tokens=352086 mainCtx=56447 correct=6/6 plan=n/0
+survey  on  1: 53.8s agents=1 tokens=358498 mainCtx=48701 correct=6/6 plan=y/0
+survey  on  2: 35.0s agents=1 tokens=117357 mainCtx=41291 correct=6/6 plan=y/0
+survey  on  3:170.6s agents=2 tokens=715271 mainCtx=46533 correct=6/6 plan=y/1
+chain   off 1: 15.9s agents=1 tokens= 85215 mainCtx=24592 correct=4/4 plan=n/0
+chain   off 2: 17.3s agents=1 tokens=109616 mainCtx=26910 correct=4/4 plan=n/0
+chain   off 3: 17.3s agents=1 tokens= 69784 mainCtx=23621 correct=4/4 plan=n/0
+chain   on  1: 18.3s agents=1 tokens= 95531 mainCtx=25952 correct=4/4 plan=y/0
+chain   on  2: 64.4s agents=4 tokens=321125 mainCtx=19851 correct=4/4 plan=y/3
+chain   on  3: 50.1s agents=2 tokens=166814 mainCtx=26985 correct=4/4 plan=y/1
+review  off 1: 34.5s agents=1 tokens=336578 mainCtx=48414 correct=4/4 plan=n/0
+review  off 2: 48.6s agents=1 tokens=231440 mainCtx=47071 correct=4/4 plan=n/0
+review  off 3:179.2s agents=4 tokens=7979462 mainCtx=118958 correct=3/4 plan=n/0
+review  on  1: 48.3s agents=1 tokens=129038 mainCtx=42626 correct=4/4 plan=y/0
+review  on  2:120.0s agents=4 tokens=502090 mainCtx=49073 correct=4/4 plan=y/0
+review  on  3:122.0s agents=4 tokens=1659346 mainCtx=41885 correct=4/4 plan=y/3
+```
+
+`plan` = 第一个工具调用是不是 `refine_plan`；`plan=y/3` = 是，而且计划里有 3 个代理节点。
+`review off 3` 是唯一一次没拿满分的运行 —— 它编出了 4 个 agent，burn 了 798 万 token。
+
+复现：`pnpm bench`；原始记录在 `bench/results/`，任务和判据在 `bench/task.mjs`，
+会话树的读法在 `bench/sessions.mjs`。
 基准要一个**自己的** DSH home（别跟正在用的那个共用 profile）：
 `DSH_SANDBOX_HOME=<你的隔离 DSH_HOME> DSH_BENCH_CWD=<任务要读的目录> pnpm bench`。
 

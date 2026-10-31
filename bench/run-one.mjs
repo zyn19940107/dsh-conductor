@@ -1,16 +1,21 @@
 /**
- * Run the benchmark task once, in one condition, and record what it cost.
+ * Run one benchmark task once, in one condition, and record what it cost.
  *
  * The measurement comes from the harness's own `--json` projection: one
  * newline-delimited event per session event, with the provider's token
  * accounting on every step. Nothing here estimates a number the provider did
  * not report.
  *
+ * The projection only covers the session the runner drives. A delegated agent
+ * lives in its own session with its own log, so the whole formation's cost
+ * is the sum over the session tree, read back from those logs after the run.
+ *
  * The run needs a DSH home of its own: it must not share a profile with the
  * DSH the person is using. Point DSH_SANDBOX_HOME at one, and DSH_BENCH_CWD
  * at the directory the task reads.
  *
- * Usage: node bench/run-one.mjs <condition> <index>
+ * Usage: node bench/run-one.mjs <task> <condition> <index>
+ *   task: survey | chain | review
  *   condition: on | off
  */
 
@@ -18,21 +23,29 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TASK, judge } from './task.mjs'
+import { TASKS } from './task.mjs'
+import { readSessions, subtree, totals } from './sessions.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EXE = 'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe'
 const CLI = 'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js'
 const SANDBOX_HOME = process.env.DSH_SANDBOX_HOME ?? 'D:/code/vibe/dsh-sandbox/home'
 const CWD = process.env.DSH_BENCH_CWD ?? 'D:/code/vibe'
+const SESSIONS_ROOT = resolve(SANDBOX_HOME, 'sessions', '--D-code-vibe--')
 
-const condition = process.argv[2] ?? 'on'
-const index = process.argv[3] ?? '1'
+const taskName = process.argv[2] ?? 'survey'
+const condition = process.argv[3] ?? 'on'
+const index = process.argv[4] ?? '1'
+const task = TASKS[taskName]
+if (task === undefined) {
+  console.error(`unknown task "${taskName}"; known: ${Object.keys(TASKS).join(', ')}`)
+  process.exit(2)
+}
 
 /**
  * Run the headless task and collect its events.
  *
- * @returns the parsed events, the final text, the wall-clock cost, and the exit code.
+ * @returns {Promise<object>} the events, the final text, the wall-clock cost, and the session id.
  */
 async function run() {
   const args = [
@@ -63,7 +76,7 @@ async function run() {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
-  child.stdin.end(TASK)
+  child.stdin.end(task.text)
 
   let stdout = ''
   let stderr = ''
@@ -76,6 +89,7 @@ async function run() {
 
   const events = []
   let finalText = ''
+  let sessionId = ''
   for (const line of stdout.split('\n')) {
     if (line.trim() === '') continue
     let event
@@ -86,6 +100,7 @@ async function run() {
     }
     events.push(event)
     if (event.type === 'final') finalText = String(event.text ?? '')
+    if (event.type === 'session') sessionId = String(event.sessionId ?? '')
   }
   if (exitCode !== 0) {
     console.error('--- stdout ---')
@@ -93,13 +108,13 @@ async function run() {
     console.error('--- stderr ---')
     console.error(stderr.slice(0, 2000))
   }
-  return { events, finalText, wallMs, exitCode, stderr }
+  return { events, finalText, wallMs, exitCode, stderr, sessionId }
 }
 
-const { events, finalText, wallMs, exitCode, stderr } = await run()
+const { events, finalText, wallMs, exitCode, stderr, sessionId } = await run()
 
 /**
- * The provider's accounting for one step.
+ * The provider's accounting for one step, from the projection stream.
  *
  * @param {object} event - a step_end event.
  * @returns {object} the token counts it carries.
@@ -111,7 +126,6 @@ function usageOf(event) {
     outputTokens: usage.outputTokens ?? 0,
     cacheReadTokens: usage.cacheReadTokens ?? 0,
     totalTokens: usage.totalTokens ?? 0,
-    reasoningTokens: usage.reasoningTokens ?? 0,
   }
 }
 
@@ -122,14 +136,32 @@ const tools = toolCalls.map(event => String(event.tool ?? ''))
 const usage = steps.map(event => usageOf(event))
 const sum = (key) => usage.reduce((total, entry) => total + entry[key], 0)
 
-const verdict = judge(finalText)
 const planCall = toolCalls.find(event => event.tool === 'refine_plan')
+const planCalls = planCall?.input?.nodes?.filter(node => node.kind !== 'tools').length ?? 0
+
+// The whole formation: the session the runner drove plus every session it
+// spawned, read back from their own logs.
+let formation = { sessions: 1, input: 0, output: 0, cacheRead: 0, total: 0, steps: 0 }
+let mainPrompt = 0
+if (sessionId !== '') {
+  const sessions = readSessions(SESSIONS_ROOT)
+  const root = sessions.get(sessionId)
+  if (root !== undefined) {
+    const tree = subtree(sessions, sessionId)
+    formation = totals(tree)
+    mainPrompt = root.lastPrompt
+  }
+}
+
+const verdict = task.judge(finalText)
 
 const record = {
+  task: taskName,
   condition,
   index: Number(index),
   exitCode,
   wallMs,
+  sessionId,
   stderr: stderr.slice(0, 1200),
   steps: steps.length,
   toolCalls: toolCalls.length,
@@ -139,33 +171,43 @@ const record = {
     outputTokens: sum('outputTokens'),
     cacheReadTokens: sum('cacheReadTokens'),
     totalTokens: sum('totalTokens'),
-    reasoningTokens: sum('reasoningTokens'),
   },
+  formation: {
+    agents: formation.sessions,
+    input: formation.input,
+    output: formation.output,
+    cacheRead: formation.cacheRead,
+    total: formation.total,
+    steps: formation.steps,
+  },
+  mainPrompt,
   correctness: {
     passed: verdict.passed,
     total: verdict.total,
     missing: verdict.missing,
   },
   planned: tools.includes('refine_plan'),
-  plan: planCall?.input ?? null,
+  planAgentNodes: planCalls,
   thinkingChars: thinking.join('\n').length,
   thinkingPreview: thinking.join('\n').slice(0, 900),
   finalText: finalText.slice(0, 4000),
 }
 
 mkdirSync(resolve(HERE, 'results'), { recursive: true })
-const out = resolve(HERE, 'results', `${condition}-${index}.json`)
+const out = resolve(HERE, 'results', `${taskName}-${condition}-${index}.json`)
 writeFileSync(out, `${JSON.stringify(record, null, 2)}\n`)
 
 console.log(JSON.stringify({
+  task: taskName,
   condition,
   index,
   exitCode,
   wallMs,
   steps: record.steps,
-  toolCalls: record.toolCalls,
+  agents: formation.sessions,
+  mainPrompt,
+  formationTotal: formation.total,
   planned: record.planned,
-  tools: tools.slice(0, 14),
-  usage: record.usage,
+  planAgentNodes: planCalls,
   correctness: record.correctness,
 }, null, 2))

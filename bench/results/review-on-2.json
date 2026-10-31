@@ -1,0 +1,47 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 2,
+  "exitCode": 0,
+  "wallMs": 119973,
+  "sessionId": "session-e03e168a-989d-4b35-b7ce-1afcd664ad69",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 7,
+  "toolCalls": 9,
+  "tools": [
+    "refine_plan",
+    "read",
+    "read",
+    "read",
+    "glob",
+    "grep",
+    "grep",
+    "read",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 32665,
+    "outputTokens": 8719,
+    "cacheReadTokens": 194560,
+    "totalTokens": 235944
+  },
+  "formation": {
+    "agents": 4,
+    "input": 105110,
+    "output": 34338,
+    "cacheRead": 362642,
+    "total": 502090,
+    "steps": 17
+  },
+  "mainPrompt": 49073,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 10950,
+  "thinkingPreview": "The user wants me to independently review three files in D:\\code\\vibe\\dsh-refine-loop. Read-only. Let me look at the files.\n\nThe task: read src/plan.ts, src/gate.ts, src/tool.ts and answer questions about each, then summarize.\n\nThis is a read-only review task with three independent parts. I could delegate to subagents, but honestly reading three files directly is fine and more accurate. However the system prompt suggests using refine_plan for multi-item turns. But the guidance also says for one or two delegations prefer plain subagent calls. Actually the \"independently review three parts\" suggests each is independent — could fan out with three subagents. But reading files myself gives better grounding and is cheap. Let me first check the directory.\n\nLet me just read the files directly — that's the most reliable. But the refined loop instructions say \"Use it whenever the turn has more tha",
+  "finalText": "三个文件都已独立读完并交叉复核过（三个子代理各审一个文件，逐条确认/更正我的判断）。以下结论均以 `file:line` 为准，未修改任何文件。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**数据形状**：`PlanArgs` = 一个带 `criteria: string[]`（可观测的成功判据）和 `nodes: PlanNode[]` 的小图（plan.ts:44-49）。每个 `PlanNode` 有 5 个字段：`id`（节点名，别人在 `after` 里引用它）、`kind`、`calls: PlanToolCall[]`（tools 节点用）、`task: string`（agent 节点用）、`after: string[]`（依赖的节点 id）（plan.ts:30-41）。`PlanToolCall` 只有 `name: string` 和 `arguments: unknown`（plan.ts:22-27）。\n\n**三种节点**：`PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'`（plan.ts:16）——`tools` 是一起跑的若干次调用，`subagent` 是交给一个\"无上下文起步\"的子代理，`subagent_fork` 是交给一个\"继承本对话\"的子代理；`AGENT_NODE_KINDS = ['subagent','subagent_fork']`（plan.ts:19）标出后两种。\n\n**占位符语法**：`@@nodeId@@`，正则 `/^@@([^@]+)@@$/u`（plan.ts:73）。三个关键性质：\n- **必须整个参数都是占位符**才替换；夹在长字符串里的（如 `\"prefix @@research@@\"`）原样保留（plan.ts:64-66）。规则作用于参数树里的**每个字符串值**，所以 `{\"content\":\"@@research@@\"}` 会替换，`\"see @@research@@\"` 不会。\n- **不用双花括号**，因为 harness 自己保留 `{{ }}` 给 prompt 变量（plan.ts:68-71）。副作用：`substitutePlaceholders` 的文档注释里写的 `{{nodeId}}`（plan.ts:267）是**过时错例**，与实际语法不符。\n- 占位符**隐式生成依赖边**：`parsePlanArgs` 会把参数里引用的节点 id 塞进该节点的 `after`（plan.ts:142-148），所以即使没写 `after`，被引用的节点也必须先跑完。占位符解不出来时**抛错**而不是把字面量塞给工具（plan.ts:279-281）。\n\n例子：`{\"name\":\"write_file\",\"arguments\":{\"path\":\"out.md\",\"content\":\"@@research@@\"}}` → `content` 变成 `research` 节点的输出文本。\n\n`parsePlanArgs` 拒绝计划的条件（plan.ts:85-135）：criteria 非数组、或过滤后没有非空字符串；nodes 非数组或为空；节点非对象；id 缺失/空白或重复（按 trim 后判重）；kind 不是那三个字符串之一（不 trim、不折叠大小写）；tools 节点没有 calls 或某个 call 没有 name；agent 节点没有非空 task。注意 criteria 是**过滤**（`[\"a\", 5, \"  \"]` → `[\"a\"]`）而不是整条拒绝，而节点是**全有或全无**。\n\n`buildWaves` 按依赖深度分层，返回 `{waves}` 或 `{error}`：重名、自依赖、依赖不存在、依赖成环都会报错（plan.ts:189-241）；无依赖的节点落在第 0 层。\n\n---\n\n## 2. `src/gate.ts` —— 两条规则\n\n**规则 A：本轮必须以计划开场**（`applyPlanGate`，gate.ts:211-244；判定逻辑 `planRefusal`，gate.ts:176-191）。\n触发条件是**全部满足**才拒绝这次工具调用：`requirePlan` 为真 → 被调用的不是计划工具 `refine_plan` → 该会话本轮还没开过计划（`hasPlanned`）→ 调用方 `delegationDepth === 0`（子代理豁免，因为交给它的这一轮已经计划过了）→ **且** 拉回次数未超预算（gate.ts:184-189）。\n注意计数是**先加后比**（`bumpPullback(...) > maxPullbacks`），所以默认 `planPullbacks=2` 时**恰好拒 2 次**，第 3 次放行；而且预算一旦用尽，本轮内闸门就**永久打开**（直到 step 1 的 `reset`），不会再收紧。强制手段是 `ctx.tools.guard(...)`（gate.ts:232-243）——插件只返回拒绝理由 `PLAN_REQUIRED`，真正拒绝由 harness 执行。\n\n**规则 B：单调用链的提醒**（`applyChainRule`，gate.ts:268-301）。\n\"链步\"的定义是：**这一步恰好只调了 1 次工具，且那一次不是计划工具**（`takeChainStep` → `calls === 1 && !batched`，gate.ts:64-70；`batched` 仅由计划工具置位）。计数在 `tools/pre-execute` 里记（gate.ts:273-277），判定放在步骤边界 `agent/pre-step`（gate.ts:279-301）。连续链步数 **达到 `chainLimit`**（默认 2，gate.ts:294 `streak < limit` 则跳过）时触发，并立刻清零 streak。\n触发后**只追加一条消息**（`PLAN_NUDGE`，source 为 `system-prompt`）到步骤消息里（gate.ts:296-300），**从不拒绝任何调用**——它自己也写明\"若剩余项目确实互相依赖，就说明并继续一次一个\"（gate.ts:33）。streak 在 step 1、规则不适用（`appliesTo`）、这一步不是链步、以及发出提醒后都会清零（gate.ts:283-295）。\n\n两条规则的状态都是**按会话**（`agent.session.id`）记账，互不相干：链式提醒**不会**把会话标记成\"已计划\"，`planned` 只由计划工具自己的 pre-execute 置位——也就是说**一个失败的计划也算开了场**。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**跑法**：注册名为 `refine_plan` 的工具（tool.ts:42, 387-388）。`execute` 先 `parsePlanArgs`（失败抛 \"refine_plan needs criteria and a non-empty list of nodes…\"），再查节点数上限 `maxBatchSize`（默认 8，超了抛 \"This plan has N nodes and the limit is M…\"），然后 `runPlan(...)`（tool.ts:486-506）。`runPlan` 先 `buildWaves` 校验图（不成立就抛 \"the plan does not hold together: …\"），再**逐层**跑：每层内 `Promise.all` 并发，层与层之间等待（tool.ts:306-324）。tools 节点走 `runBatch`（batch.ts:225-282）：按 `executionMode`/`mayRunTogether` 再切波次，能并发的并发、互斥的串行，但仍全在这一次 `refine_plan` 调用内。最后 `renderPlan` 把所有节点结果渲染成一段文本，末尾一句 \"Write the conclusion of every node above in this reply.\"（tool.ts:345-362）。\n\n**派出去的子代理受的限制**（`runNode` 的 agent 分支，tool.ts:213-269）：\n- **深度限制**：`agent?.session.header.delegationDepth ?? 0`，若 `depth >= maxAgentDepth`（默认 1）该节点直接失败，报 \"this conversation is already a delegated child (depth N), so a plan here may not start another agent…\"（tool.ts:213-222）——不允许在子代理里再套子代理。注意这个检查在 tools 分支之后，只挡 agent 节点；且没有 agent 时深度算 0，检查形同虚设。\n- **只能前台**：`run_in_background: false` 是写死的（tool.ts:238），计划里的子代理不能是后台任务。\n- **时间预算**：整个派发跑在 `runWithDeadline(..., "
+}

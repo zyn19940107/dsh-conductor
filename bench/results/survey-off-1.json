@@ -1,0 +1,60 @@
+{
+  "task": "survey",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 66236,
+  "sessionId": "session-ccc17f48-b636-4421-8952-cab4a44aa329",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 12,
+  "toolCalls": 22,
+  "tools": [
+    "glob",
+    "glob",
+    "glob",
+    "pwsh",
+    "grep",
+    "grep",
+    "grep",
+    "glob",
+    "pwsh",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "pwsh",
+    "read",
+    "pwsh",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 44629,
+    "outputTokens": 5263,
+    "cacheReadTokens": 443648,
+    "totalTokens": 493540
+  },
+  "formation": {
+    "agents": 1,
+    "input": 44629,
+    "output": 5263,
+    "cacheRead": 443648,
+    "total": 493540,
+    "steps": 12
+  },
+  "mainPrompt": 56515,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 10244,
+  "thinkingPreview": "The task is a read-only health check of a plugin directory. No skill strictly needed (dsh-plugin-sandbox is for modifying/debugging plugins; this is read-only inspection). Let me just use glob and grep.\n\nLet's start.\nMaybe the path is different. Let me list top-level files.\nThe glob tool with pattern `src/**/*.ts` returned \"No files found\" — odd. Maybe glob needs a different pattern. Let me try glob with pattern `src/*.ts` at path.\n\nAnyway I have the file list from PowerShell:\nsrc: batch.ts, concurrency.ts, gate.ts, index.ts, plan.ts, policy.ts, tool.ts → 7 files\nverify: batch.spec.ts, concurrency.spec.ts, gate.spec.ts, plan.spec.ts, refine.spec.ts → 5 .spec.ts files\n\nNow let's grep for \"isConcurrencySafe\" and \"delegationDepth\" in the project (excluding node_modules).\n\nLet me use grep tool with path restricted.\n\"isConcurrencySafe\" has no matches in .ts files. Let me check the whole repo ",
+  "finalText": "体检完成，全程只读（glob / grep / read / Get-ChildItem / Select-String），**没有修改任何文件**。\n\n---\n\n## 1. `src/` 下的 .ts 文件 —— **7 个**\n\n| 文件 | 职责（据代码内容） |\n|---|---|\n| `src/index.ts` | 插件装配：Config（zod + volatile）、`REFINE_GUIDANCE` 提示词、各子模块接线 |\n| `src/tool.ts` | `refine_plan` 工具面对外接口：参数 schema、节点派发、结果渲染 |\n| `src/batch.ts` | 批内执行与 **wave 调度**（并发/独占屏障） |\n| `src/concurrency.ts` | 并发安全判定：只读命令白名单、shell lexer、`mayRunTogether` |\n| `src/gate.ts` | 两条规则：`ChainDetector`（链式步骤）+ `PlanGate`（一轮从计划开始） |\n| `src/plan.ts` | 计划数据结构：节点类型、`@@节点名@@` 占位符、依赖分层 |\n| `src/policy.ts` | 会话级开关（单个会话退出插件） |\n\n（另有编译产物 `lib/index.js`、构建脚本 `build.mjs`、`cordis.patch.yml`。）\n\n## 2. `verify/` 下的 .spec.ts —— **5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n\n断言数分别为 21 / 39 / 13 / 47 / 29，合计 **149 条**。同目录另有三个 `.mjs` 脚手架（`run-specs.mjs`、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`），不是 spec。spec 是自研的 `check()` 脚本，不是 vitest/jest。\n\n## 3. 出现 `\"isConcurrencySafe\"` 的文件\n\n**`src/` 和 `verify/` 里的 .ts 文件：一次都没有。** 全部命中在非源码文件：\n\n| 文件 | 行 |\n|---|---|\n| `README.md` | 126, 230, 235, 241（讲 harness 的机制与插件为什么自己另做一层） |\n| `bench/task.mjs` | 26, 43（基准任务文本与判据） |\n| `bench/results/survey-on-1.json` | 54, 55（历史基准运行记录） |\n\n原因：插件**从不直接读这个标志**。它通过 `runner.executionMode(exec).kind === 'parallel'` 间接拿 harness 的判定（`src/batch.ts:243-251`），再叠加自己那层 override（`src/concurrency.ts` 的 `mayRunTogether` / `DEFAULT_OVERRIDES`）。插件内部对应的是**另一个名字**：`respectConcurrencySafety`（`src/index.ts`、`src/tool.ts`、`src/batch.ts`）。\n\n## 4. 出现 `\"delegationDepth\"` 的文件\n\n| 文件 | 行 | 用途 |\n|---|---|---|\n| `src/gate.ts` | 170, 179, 188, 238 | `planRefusal` 参数；`delegationDepth > 0` → 子代理不受「一轮从计划开始」约束 |\n| `src/tool.ts` | 213 | `depth >= maxAgentDepth` → 拒绝在子代理里再派代理 |\n| `verify/plan.spec.ts` | 222 | 构造 `session: { header: { delegationDepth: 1 } }` 的用例 |\n\n非源码命中：`lib/index.js`（465/777/781/806，编译产物）、`bench/task.mjs`（27/44/90）、`bench/sessions.mjs`（117）、`bench/results/survey-on-1.json`（54/55）。\n\n---\n\n## 5. 架构评价（两句话）\n\n这个插件是**清晰的三层分法**：无状态的纯决策层（`concurrency.ts` 并发分类、`plan.ts` 计划图解析、`gate.ts` 两条规则）→ 有状态的执行层（`batch.ts` 的 wave 调度、`tool.ts` 的工具面）→ 装配层（`index.ts` 接线、`policy.ts` 会话开关），七个文件单一职责、注释写的是「为什么」而不是「是什么」，并且把并发安全做成「判断不了就排队」的保守分类器，方向正确；149 条断言覆盖了并发判定、批次屏障顺序、占位符替换等关键不变量，测试与源码一一对应（`concurrency.spec.ts` ↔ `concurrency.ts`、`plan.spec.ts` ↔ `plan.ts`）。\n\n风险点也很清楚：**两个关键的跨插件概念都是间接依赖宿主语义**——`isConcurrencySafe` 的语义来自 harness 源码（README 明说 harness 的改动要等发版才生效，插件只能自己再叠一层 override 白名单）、`delegationDepth` 来自 session header，两者一旦宿主改语义，插件会静默漂移；加上会话级状态散落在 `Map`/`Set` 里没有清理路径、以及插件自带 `bench/` 目录（里面甚至躺着跟本次体检一模一样的任务和一份历史答案），这些是后续维护最该盯的地方。\n\n> 顺带一提：`bench/task.mjs` 里放的正是本次这道体检题，`bench/results/survey-on-1.json` 是它上一次的运行记录——上面的结论是我自己重新 grep/read 出来的，不是抄那份记录。"
+}

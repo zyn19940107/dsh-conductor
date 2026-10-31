@@ -1,0 +1,57 @@
+{
+  "task": "survey",
+  "condition": "off",
+  "index": 2,
+  "exitCode": 0,
+  "wallMs": 55668,
+  "sessionId": "session-6052b664-0bf3-4809-b459-5569068c816a",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 12,
+  "toolCalls": 19,
+  "tools": [
+    "glob",
+    "glob",
+    "glob",
+    "pwsh",
+    "glob",
+    "glob",
+    "pwsh",
+    "glob",
+    "grep",
+    "grep",
+    "grep",
+    "grep",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 20654,
+    "outputTokens": 3753,
+    "cacheReadTokens": 226048,
+    "totalTokens": 250455
+  },
+  "formation": {
+    "agents": 1,
+    "input": 20654,
+    "output": 3753,
+    "cacheRead": 226048,
+    "total": 250455,
+    "steps": 12
+  },
+  "mainPrompt": 31809,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 4530,
+  "thinkingPreview": "The task is read-only inspection of a plugin directory. Let me explore.\n\nLet me use glob and grep tools.\nHmm, no files found. Let me check the directory structure.\nThe glob with `src/**/*.ts` returned no files — odd. Maybe the glob tool's path handling with backslash. Let me try relative path or forward slash. Let me try glob with pattern \"*.ts\" and path \"D:/code/vibe/dsh-refine-loop/src\".\nThe glob path seems to be relative to workspace root and results mixed with other dirs (dsh-codex etc.) — actually results include `dsh-codex\\src\\tool.ts` and `dsh-codex\\verify\\gate.spec.ts` which are outside the plugin? Wait, that's weird. The results include dsh-codex paths. Hmm, this suggests the glob path parameter may be partially ignored or the results are from a broader search.\n\nLet me just use pwsh Get-ChildItem to enumerate reliably (read-only). That's acceptable — the instruction says use glo",
+  "finalText": "体检完成，全程只读（glob / grep / read / PowerShell 只读列举），**没有修改任何文件**。\n\n---\n\n## 1. `src/` 下的 `.ts` 文件 —— **7 个**\n\n| 文件 | 大小 | 职责（据代码内容） |\n|---|---|---|\n| `src/index.ts` | 12.2 KB | 插件装配：Config（schemastery，全部 `volatile()`）、系统提示词 `REFINE_GUIDANCE`、各子模块接线 |\n| `src/tool.ts` | 17.6 KB | `refine_plan` 工具的对外接口：参数 schema、节点派发（tools / subagent / subagent_fork）、结果渲染 |\n| `src/batch.ts` | 10.9 KB | 批内执行与 **wave 调度**（并发波 / 独占屏障），只依赖 registry 的 `executionMode` + `execute` 两个接口 |\n| `src/concurrency.ts` | 8.2 KB | 并发判定：只读命令白名单 + shell lexer + `mayRunTogether` |\n| `src/gate.ts` | 10.4 KB | 两条规则：`ChainDetector`（链式步骤）+ `PlanGate`（一轮从计划开始） |\n| `src/plan.ts` | 10.4 KB | 计划数据结构：节点类型、`@@节点名@@` 占位符、依赖分层 |\n| `src/policy.ts` | 8.4 KB | 会话级开关（单个会话退出插件） |\n\n（另有编译产物 `lib/index.js`、构建脚本 `build.mjs`、`cordis.patch.yml`。）\n\n## 2. `verify/` 下的 `.spec.ts` —— **5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n\n同目录另有 3 个 `.mjs` 脚手架（`run-specs.mjs`、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`），不是 spec。整个插件（排除 `node_modules`）总共就这 12 个 `.ts` 文件。\n\n## 3. 出现 `\"isConcurrencySafe\"` 的文件 —— **4 个，全都不是源码**\n\n| 文件 | 命中 | 性质 |\n|---|---|---|\n| `README.md` | 4 处（126 / 230 / 235 / 241 行） | 讲 harness 的机制，以及插件为什么自己另做一层 |\n| `bench/task.mjs` | 2 处 | 基准任务文本与判据 |\n| `bench/results/survey-on-1.json` | 2 处 | 历史基准运行记录（生成物） |\n| `bench/results/survey-off-1.json` | 2 处 | 同上 |\n\n**`src/` 和 `verify/` 的 `.ts` 文件里一次都没有。** 原因值得记一笔：插件从不直接读这个标志，而是通过 registry 的 `runner.executionMode(exec).kind === 'parallel'` 间接取 harness 的判定（`src/batch.ts:243-251`），再叠加自己那层 override（`src/concurrency.ts` 的 `mayRunTogether` / `DEFAULT_OVERRIDES`）。真正落点是 `concurrency.ts` 的 `mayRunTogether`——工具自报安全就信，插件只对\"沉默即独占\"的工具补判。\n\n## 4. 出现 `\"delegationDepth\"` 的文件 —— **5 个（其中 3 个是源码）**\n\n| 文件 | 命中 | 说明 |\n|---|---|---|\n| `src/gate.ts` | 4 处（170 / 179 / 188 / 238） | `planRefusal()` 的参数与判定：`delegationDepth > 0` → 子代理豁免\"必须先出计划\"的门禁 |\n| `src/tool.ts` | 1 处（213） | `depth >= maxAgentDepth` → 拒绝在子代理里再套一层代理，防\"流水线吃自己\" |\n| `verify/plan.spec.ts` | 1 处（222） | 构造 `session: { id: 'child', header: { delegationDepth: 1 } }` 测深度豁免 |\n| `lib/index.js` | 4 处 | 编译产物 |\n| `bench/task.mjs` / `bench/sessions.mjs` / `bench/results/*.json` | 各 1–3 处 | 基准脚手架与历史记录 |\n\n两个 `delegationDepth` 用途是配套的：gate 层让\"已被委派的子代理\"免于门禁，tool 层则限制\"一个被委派的子代理不得再委派\"——默认 `maxAgentDepth = 1`。\n\n## 5. 架构评价\n\n这个插件是**一条单职责的主干加若干规则附件**：`tool.ts` 暴露一个 `refine_plan`，`plan.ts` 定义它的图语义，`batch.ts` 负责执行与 wave 调度，`concurrency.ts` 补上 harness 不认识的并发判定，`gate.ts` / `policy.ts` 则作为可关的护栏挂在 `tools.guard` 和 `agent/pre-step` 上——层次清楚，且每层都能脱离宿主单测（`batch.ts` 只依赖 `BatchRunner` 这两个接口的窄抽象）。\n\n它最聪明的一点是**耦合策略的克制**：`isConcurrencySafe` 一次都没被直接引用，插件改为间接读 harness 的 `executionMode` 再叠加自己的 override，因此 harness 发版后不会因为字段改名而断；同样，`delegationDepth` 只从 `session.header` 取一个数，深度规则的两端（豁免 + 禁止再委派）都收在 `gate.ts` / `tool.ts` 两处。\n\n代价是**边界靠约定而非类型保护**：`@module` 注释里出现两个不同的包名（`@local/dsh-refine-loop` 与 `@zyn19940107/dsh-refine-loop`），而 `delegationDepth` 这类 header 字段在 harness 侧没有任何类型约束可依赖——一旦运行时改字段名，插件是静默降级（`?? 0` 兜底）而不是报错，这类\"失败即安全\"的选择值得在 README 里写明取舍理由。\n\n---\n\n顺带一提：`bench/results/*.json` 里存着历史运行的完整 transcript（包含模型思考过程与答案正文），里面恰好也出现了这两个 token。做后续全文检索时这类产物会制造假阳性——本回答第 3、4 项已把它们与真实源码分开列出。"
+}
