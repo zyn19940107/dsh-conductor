@@ -172,39 +172,46 @@ review  on  3:330.4s agents=4 tokens=1907166 mainCtx=28800 correct=4/4 plan=y/3
 ```mermaid
 graph TD
   local["local<br/>tools"]
-  gh_repo["gh-repo<br/>subagent"]
-  npm_plugins["npm-plugins<br/>subagent"]
-  gh_articles["gh-articles<br/>subagent"]
-  brief["brief<br/>subagent_fork"]
-  local --> brief
-  gh_repo --> brief
-  npm_plugins --> brief
-  gh_articles --> brief
+  gh_repo["gh-repo<br/>tools"]
+  npm_pkgs["npm-plugins<br/>tools"]
+  gh_tutorials["gh-tutorials<br/>tools"]
+  crosscheck["crosscheck<br/>tools"]
+  local --> gh_repo
+  local --> npm_pkgs
+  local --> gh_tutorials
+  gh_repo --> crosscheck
+  npm_pkgs --> crosscheck
+  gh_tutorials --> crosscheck
 ```
 
 | 节点 | 类型 | 依赖 | 干什么 |
 |---|---|---|---|
-| `local` | `tools` | — | 读本地安装，补准确的包名（2 个 `ops_bash`） |
-| `gh-repo` | `subagent` | — | 调查 DSH 在 GitHub 上的官方仓库 |
-| `npm-plugins` | `subagent` | — | 调查 npm 上的 DSH 插件包 |
-| `gh-articles` | `subagent` | — | 调查 GitHub 上的 DSH 教程文章 |
-| `brief` | `subagent_fork` | 上面四条 | 把四条调查结果汇总成简报 |
+| `local` | `tools` | — | 读本地安装，补准确的包名（5 个调用） |
+| `gh-repo` | `tools` | `local` | 查 GitHub 上的官方仓库（4 个调用） |
+| `npm-plugins` | `tools` | `local` | 查 npm 上的 DSH 插件包（4 个调用） |
+| `gh-tutorials` | `tools` | `local` | 查 GitHub 上的教程文章（5 个调用） |
+| `crosscheck` | `tools` | 上面三条 | 交叉核对三份调查（2 个调用） |
 
-**两层**：上面四条并行跑，`brief` 等齐了再动。
+**三层**：第一层读本地，第二层三条线上调查并行，第三层等齐了交叉核对。
 
 **节点类型是模型自己选的**，判据只有一条：**这个孩子需不需要知道我们刚才说了什么。**
 三个调查各自独立、不需要本对话的上下文 → `subagent`；汇总要用到前面三条的结果 → `subagent_fork`。
+上面这张图里全是 `tools` 节点 —— 这一次模型判断这些活自己跑更合适，就没派孩子。
+**派不派、派几个，是模型的判断，不是插件的规定**：同一批任务换个形状，模型就画出了带 4 个代理节点的图（见下一节）。
 
 ---
 
 ## 开了插件之后，编队长什么样
 
-一次派出 4 个子代理。DSH 的「编队」页把派生关系画成了树，每个子代理有自己的上下文、耗时和步数：
+**编队多大，取决于模型在图里放不放代理节点。** 同一套插件，上面那张图里模型全用了工具调用，
+一个孩子都没派 —— 那一轮就没有编队。换个形状，模型画出了 4 个代理节点，编队就出现了：
 
 ![编队：1 个主 Agent 和它派出的 4 个子 Agent](docs/formation.png)
 
-图里能直接读出来：谁派生了谁、每个子代理烧了多少上下文（`npm-plugins` 1.1M，`gh-repo` 517.6k）、
+图里能直接读出来：谁派生了谁、每个子代理烧了多少上下文（`review-tool` 49.0k，`review-plan` 45.4k）、
 跑了多久、走了几步、上下文压力百分之多少。
+
+**主 Agent 自己只走了 4 步** —— 一张图，四条并行的代理节点，加一句汇总。
 
 ---
 

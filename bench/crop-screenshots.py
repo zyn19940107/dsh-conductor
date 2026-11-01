@@ -14,11 +14,11 @@ DOCS = REPO / 'docs'
 
 # (source, destination, box) — box is (left, top, right, bottom).
 CROPS = [
-    # The first turn of the run: the prompt, the model's plan in its thinking,
-    # and the plan tool call it produced.
-    (REPO / 'docs' / 'plan-turn.png', REPO / 'docs' / 'plan-turn.png', (455, 88, 1400, 520)),
+    # The first turn of the run: the prompt, the refusals, the model's plan in
+    # its thinking, and the plan tool call it produced.
+    (REPO / 'docs' / 'plan-turn.png', REPO / 'docs' / 'plan-turn.png', (295, 88, 1500, 600)),
     # The formation graph and its roster.
-    (REPO / 'docs' / 'formation.png', REPO / 'docs' / 'formation.png', (292, 84, 1400, 812)),
+    (REPO / 'docs' / 'formation.png', REPO / 'docs' / 'formation.png', (295, 88, 1500, 800)),
 ]
 
 

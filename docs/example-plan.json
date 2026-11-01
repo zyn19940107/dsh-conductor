@@ -1,56 +1,210 @@
 {
   "criteria": [
-    "调查 1 产出:DeepSeek Harness 的 GitHub 仓库 URL、star 数、最后一次提交的日期与提交信息,三者均带可点击来源链接",
-    "调查 2 产出:一个 npm 上其他 DeepSeek Harness 插件包的清单(包名、版本、发布时间或最近更新、链接),能区分官方包与第三方包",
-    "调查 3 产出:GitHub 上 DSH 教程/实践文章的清单(标题、仓库或文章 URL),并说明每篇覆盖什么",
-    "全部三条调查都标注了数据来源 URL 与抓取时间,不确定或查不到的部分明确说明而不是编造",
-    "最终简报包含三个独立小节 + 汇总,每个结论后面直接跟来源链接"
+    "本地已安装的 DSH 插件包名来自磁盘上真实的 package.json(name/version),不是推测;至少确认一个准确包名",
+    "GitHub 官方仓库的 owner/repo 明确,且 star 数与最近一次提交时间都能从 GitHub API 直接读到(两个来源互相印证)",
+    "npm 上其它 DeepSeek Harness 相关插件包列出名字+版本+说明,并与本地包名锚定区分「本地已装」与「生态中其它」",
+    "GitHub 上的教程/指南类文章或仓库有可点击的链接和标题,数量或来源说得清",
+    "全过程只读:没有任何写文件/装包/改配置的操作",
+    "最终简报在回复里覆盖上述四条,并标注数据来源与时间点"
   ],
   "nodes": [
     {
       "id": "local",
       "kind": "tools",
+      "description": "Read locally installed DSH packages to get exact package names",
       "calls": [
         {
           "name": "ops_bash",
           "arguments": {
-            "command": "ls \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/\" 2>&1 | head -50; echo '---PKG---'; cat \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/package.json\" 2>&1 | head -60",
-            "description": "Inspect local DSH checkout package metadata"
+            "command": "echo \"== HOME=$HOME\"; echo \"== desktop profile ==\"; ls -la \"$HOME/.dsh/profiles/desktop\" 2>&1 | head -30; echo \"== desktop plugins ==\"; ls -la \"$HOME/.dsh/profiles/desktop/plugins\" 2>&1 | head -40; echo \"== home plugins ==\"; ls -la \"$HOME/.dsh/plugins\" 2>&1 | head -40",
+            "description": "List DSH home profiles and plugin directories"
           }
         },
         {
           "name": "ops_bash",
           "arguments": {
-            "command": "cd \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/\" && ls packages apps 2>&1 | head -60",
-            "description": "List DSH workspace packages and apps"
+            "command": "echo \"== sandbox plugins ==\"; ls -la \"D:/code/vibe/dsh-sandbox/home/plugins\" 2>&1 | head -40; echo \"== sandbox profiles ==\"; ls -la \"D:/code/vibe/dsh-sandbox/home/profiles\" 2>&1 | head -20; for d in \"D:/code/vibe/dsh-sandbox/home/profiles\"/*; do echo \"-- $d\"; ls \"$d\" 2>&1 | head -20; done",
+            "description": "List sandbox DSH home plugins and profiles"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "for d in \"$HOME/.dsh/profiles/desktop/plugins\" \"$HOME/.dsh/plugins\" \"D:/code/vibe/dsh-sandbox/home/plugins\"; do echo \"=== $d\"; ls \"$d\" 2>&1 | head -30; for f in \"$d\"/*/package.json; do [ -f \"$f\" ] && { echo \"-- $f\"; grep -E '\"(name|version|description)\"' \"$f\" | head -4; }; done; done",
+            "description": "Extract installed plugin package names and versions"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "echo \"== asar checkout ==\"; ls -la \"C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh\" 2>&1 | head -40; echo \"== workspace deepseek-harness ==\"; ls -la \"D:/code/vibe/deepseek-harness\" 2>&1 | head -40; echo \"== toolchain ==\"; npm --version 2>&1; node --version 2>&1; git --version 2>&1",
+            "description": "Inspect asar checkout workspace dir toolchain"
+          }
+        },
+        {
+          "name": "ops_read_files",
+          "arguments": {
+            "files": [
+              {
+                "path": "D:/code/vibe/deepseek-harness/package.json",
+                "limit": 80
+              },
+              {
+                "path": "C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/resources/app.asar/dsh/package.json",
+                "limit": 80
+              }
+            ]
           }
         }
       ]
     },
     {
-      "id": "gh-repo",
-      "kind": "subagent",
-      "task": "调查 DeepSeek Harness(简称 DSH)在 GitHub 上的官方仓库情况。这是一个由 DeepSeek 发布的 AI 编码 agent / 命令行 harness 运行时,带插件系统(插件分为 host 半边 / client 半边、cordis.patch.yml 补丁、typert 清单等),npm 上有 `dsh-plugin-*` 之类的包。\n\n请只做只读调查,不要修改任何文件。你的任务:\n1. 找到 DeepSeek Harness 的官方 GitHub 仓库(候选可能包括 deepseek-ai/DeepSeek-Harness、deepseek-ai/dsh、deepseek-ai/harness 等,请实际访问 GitHub 确认,不要凭猜测)。\n2. 报告该仓库的:star 数、fork 数、watcher 数(能看到多少报多少)、仓库描述、license、主要语言、创建时间。\n3. 报告**最后一次 commit 的日期与提交标题**(以及作者/分支),尽量精确到日期(YYYY-MM-DD),并说明你是从哪个页面或 API 拿到的。\n4. 顺便报告:最近一次 release / tag 的版本号与日期(如果存在)、仓库是否公开可见。\n5. 如果 GitHub API 可用(curl https://api.github.com/repos/OWNER/REPO),可以直接用 API 取 stargazers_count 和 pushed_at / updated_at,更准确。\n\n方法建议:用 web_search 搜索 \"DeepSeek Harness github\",再用 web_fetch 或 read_page 打开 GitHub 仓库页和 https://api.github.com/repos/<owner>/<repo>。\n\n输出格式(纯文本,可含 markdown):\n- 仓库 URL\n- Star / Fork / Watcher 数(注明数据来源 URL 与抓取时间)\n- 最后一次提交:日期 + 标题 + 分支(注明来源 URL)\n- 最近 release/tag\n- 备注:仓库是否还有其他相关仓库(issues、discussions、模板仓库等),若发现一并列出 URL\n- 明确列出你不确定的地方\n\n所有数字和日期必须带来源链接。不要编造数字。"
-    },
-    {
-      "id": "npm-plugins",
-      "kind": "subagent",
-      "task": "调查 npm registry 上有哪些「DeepSeek Harness」(简称 DSH)的插件包在发布。\n\n背景:DSH 是一个带插件系统的 AI agent harness。已知 npm 上存在形如 `dsh-plugin-*` 的包命名约定。已知的官方/相关包名可能包括 `dsh`、`dsh-plugin-*` 系列、以及 `@deepseek/*` 之类的 scope。\n\n请只做只读调查,不要修改任何文件。任务:\n1. 找出 npm 上所有与 DeepSeek Harness 相关的已发布包。重点查:\n   - npmjs.com 搜索页 https://www.npmjs.com/search?q=dsh-plugin\n   - https://www.npmjs.com/search?q=deepseek+harness\n   - npm registry 搜索 API: https://registry.npmjs.org/-/v1/search?text=dsh-plugin&size=50\n   - https://registry.npmjs.org/-/v1/search?text=keywords:dsh&size=50\n   - 也可以查 https://www.npmjs.com/org/deepseek-ai 之类的组织页\n2. 对每个找到的包,报告:包名、最新版本、最后发布时间(用 registry API: https://registry.npmjs.org/<pkg> 取 time.modified)、仓库主页/主页链接、简述。\n3. 区分「官方包」和「第三方包」——第三方通常自带自己的 repo URL;官方包可能指向同一个 DeepSeek Harness 仓库。\n4. 如果某类包很多,至少给出完整清单表格;不要只给示例就停。\n5. 注意区分同名但无关的包(例如别的项目也叫 dsh)。\n\n可用工具:web_fetch 可直接抓 registry.npmjs.org 的 JSON(用 URL 形式的 text= 查询参数),也可以用 web_search 找 npmjs.com 页面。npm CLI 不可用时不要尝试安装。\n\n输出格式(纯文本,可含 markdown 表格):\n- 每个包一行:包名 | 版本 | 最后修改时间 | 主页/仓库链接 | 官方/第三方 | 一句话说明\n- 最后给一句总结:一共找到几个包,分别属于几类\n- 每行都带来源 URL;标注抓取时间\n- 明确列出查不到或不确定的部分"
-    },
-    {
-      "id": "gh-articles",
-      "kind": "subagent",
-      "task": "调查 GitHub 上有没有人写过关于 DeepSeek Harness(简称 DSH)的教程或实践文章。\n\n背景:DSH 是 DeepSeek 发布的 AI 编码 agent harness / 命令行运行时,带插件系统(插件分 host 半边与 client 半边,支持 cordis.patch.yml 补丁和 typert 清单),以 npm 包形式分发(如 `dsh-plugin-*`)。2025 年前后开始有人关注。\n\n请只做只读调查,不要修改任何文件。任务:\n1. 在 GitHub 上搜索 DSH 相关教程/实践文章。重点搜索方向:\n   - 仓库搜索:site:github.com \"DeepSeek Harness\" tutorial / guide / plugin\n   - GitHub 搜索 API: https://api.github.com/search/repositories?q=deepseek+harness ; https://api.github.com/search/code 需要认证,可改用 https://api.github.com/search/repositories?q=dsh-plugin\n   - 搜索 README 里带 \"DeepSeek Harness\" 的仓库: https://api.github.com/search/repositories?q=%22DeepSeek+Harness%22+in:readme\n   - 尝试 GitHub 网页搜索: https://github.com/search?q=%22DeepSeek+Harness%22&type=repositories 与 type=code\n   - 也可搜 \"dsh-plugin\"、\"dsh plugin tutorial\"、\"DeepSeek Harness 插件\"\n2. 对每个命中,报告:仓库/文章标题、作者、URL、语言/star(能看到就报)、以及**这篇内容具体覆盖了什么**(比如:写插件的完整教程、踩坑记录、配置示例、示例项目)。\n3. 注意区分「DSH 官方文档」和「第三方作者写的实践文章」;也要注意区分 DeepSeek-V3/R1 模型本身的教程(那不是 DSH)。\n4. 如果找不到真正的教程文章,如实说「基本没有找到第三方教程,只有官方 README/文档」,这也是有价值的结论 —— 请确认这个判断的证据(例如搜索了哪些 query、GitHub 上带 dsh-plugin 的仓库都只有什么)。\n\n可用工具:web_search、web_fetch、read_page。GitHub REST API 无需认证也能有较低速率限制地使用。\n\n输出格式(纯文本,可含 markdown):\n- 每条命中:标题 | 作者 | URL | star(可查则报) | 覆盖内容一句话 | 类型(官方文档/第三方教程/示例项目/无关)\n- 结论段:GitHub 上 DSH 教程的整体稀缺程度,列出你实际跑过的搜索 query 作为证据\n- 每条带来源 URL;标注抓取时间"
-    },
-    {
-      "id": "brief",
-      "kind": "subagent_fork",
-      "task": "把前面三条调查结果汇总成一份中文《DSH 生态简报》。\n\n要求:\n- 开头一段 3-5 行的摘要:DSH 生态当前的整体状态。\n- 三个独立小节,分别对应:① GitHub 仓库情况(star 数、最后一次提交日期等) ② npm 上的其他插件包 ③ GitHub 上的教程/实践文章。每节都要有「结论」和「来源链接」。\n- 所有具体数字/日期/包名后面直接跟 markdown 链接,格式 [来源](url)。\n- 单独一节「交叉观察」:把三条线索串起来看,例如 star 数 vs 生态丰富度 vs 教程稀缺度之间的张力,只写能被调查数据支撑的推论,明确区分「事实」和「推测」。\n- 最后一节「数据可信度与缺口」:说明每个数字的来源、抓取时间、以及哪些地方查不到或有不确定性。\n- 全文用中文,简洁、克制,不要客套话和空洞形容词。事实为主。\n\n如果某条调查没有拿到结果,照实写「未查到」,不要用其他来源编造。",
+      "id": "gh_repo",
+      "kind": "tools",
+      "description": "Find official GitHub repo, stars, last commit",
       "after": [
-        "local",
-        "gh-repo",
-        "npm-plugins",
-        "gh-articles"
+        "local"
+      ],
+      "calls": [
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "echo \"== deepseek-ai org repos ==\"; curl -s -m 40 \"https://api.github.com/orgs/deepseek-ai/repos?per_page=100&sort=updated\" | tr ',' '\\n' | grep -E '\"(full_name|stargazers_count|pushed_at|description)\"' | head -140",
+            "description": "List deepseek-ai org repos with star counts"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "REPOS=\"$(curl -s -m 40 'https://api.github.com/orgs/deepseek-ai/repos?per_page=100'; curl -s -m 40 'https://api.github.com/search/repositories?q=deepseek+harness&sort=stars&per_page=20')\"; for slug in $(echo \"$REPOS\" | tr ',' '\\n' | grep -oE '\"full_name\": *\"[^\"]+\"' | cut -d'\"' -f4 | sort -u); do case \"$slug\" in *arness*|*Harness*|*dsh*|*DSH*) echo \"=== $slug\"; curl -s -m 40 \"https://api.github.com/repos/$slug\" | tr ',' '\\n' | grep -E '\"(stargazers_count|forks_count|pushed_at|updated_at|default_branch|html_url|description)\"' | head -14; echo \"-- last commit\"; curl -s -m 40 \"https://api.github.com/repos/$slug/commits?per_page=1\" | tr ',' '\\n' | grep -E '\"(date|message|html_url)\"' | head -8;; esac; done",
+            "description": "Fetch stars and latest commit for candidate repos"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "for f in \"$HOME/.dsh/profiles/desktop/plugins\"/*/package.json \"$HOME/.dsh/plugins\"/*/package.json \"D:/code/vibe/dsh-sandbox/home/plugins\"/*/package.json \"D:/code/vibe/deepseek-harness/package.json\"; do [ -f \"$f\" ] || continue; echo \"-- $f\"; grep -E '\"(name|repository|homepage|bugs|publishConfig|author)\"' \"$f\" | head -8; done",
+            "description": "Extract repository URLs from local package manifests"
+          }
+        },
+        {
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://api.github.com/search/repositories?q=deepseek+harness&sort=stars&per_page=10"
+          }
+        }
+      ]
+    },
+    {
+      "id": "npm_pkgs",
+      "kind": "tools",
+      "description": "Find other DeepSeek Harness packages on npm",
+      "after": [
+        "local"
+      ],
+      "calls": [
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "for f in \"$HOME/.dsh/profiles/desktop/plugins\"/*/package.json \"$HOME/.dsh/plugins\"/*/package.json \"D:/code/vibe/dsh-sandbox/home/plugins\"/*/package.json; do [ -f \"$f\" ] || continue; n=$(grep -m1 '\"name\"' \"$f\" | sed -E 's/.*\"name\"[[:space:]]*:[[:space:]]*\"([^\"]+)\".*/\\1/'); echo \"=== $n\"; npm view \"$n\" version dist-tags description homepage repository --json 2>&1 | head -25; done",
+            "description": "Query npm registry for locally installed packages"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "for q in \"deepseek-harness\" \"deepseek+harness\" \"dsh+harness\" \"%22deepseek+harness%22\"; do echo \"=== $q\"; curl -s -m 40 \"https://registry.npmjs.org/-/v1/search?text=$q&size=25\" | tr ',' '\\n' | grep -E '\"(name|version|description)\"' | head -70; done",
+            "description": "Search npm registry API for harness packages"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "f=$(ls \"$HOME/.dsh/profiles/desktop/plugins\"/*/package.json \"$HOME/.dsh/plugins\"/*/package.json \"D:/code/vibe/dsh-sandbox/home/plugins\"/*/package.json 2>/dev/null | head -1); sc=$(grep -m1 '\"name\"' \"$f\" | sed -E 's/.*\"name\"[[:space:]]*:[[:space:]]*\"(@[^\"/]+)\\/.*/\\1/'); echo \"scope=$sc\"; [ -n \"$sc\" ] && curl -s -m 40 \"https://registry.npmjs.org/-/v1/search?text=scope:$sc&size=50\" | tr ',' '\\n' | grep -E '\"(name|version|description)\"' | head -120; echo \"== npm search cli\"; npm search \"deepseek harness\" --json 2>&1 | head -c 2500",
+            "description": "Search npm by scope and CLI keyword search"
+          }
+        },
+        {
+          "name": "web_fetch",
+          "arguments": {
+            "url": "https://registry.npmjs.org/-/v1/search?text=deepseek%20harness&size=25"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gh_tutorials",
+      "kind": "tools",
+      "description": "Find GitHub tutorial articles about DSH",
+      "after": [
+        "local"
+      ],
+      "calls": [
+        {
+          "name": "web_search",
+          "arguments": {
+            "queries": [
+              "\"DeepSeek Harness\" 教程",
+              "\"DeepSeek Harness\" tutorial github",
+              "DeepSeek Harness plugin development guide",
+              "dsh 插件开发 打包 patch 教程 DeepSeek Harness"
+            ]
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "for q in \"deepseek+harness+tutorial\" \"deepseek+harness+plugin\" \"%22DeepSeek+Harness%22\" \"deepseek+harness+%E6%95%99%E7%A8%8B\"; do echo \"=== $q\"; curl -s -m 40 \"https://api.github.com/search/repositories?q=$q&sort=stars&per_page=15\" | tr ',' '\\n' | grep -E '\"(full_name|description|stargazers_count|pushed_at)\"' | head -60; done",
+            "description": "Search GitHub repositories for harness tutorials"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "REPOS=\"$(curl -s -m 40 'https://api.github.com/search/repositories?q=%22DeepSeek+Harness%22&per_page=15')\"; for slug in $(echo \"$REPOS\" | tr ',' '\\n' | grep -oE '\"full_name\": *\"[^\"]+\"' | cut -d'\"' -f4 | sort -u | head -12); do echo \"=== $slug\"; curl -s -m 40 \"https://api.github.com/repos/$slug/readme\" -H \"Accept: application/vnd.github.raw\" | grep -inE \"tutorial|教程|guide|how to|quickstart|入门|上手\" | head -8; done",
+            "description": "Scan candidate repo READMEs for tutorial sections"
+          }
+        },
+        {
+          "name": "read_page",
+          "arguments": {
+            "url": "https://github.com/search?q=%22DeepSeek+Harness%22&type=repositories&s=stars&o=desc",
+            "query": "tutorial or guide articles about DeepSeek Harness"
+          }
+        },
+        {
+          "name": "x_search",
+          "arguments": {
+            "query": "DeepSeek Harness tutorial plugin",
+            "max_results": 8
+          }
+        }
+      ]
+    },
+    {
+      "id": "crosscheck",
+      "kind": "tools",
+      "description": "Independently re-verify stars, commit date, read-only",
+      "after": [
+        "gh_repo",
+        "npm_pkgs",
+        "gh_tutorials"
+      ],
+      "calls": [
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "REPOS=\"$(curl -s -m 40 'https://api.github.com/search/repositories?q=deepseek+harness&sort=stars&per_page=10')\"; for slug in $(echo \"$REPOS\" | tr ',' '\\n' | grep -oE '\"full_name\": *\"[^\"]+\"' | cut -d'\"' -f4 | sort -u | head -5); do echo \"=== $slug\"; curl -s -m 40 \"https://api.github.com/repos/$slug\" | grep -oE '\"stargazers_count\":[0-9]+' | head -2; curl -s -m 40 \"https://api.github.com/repos/$slug/commits?per_page=3\" | grep -oE '\"date\":\"[^\"]+\"' | head -3; done; echo \"== rate limit\"; curl -s -m 20 https://api.github.com/rate_limit | head -c 300",
+            "description": "Re-verify star counts and commit dates"
+          }
+        },
+        {
+          "name": "ops_bash",
+          "arguments": {
+            "command": "SLUG=$(curl -s -m 40 'https://api.github.com/search/repositories?q=deepseek+harness&sort=stars&per_page=10' | tr ',' '\\n' | grep -oE '\"full_name\": *\"[^\"]+\"' | cut -d'\"' -f4 | head -1); echo \"slug=$SLUG\"; curl -s -m 40 \"https://github.com/$SLUG\" | grep -oiE '[0-9,]+ (users )?starred|aria-label=\"[0-9,]+ users' | head -5; echo \"== read-only check ==\"; git -C D:/code/vibe status --porcelain 2>&1 | head -20; echo \"(empty above means clean)\"",
+            "description": "Cross-check stars on HTML page and repo cleanliness"
+          }
+        }
       ]
     }
   ]
