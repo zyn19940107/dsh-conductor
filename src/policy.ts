@@ -4,7 +4,7 @@
  * The plugin is mounted for a whole deployment, but a conversation may opt out
  * of it. `/dsh-refine-loop off` takes the plugin out of the conversation that
  * ran it: the batch tool disappears from the model's tool table, the guidance
- * leaves the system prompt with it, and the chain rule stops firing.
+ * leaves the system prompt with it, and the rule stops being enforced.
  * `/dsh-refine-loop on` puts it back.
  *
  * The state is per conversation. One conversation opting out changes no other
@@ -114,8 +114,8 @@ export function runPolicyCommand(
     policy.turnOff(invocation.agent)
     return {
       kind: 'success',
-      text: 'The refined loop is off for this conversation: refine_batch is gone and the chain rule is '
-        + 'not enforced. Turn it back on with '
+      text: 'The refined loop is off for this conversation: refine_plan is gone and the rule that makes '
+        + 'a turn one plan is not enforced. Turn it back on with '
         + `/${POLICY_COMMAND} on.`,
     }
   }
@@ -161,10 +161,10 @@ export function parsePolicyCommand(text: string): 'on' | 'off' | undefined {
  */
 export function policyConfirmation(mode: 'on' | 'off'): string {
   return mode === 'off'
-    ? 'The refined loop has been turned off for this conversation: the batch tool is gone and the chain '
-      + 'rule is not enforced. Reply with one short sentence saying so, and do nothing else.'
-    : 'The refined loop has been turned on for this conversation: the batch tool is back and the chain '
-      + 'rule is enforced again. Reply with one short sentence saying so, and do nothing else.'
+    ? 'The refined loop has been turned off for this conversation: the plan tool is gone and the rule that '
+      + 'makes a turn one plan is not enforced. Reply with one short sentence saying so, and do nothing else.'
+    : 'The refined loop has been turned on for this conversation: the plan tool is back and the rule that makes '
+      + 'a turn one plan is enforced again. Reply with one short sentence saying so, and do nothing else.'
 }
 
 /**

@@ -1,0 +1,40 @@
+{
+  "task": "survey",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 95379,
+  "sessionId": "session-b0a38fb4-bef2-43b8-8221-70442a9baeed",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 36341,
+    "outputTokens": 8058,
+    "cacheReadTokens": 41472,
+    "totalTokens": 85871
+  },
+  "formation": {
+    "agents": 2,
+    "input": 95615,
+    "output": 14994,
+    "cacheRead": 244224,
+    "total": 354833,
+    "steps": 8
+  },
+  "mainPrompt": 34544,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 17710,
+  "thinkingPreview": "The task is read-only inspection of a plugin directory. Let me plan: I need to find .ts files in src, .spec.ts files in verify, and grep for two identifiers.\n\nLet me do this with glob and grep tools. The refine_plan tool guidance says to draw a plan and use refine_plan for a turn. Let me consider: this is a simple multi-step read-only task. The refined loop instructions say to make one refine_plan call carrying the whole shape of the turn. Let me do that with parallel tool nodes.\n\nLet me first check the directory structure exists. Actually, refine_plan with tools node could include glob and grep calls. But grep needs the path. Let me structure:\n\nNode A (tools): glob src/**/*.ts, glob verify/**/*.spec.ts\nNode B (tools): grep \"isConcurrencySafe\", grep \"delegationDepth\"\nNode C (subagent_fork)? Not needed.\n\nActually, greps depend on knowing the path but the path is known: D:\\code\\vibe\\dsh-re",
+  "finalText": "## 体检报告 · `dsh-refine-loop`(全程只读,未修改/创建/删除任何文件)\n\n> **方法与两点提醒**\n> ① `glob` 以 `path=D:\\code\\vibe\\dsh-refine-loop` + `src/**/*.ts` 锚定失败(返回 `No files found`;同参数的 `**/*` 却能命中),`grep` 对同一路径却工作正常——两者路径语义不一致。第 1、2 问的文件清单由**直接通读每个文件**取得,不是从 glob 的空结果反推。\n> ② 检索时 **`bench/results*/`、`bench/results-old-gate/*.json` 必须当噪音剔掉**:那是插件自己跑基准留下的历史运行记录,里面恰好存着本题的任务原文,全库 grep 会把第 3、4 问污染成几十条假命中。\n\n---\n\n### 1. `src/` 下的 .ts 文件 —— **7 个**(扁平,无子目录)\n\n| 文件 | 行数 | 职责 |\n|---|---|---|\n| `src/index.ts` | 273 | Cordis 装配:Config(12 项全 `volatile()`)、`REFINE_GUIDANCE` 提示词、四个子模块接线 |\n| `src/tool.ts` | 521 | `refine_plan` 工具本体:参数 schema、节点派发(`tools`/`subagent`/`subagent_fork`)、深度拒绝、结果渲染 |\n| `src/plan.ts` | 295 | 计划数据模型:三种节点、`@@nodeId@@` 占位符、`parsePlanArgs`、依赖分层与环检测(零 harness 依赖) |\n| `src/batch.ts` | 314 | 批内执行 + wave 调度(并发波/独占屏障),只依赖 `BatchRunner`(`executionMode`/`execute`)窄端口 |\n| `src/concurrency.ts` | 234 | 并发判定:只读命令白名单、`UNSAFE_FLAGS`、自写 shell lexer、`isReadOnlyCommand`、`buildOverrides`、`mayRunTogether` |\n| `src/gate.ts` | 236 | `PlanGate` + 纯函数 `planRefusal` + `isModelCall` + `applyPlanGate`(`ctx.tools.guard`) |\n| `src/policy.ts` | 233 | 会话级开关 `SessionPolicy`(`/dsh-refine-loop on\\|off`) |\n\n`node_modules` 下的 `.d.ts` 属依赖,不计。\n\n### 2. `verify/` 下的 .spec.ts —— **5 个**\n\n`batch.spec.ts`(166 行)、`concurrency.spec.ts`(123)、`gate.spec.ts`(101)、`plan.spec.ts`(282)、`refine.spec.ts`(81)\n\n同目录另有 3 个 `.mjs` **不是 spec**:`run-specs.mjs`(esbuild 打包 + 每 spec 单进程跑)、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`。断言是**自研 `check()` 脚本,不是 vitest/jest**(仓库无 `vitest.config`/`jest.config`/`.test.ts`)。\n\n### 3. 出现 `\"isConcurrencySafe\"` 的文件 —— **`.ts` 源码里 0 处**\n\n| 文件 | 命中 | 性质 |\n|---|---|---|\n| `README.md` | 4 处(223 / 332 / 337 / 343) | 引 harness 的 `if (!tool?.isConcurrencySafe) return { kind: 'exclusive' }`,讲\"没声明即独占\"及插件为何自己另做一层 |\n| `bench/task.mjs` | 2 处(26 / 43) | 基准任务文本与判据 |\n| `bench/results-off-1.json`、`bench/results-old-gate/survey-*.json`、`review-*.json` | 各 1–2 处 | **历史基准运行记录(生成物)**,已排除 |\n\n**`src/` 7 个 .ts 与 `verify/` 5 个 .spec.ts 中,一个字面量都没有。** 它不是本插件的闸门实现,而是 harness 侧的契约名;插件真正的并发闸门叫 `mayRunTogether(toolName, args, ownAnswer, overrides)`,`ownAnswer` 来自 `runner.executionMode(...)` 的 `kind === 'parallel'`——也就是**间接消费** harness 那个标志位。\n\n### 4. 出现 `\"delegationDepth\"` 的文件\n\n| 文件 | 命中位置 | 性质 |\n|---|---|---|\n| `src/tool.ts` | `:215` `agent?.session.header.delegationDepth ?? 0` | 源码:委派深度上限闸门(配 `maxAgentDepth`) |\n| `src/gate.ts` | `:145 / :156 / :164 / :217` | 源码:`planRefusal` 的形参;`:164` `if (delegationDepth > 0) return undefined` 让子代理豁免门禁 |\n| `verify/plan.spec.ts` | `:224` 构造 `header: { delegationDepth: 1 }` | 测试:与 `tool.ts:215` 的深度拒绝**成对** |\n| `bench/task.mjs`、`bench/show-formation.mjs`、`bench/sessions.mjs` | task.mjs `:27/:44/:90`;show-formation `:94`;sessions `:117` | 基准脚本,非 src/verify |\n| `bench/results*/`、`bench/results-old-gate/*.json` | 多处 | **历史运行记录(生成物)**,已排除 |\n\n补充一个容易踩的坑:`verify/gate.spec.ts:67` 覆盖了门禁豁免,但用的是**位置参数** `planRefusal('glob', …, 1, gate, …)`,所以该文件里并不出现 `delegationDepth` 字面量——grep 抓不到,别据此认为门禁缺测试。\n\n### 5. 架构评价\n\n`src/` 只用 7 个扁平 `.ts` 就做到了「装配(index)／工具入口(tool)／数据模型(plan)／执行调度(batch)／并发判定(concurrency)／门禁(gate)／会话开关(policy)」一层一职责,`plan.ts`、`concurrency.ts`、`gate.ts` 的判定函数都是零 harness 依赖的纯函数、`batch.ts` 只依赖 `BatchRunner` 这条两成员窄端口,所以\"闸门逻辑塞进中心文件\"没有发生——唯一的重文件 `tool.ts`(521 行)只做编排,判定全部外置。但测试层**不是一一对应**:`batch`/`concurrency`/`plan`/`gate` 四个 spec 对齐同名模块,而 `refine.spec.ts` 是把 `batch.ts` 与 `policy.ts` 混装在一起的杂项 spec、`policy.ts` 没有自己的 spec、`tool.ts` 的 schema 与渲染只能靠 `plan.spec.ts` 间接覆盖,再叠加每个 spec 各抄一份约 15 行的 `check()` + `failures` 计数器 + 退出码尾巴——这是全仓唯一明显的\"散落复制\"。两个关键标识符的分布也印证了这点:`delegationDepth` 集中且在 src/verify 之间成对(`tool.ts` 限深、`gate.ts` 豁免、`plan.spec.ts` 具名覆盖),而 `isConcurrencySafe` 在 src/verify 里**根本不存在**,并发闸门另起了 `mayRunTogether` + `ConcurrencyOverride` 的命名体系、与 harness 标志名脱钩,两者之间的契约**只写在 README 里、没有测试守住**——这是当前最值得补的一处。\n\n---\n\n**本轮未settle 的两点**(下一轮要接着做):`glob` 的路径锚定语义(为何 `path=插件目录` + `**/*.ts` 空返回)尚未定位到根因,只绕过了;第 3、4 问的命中清单按目录分类做了穷举,但 `README.md` 是否命中 `delegationDepth` 这一条在检索输出被截断的那段里没能亲眼复核。"
+}

@@ -16,9 +16,9 @@
  *   child that starts with no context, or a task for a child that inherits
  *   this conversation; a node may say what it depends on, so the plan runs in
  *   layers and every result comes back in one tool result.
- * - The chain rule watches for the shape the plan replaces: a step that made
- *   exactly one call, right after another step that made exactly one call. The
- *   step after that is told how to break the chain.
+ * - The rule makes a turn one plan: the first call of a turn is the plan, and
+ *   after the plan has run the turn is over — what the plan did not settle
+ *   belongs to the next round.
  * - The per-conversation switch takes the whole plugin out of one conversation
  *   without touching the deployment.
  *
@@ -213,7 +213,7 @@ export const Config = z.object({
 })
 
 /**
- * Register the plan tool, the guidance, the chain rule, and the switch.
+ * Register the plan tool, the guidance, the rule that makes a turn one plan, and the switch.
  *
  * @param ctx - the plugin context supplying the registries.
  * @param config - the resolved plugin configuration.
