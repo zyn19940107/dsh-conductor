@@ -1,0 +1,63 @@
+{
+  "task": "survey",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 66534,
+  "sessionId": "session-57790cf3-8aae-467c-a578-cdad74f40083",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 11,
+  "toolCalls": 25,
+  "tools": [
+    "glob",
+    "glob",
+    "grep",
+    "grep",
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "read",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "glob",
+    "read",
+    "grep",
+    "grep",
+    "grep",
+    "read",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 24110,
+    "outputTokens": 5674,
+    "cacheReadTokens": 232704,
+    "totalTokens": 262488
+  },
+  "formation": {
+    "agents": 1,
+    "input": 24110,
+    "output": 5674,
+    "cacheRead": 232704,
+    "total": 262488,
+    "steps": 11
+  },
+  "mainPrompt": 36737,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 14671,
+  "thinkingPreview": "The user wants a read-only inspection of D:\\code\\vibe\\dsh-refine-loop. This is a health check with specific questions about files. Let me use glob and grep tools.\n\nLet me start with glob for src/**/*.ts and verify/**/*.spec.ts, and grep for \"isConcurrencySafe\" and \"delegationDepth\".\n\nNote: I should not modify anything. Let me do parallel calls.\n\nNote the glob tool has a 100 path limit; but likely fine.\n\nLet me run the calls in parallel.\nThe glob with `src/**/*.ts` returned no files, but grep found `dsh-refine-loop\\src\\tool.ts`. Perhaps glob path base issue. Let me try path = D:\\code\\vibe\\dsh-refine-loop\\src and pattern `**/*.ts`. Or pattern `*.ts` with path src.\n\nAlso verify/*.spec.ts exists (plan.spec.ts found by grep). Let's re-glob.\nThe earlier glob with path root + pattern \"src/**/*.ts\" returned nothing — odd but the anchored path works. Fine.\n\nNow, the grep results for isConcurrency",
+  "finalText": "体检完成，全程只读（未改动任何文件）。\n\n## 1. `src` 下的 .ts 文件：**7 个**\n\n| 文件 | 职责 |\n|---|---|\n| `src/index.ts` | Cordis 入口：zod 配置、注册 system prompt 段落 / 工具 / 规则 / 命令 |\n| `src/plan.ts` | 计划数据模型：`PlanNode` / `PlanArgs` / `buildWaves` / 占位符 `@@nodeId@@` |\n| `src/batch.ts` | 调度器：`runBatch` 把一批调用切成并发波次并收集结果 |\n| `src/concurrency.ts` | 并发判定：`READ_ONLY_COMMANDS`、`isReadOnlyCommand`、`buildOverrides`、`mayRunTogether` |\n| `src/tool.ts` | `refine_plan` 工具本体：`runPlan` / `renderPlan` / 子代理节点执行 |\n| `src/gate.ts` | 规则层：`PlanGate` / `planRefusal`，逼模型先画计划再调工具 |\n| `src/policy.ts` | 单会话开关：`/dsh-refine-loop on|off` |\n\n## 2. `verify` 下的 .spec.ts：**5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n（由 `verify/run-specs.mjs` 用 esbuild 打包后逐个进程跑，跑完删 `verify/.build`）\n\n## 3. 出现 `\"isConcurrencySafe\"` 的文件：**只有 2 个，且 src 里一个都没有**\n\n- `README.md` —— 4 处（第 258 行是示例里的 grep 调用；第 369 行是**引用 harness 源码**的片段 `if (!tool?.isConcurrencySafe) return { kind: 'exclusive' }`；第 374、380 行是文字说明，并注明 harness 侧那行补丁要等发版才生效）\n- `bench/task.mjs` —— 第 26 行，就是本次体检题目的原文（benchmark prompt）\n\n**关键点**：`src/*.ts` 里**不存在**这个标识符。插件自己那套命名是 `respectConcurrencySafety`（配置项，出现在 `index.ts` / `tool.ts` / `batch.ts`）、`ConcurrencyOverride` / `buildOverrides` / `mayRunTogether`（`concurrency.ts`）。也就是说插件没有直接消费 harness 的 `isConcurrencySafe`，而是**另起了一层自己的判定**（读工具白名单 + shell 只读命令分类器），再通过 `respectConcurrencySafety` 开关决定要不要认工具自己的独占声明。\n\n## 4. 出现 `\"delegationDepth\"` 的文件：**7 个，其中 src 里只有 1 个**\n\n- **`src/tool.ts`（第 215 行）** —— 唯一的 src 命中点：`const depth = agent?.session.header.delegationDepth ?? 0`，配合 `maxAgentDepth`（默认 1）阻止计划节点再开子代理\n- **`verify/plan.spec.ts`（第 225 行）** —— fixture：`session: { id: 'child', header: { delegationDepth: 1 } }`\n- `bench/task.mjs`、`bench/sessions.mjs`、`bench/show-one-session.mjs`、`bench/show-formation.mjs`、`bench/show-overlap-bar.mjs` —— 都在读会话头里的这个字段\n\n`src/gate.ts` **不包含** `delegationDepth`；深度限制属于 `tool.ts` 的子代理节点，不属于 gate。\n\n## 5. 架构评价\n\n分层很清楚且每个模块职责单一、注释密度高得近乎教学：`plan.ts` 定义计划与 DAG → `batch.ts` 负责调度波次 → `concurrency.ts` 独立判定并发安全 → `tool.ts` 装配成 `refine_plan` 工具 → `gate.ts`/`policy.ts` 分别管\"强制走计划\"和\"单会话豁免\"，`index.ts` 只做 Cordis 接线，5 个 spec 基本按模块一一对应 —— 这是小而正交的典型 harness 插件骨架。\n\n两个值得记一笔的体检发现：其一，**`bench/task.mjs` 的判分标准已经和源码脱节**——它把 Q3 的答案写成 `concurrency.ts`、Q4 的答案写成 `gate.ts`，而真实答案是\"src 里没有 `isConcurrencySafe`，它在 `tool.ts`\"，用当前判分器评这道题会误判；其二，**`batch.ts` 留着一套与新架构平行的旧模型**（`BatchArgs`/`BatchCall`/`parseBatchArgs`/`renderBatch`），运行时真正注册的是 `plan.ts`+`tool.ts` 的 plan 面，旧模型只剩 `refine.spec.ts` 在测，属于该收进历史或删掉的重复面。"
+}
