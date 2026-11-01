@@ -2,44 +2,45 @@
   "task": "survey",
   "condition": "on",
   "index": 1,
-  "exitCode": 0,
-  "wallMs": 197471,
-  "sessionId": "session-1bbf76c3-4911-4c11-bb0f-53a14e8aa986",
+  "exitCode": 1,
+  "wallMs": 28689,
+  "sessionId": "session-e9532352-d034-4af9-9617-e3624aa0c17a",
   "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
-  "steps": 7,
-  "toolCalls": 7,
+  "steps": 1,
+  "toolCalls": 1,
   "tools": [
-    "glob",
-    "glob",
-    "refine_plan",
-    "refine_plan",
-    "refine_plan",
-    "refine_plan",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 36769,
-    "outputTokens": 12621,
-    "cacheReadTokens": 168192,
-    "totalTokens": 217582
+    "inputTokens": 10534,
+    "outputTokens": 2122,
+    "cacheReadTokens": 640,
+    "totalTokens": 13296
   },
   "formation": {
     "agents": 2,
-    "input": 135734,
-    "output": 51353,
-    "cacheRead": 1040512,
-    "total": 1227599,
-    "steps": 21
+    "input": 37824,
+    "output": 3969,
+    "cacheRead": 21132,
+    "total": 62925,
+    "steps": 3
   },
-  "mainPrompt": 43389,
+  "mainPrompt": 11174,
   "correctness": {
-    "passed": 6,
+    "passed": 0,
     "total": 6,
-    "missing": []
+    "missing": [
+      "src 下的 .ts 文件数(7)(缺:7)",
+      "verify 下的 spec 数(5)(缺:5)",
+      "src 里的每个文件名(缺:batch.ts/concurrency.ts/gate.ts/index.ts/plan.ts/policy.ts/tool.ts)",
+      "verify 里的每个 spec 名(缺:batch.spec.ts/concurrency.spec.ts/gate.spec.ts/plan.spec.ts/refine.spec.ts)",
+      "定义 isConcurrencySafe 的文件(缺:concurrency.ts)",
+      "提到 delegationDepth 的文件(缺:gate.ts)"
+    ]
   },
   "planned": true,
   "planAgentNodes": 1,
-  "thinkingChars": 26071,
-  "thinkingPreview": "I need to use refine_plan. Let me shape the work: the task is read-only inspection. I need:\n1. glob src/**/*.ts\n2. glob verify/**/*.spec.ts\n3. grep isConcurrencySafe\n4. grep delegationDepth\n\nThese are independent — one node with tools running them together. But the greps might be better scoped to the whole plugin dir. Let me do one tools node with all four calls. Actually, maybe I should also read some files for the architecture evaluation in question 5. Let me add a node that reads key files — but I don't know file names until glob returns. Hmm. But I could read the package.json and README to inform architecture. Let me include reads of package.json, README.md, and maybe a tsconfig. But the src file names depend on the glob.\n\nAlternative: use a broader glob for all .ts files in the repo, and read package.json + README + any AGENTS.md in the plugin dir. Then I can form the architecture a",
-  "finalText": "体检完成，全程只读（未创建/修改/删除任何文件，未跑构建或测试）。\n\n## 1. `src` 下的 .ts 文件：**7 个**\n\n| 文件 | 职责（源码通读确认） |\n|---|---|\n| `src/index.ts` | Cordis 装配层：zod 配置、系统提示段落、工具/规则/命令注册 |\n| `src/plan.ts` | 计划数据模型：`PlanNode`/`PlanArgs`/`buildWaves`/`@@nodeId@@` 占位符 |\n| `src/batch.ts` | 分波调度：`runBatch` 把一批调用切并发波次并收集结果 |\n| `src/concurrency.ts` | 并发判定：`READ_ONLY_COMMANDS`、`isReadOnlyCommand`、`buildOverrides`、`mayRunTogether` |\n| `src/tool.ts` | `refine_plan` 工具本体：`runPlan`/`runNode`/`renderPlan` |\n| `src/gate.ts` | 规则层：`PlanGate`/`planRefusal`，逼模型先交图再干活 |\n| `src/policy.ts` | 单会话开关 `/dsh-refine-loop on\\|off` |\n\n没有 client 半边，也没有子目录嵌套。\n\n## 2. `verify` 下的 .spec.ts：**5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n（同目录另有 3 个 .mjs 辅助：`run-specs.mjs`、`dump-sandbox-turn.mjs`、`dump-sandbox-log.mjs`）\n\n## 3. 出现 `\"isConcurrencySafe\"` 的文件\n\n- `README.md` — 4 处：**262**（示例里的 grep 调用）、**376**（引用 harness 源码片段 `if (!tool?.isConcurrencySafe) return { kind: 'exclusive' }`）、**381**、**387**（说明 harness 侧补丁要等发版才生效）\n- `bench/task.mjs` — 2 处：**26**（就是本次体检题面的原文）、**43**（benchmark needle）\n- `bench/results/survey-off-1.json` — 生成物，是上一次同题运行的存档，非源码\n\n**关键：`src/` 和 `verify/` 里没有任何 .ts 含这个标识符。**（README 的 mtime 是 00:40:04，在我第一遍 grep 之后被改动过，所以早先的行号 258/369/374/380 已过期，上表是当前值。）\n\n## 4. 出现 `\"delegationDepth\"` 的文件\n\n- `src/tool.ts:215` — `const depth = agent?.session.header.delegationDepth ?? 0`（生产代码里唯一一处）\n- `verify/plan.spec.ts:225` — `session: { id: 'child', header: { delegationDepth: 1 } }`\n- `bench/task.mjs` — 27、44、90（题面 + needle）；`bench/sessions.mjs:117`、`bench/show-formation.mjs:94`、`bench/show-one-session.mjs:26`、`bench/show-overlap-bar.mjs:47`（均为 harness 事件字段透传）\n- `bench/results/survey-off-1.json` — 同上，生成物\n\n## 5. 架构评价（2–3 句）\n\n这是一个纯宿主侧的 Cordis 插件：七个职责单一的小模块把「画一张 DAG → 跑这张 DAG」拆成数据模型（plan）、调度（batch）、并发判定（concurrency）、工具外壳（tool）、规则闸门（gate）、会话开关（policy）和装配（index），依赖单向、边界干净。它刻意**没有**直接消费 harness 的 `isConcurrencySafe` / `delegationDepth`，而是自己另起了一层抽象（`respectConcurrencySafety` + `mayRunTogether`、`maxAgentDepth`），只从 harness 取「一个布尔 / 一个整数」再叠自己的策略——隔离性好，但把 harness 的裁决语义压扁了，丢了「没声明」与「声明为不安全」的区别。真正的短板不在结构而在**验证与文档同步**：`index.ts` 零覆盖、并发覆盖层从未端到端跑过，而 README 与 `cordis.patch.yml` 仍在配一个代码里根本不存在的 `conclusionPullbacks`。\n\n---\n\n### 顺带发现的具体问题（静态阅读，均带证据）\n\n**并发判定有真实漏洞**\n- `src/concurrency.ts:33-52` — 只读白名单含 `env`（任意命令包装器）和 `date`（`-s` 改系统时钟），`UNSAFE_FLAGS` 未覆盖这两项，于是 `isReadOnlyCommand('env rm -rf x')`、`isReadOnlyCommand('date -s 2020-01-01')` 都返回 true（判定逻辑 `:138-155`）→ 被当作只读而并发执行。\n- `src/concurrency.ts:146` — `executable.split(/[/\\\\]/u).pop()` 只取末段文件名，`./ls`、`dir/ls` 被当成 `ls` 放行 → CWD/PATH 影子可绕过白名单。\n- `src/batch.ts:255` 把 harness 的 `ToolExecutionMode` 折叠成布尔 `mode.kind === 'parallel'`，随后 `src/concurrency.ts:229-233` 对**任何**非 parallel 裁决都做覆盖，而 `README.md:381` 只承诺「没声明」的情形。\n\n**委派深度**\n- `src/tool.ts:216-224` + `src/index.ts:201`（`maxAgentDepth` 允许 0）— 拒绝文案恒为「already a delegated child (depth N)」，但 depth=0 且上限为 0 时主会话被拒，文案与事实不符。\n\n**重复实现与死代码**\n- `src/tool.ts:92-104` `resultText` ≈ `src/batch.ts:115-127` `contentToText`；`src/tool.ts:270` ≈ `src/batch.ts:135-138` `errorMessage`。\n- `src/tool.ts:73,80-83` 与 `src/batch.ts:141,148-151` 是两套模块级全局 id 计数器，作用相同、前缀还各写各的。\n- `src/concurrency.ts:176-180` `DEFAULT_OVERRIDES` 无人引用，且默认值在 `src/index.ts:135,144,149` 与 `cordis.patch.yml:26-30` 重复三遍。\n- `src/plan.ts:19` `AGENT_NODE_KINDS` 从未参与任何判断（`src/tool.ts:191` 直接判 `node.kind === 'tools'`），`src/tool.ts:522` 还把它和 `mayRunTogether` 重复导出。\n- `src/batch.ts:83` `parseBatchArgs` 只被 `verify/refine.spec.ts` 引用，生产路径用的是 `parsePlanArgs` → 产品里死、测试里活；该 spec 文件头注释仍写着已不存在的「the chain detector」。\n\n**文档 / 配置漂移**\n- `src/index.ts:168-169,194` 只是两处孤立注释，`Config` 与 zod schema 里没有 `conclusionPullbacks` 键，src 中也无此符号，但 `cordis.patch.yml:24` 仍在配它 → 无效设置。\n- `README.md:290`（「图交出后这一轮再调工具会被拒绝」）与 `README.md:443`（「图之后模型做什么，规则不管」）自相矛盾；代码是后者（`src/gate.ts:93-108` 只有一个 pullback 计数器，无「图已提交」状态机）。\n\n**状态与规格**\n- `src/gate.ts:36` 的 `before` Map、`src/policy.ts:46-47` 的 `optedOut`/`lifts` 按 sessionId 累积且会话结束不清理 → 长驻宿主下无界增长。\n- `src/gate.ts:93-108` `planRe"
+  "thinkingChars": 5115,
+  "thinkingPreview": "The user wants a read-only health check of a plugin at D:\\code\\vibe\\dsh-refine-loop. I need to:\n1. Count .ts files in src directory, list names\n2. Count .spec.ts files in verify directory, list names\n3. Files containing \"isConcurrencySafe\"\n4. Files containing \"delegationDepth\"\n5. Architectural evaluation\n\nThis is a read-only task. The skill `dsh-plugin-sandbox` is about developing/debugging plugins — this task is just a read-only inspection/audit, not modifying. The AGENTS.md says to call the skill before 改/调 any plugin. This is only reading/inspecting, so probably not needed. But the task says \"对插件做一次体检\" — a health check. It's read-only analysis. I don't think I need the sandbox skill since I'm not changing anything.\n\nLet me just do the exploration. I'll use a plan via refine_plan? The instructions say one turn = one plan with refine_plan. Let me think about the shape: I need to glob sr",
+  "finalText": ""
 }

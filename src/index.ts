@@ -57,11 +57,13 @@ export const REFINE_GUIDANCE = [
   + 'one refine_plan call. The plan runs, its results come back together, and the turn is over: what the '
   + 'plan produced is what this turn produced. If you have nothing left to do, write the conclusion instead — '
   + 'that ends the turn too.',
-  '- A node is one of three kinds. "tools": calls that run together. "subagent": a self-contained task for '
-  + 'a child that starts with no context — use it when the task needs nothing from this conversation, such '
-  + 'as researching a topic, auditing a file, or doing a scoped piece of work. "subagent_fork": a task for '
-  + 'a child that inherits this conversation — use it when the task builds on what has already been said '
-  + 'here, such as a follow-up analysis or a review of this conversation. You decide which one each task '
+  '- A node is one of three kinds. "tools": a batch of calls written before anything has run — they run '
+  + 'together and nothing looks at a result before the next call, so it cannot correct itself; use it when '
+  + 'the calls are plain and sure, such as reading files you can name exactly. "subagent"/"subagent_fork": '
+  + 'the ordinary call → think → call chain, run inside the plan — the child sees each result and decides '
+  + 'the next call, so it can work its own way out of a failure; use it when the work needs looking at what '
+  + 'came back, such as auditing, searching, or tracing something you cannot name in advance. "subagent" '
+  + 'starts with no context; "subagent_fork" inherits this conversation. You decide which one each task '
   + 'needs.',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
