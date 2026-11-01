@@ -19,7 +19,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import { defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import {
   renderBatch,
   runBatch,
@@ -397,6 +397,13 @@ export function applyPlanTool(
     onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
     /** Build the repair for one conversation, from its own call configuration. */
     repair?: (config: LlmCallConfig) => RepairCall
+    /**
+     * Called when a plan has run, before the tool returns.
+     *
+     * Returns true when the loop should go on: the plugin has queued the next
+     * round and the turn must end so that round can start.
+     */
+    onPlanFinished?: (agent: Agent) => boolean
   },
 ): void {
   ctx.tools.register(defineTool({
@@ -496,7 +503,7 @@ export function applyPlanTool(
         return [{ type: 'text', text: renderPlan(output) }]
       },
     },
-    async execute(args, exec: ToolExecution) {
+    async execute(args, exec: ToolRunContext) {
       const parsed = parsePlanArgs(args)
       if (parsed === undefined) {
         throw new Error('refine_plan needs criteria and a non-empty list of nodes, each with an id and a kind')
@@ -514,7 +521,7 @@ export function applyPlanTool(
       const repair = options.repair === undefined || ownConfig === undefined
         ? undefined
         : options.repair(ownConfig)
-      return await runPlan(
+      const output = await runPlan(
         ctx.tools,
         parsed,
         agent,
@@ -526,6 +533,12 @@ export function applyPlanTool(
         options.agentNodeTimeoutMs(),
         repair,
       )
+      // The plan has run. If the loop has a round left, the next one is already
+      // queued; ending this turn is what lets the harness open it.
+      if (agent !== undefined && options.onPlanFinished?.(agent) === true) {
+        exec.concludeTurn()
+      }
+      return output
     },
   }))
 }

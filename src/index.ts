@@ -26,12 +26,14 @@
  */
 
 import type { Context, Volatile } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyPlanGate, PlanGate } from './gate.js'
+import { applyPlanGate, NEXT_ROUND, PlanGate } from './gate.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -272,6 +274,18 @@ export function apply(ctx: Context, config: Config): void {
     maxAgentDepth: () => config.maxAgentDepth.get(),
     agentNodeTimeoutMs: () => config.agentNodeTimeoutMs.get(),
     onPlanStarted: (sessionId, callId) => planGate.markPlanned(sessionId, callId),
+    // One round is a plan and its execution. When the plan has run and the loop
+    // still has rounds in budget, queue the next one: the plan tool ends this
+    // turn, and the pending message is what makes the harness open the next.
+    onPlanFinished: (agent: Agent) => {
+      const sessionId = agent.session.id
+      if (planGate.bumpRound(sessionId) > config.maxRounds.get()) return false
+      agent.followup(createUserMessage({
+        content: [{ type: 'text', text: NEXT_ROUND }],
+        source: { kind: 'system-prompt' },
+      }))
+      return true
+    },
     repair: (config: LlmCallConfig) => (failed, error, signal) => repairFailedCall(ctx, config, failed, error, signal),
   })
 

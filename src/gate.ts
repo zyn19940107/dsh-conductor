@@ -137,12 +137,6 @@ export const NEXT_ROUND = 'The plan has run — every result is above. This is t
   + 'the request and ends the loop.'
 
 /**
- * What the loop says when its round budget is spent.
- */
-export const ROUNDS_SPENT = 'The loop has run its budget of rounds. Write the conclusion now: what the '
-  + 'results settle, and what is left for the next request.'
-
-/**
  * Whether a call is the model's own call rather than one a plan made.
  *
  * The harness marks a nested call with the root call it runs under, so the
@@ -164,7 +158,6 @@ export function isModelCall(execution: { readonly callId: ToolCallId, readonly r
  * @param appliesTo - whether the rules apply to this conversation.
  * @param requirePlan - whether tool calls have to go inside a plan.
  * @param planPullbacks - how many times the conversation may be pulled back.
- * @param maxRounds - how many rounds the loop may run for one request.
  * @returns the refusal reason, or undefined when the call may run.
  */
 export function planRefusal(
@@ -174,13 +167,10 @@ export function planRefusal(
   appliesTo: (sessionId: string) => boolean,
   requirePlan: boolean,
   planPullbacks: number,
-  maxRounds: number,
 ): string | undefined {
   // A conversation that opted out is left alone.
   if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
-  // The loop's budget is spent: only the conclusion can end it now.
-  if (gate.roundsUsed(sessionId) > maxRounds) return ROUNDS_SPENT
   // The plan is how the work is handed over.
   if (toolName === PLAN_TOOL) return undefined
   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined
@@ -212,23 +202,10 @@ export function applyPlanGate(
       gate.reset(sessionId)
       return decision
     }
-    if (!gate.hasPlanned(sessionId)) return decision
-    // The plan has run. That is one round: the results are in the conversation,
-    // and the next round decides what they mean — another plan, or the
-    // conclusion that answers the request and ends the loop.
-    gate.reset(sessionId)
-    const round = gate.bumpRound(sessionId)
-    const text = round <= config.maxRounds() ? NEXT_ROUND : ROUNDS_SPENT
-    return {
-      kind: 'enter',
-      messages: [
-        ...decision.messages,
-        createUserMessage({
-          content: [{ type: 'text', text }],
-          source: { kind: 'system-prompt' },
-        }),
-      ],
-    }
+    // A plan that ran ends its own turn (the plan tool concludes it), so there
+    // is nothing left for this hook to do here. The round it starts is queued
+    // when the plan finishes, and the harness opens it as the next turn.
+    return decision
   })
 
   ctx.tools.guard((execution) => {
@@ -245,7 +222,6 @@ export function applyPlanGate(
       config.appliesTo,
       config.requirePlan(),
       config.planPullbacks(),
-      config.maxRounds(),
     )
   })
 }
