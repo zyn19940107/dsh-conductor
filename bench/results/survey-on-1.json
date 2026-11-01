@@ -1,0 +1,40 @@
+{
+  "task": "survey",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 58688,
+  "sessionId": "session-310906cf-14f7-479c-b36e-4df5792508a0",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 33352,
+    "outputTokens": 3854,
+    "cacheReadTokens": 37798,
+    "totalTokens": 75004
+  },
+  "formation": {
+    "agents": 2,
+    "input": 65106,
+    "output": 8247,
+    "cacheRead": 146726,
+    "total": 220079,
+    "steps": 8
+  },
+  "mainPrompt": 33480,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 6624,
+  "thinkingPreview": "The task is read-only analysis of a plugin directory. Let me explore.\n\nLet me use refine_plan? The instructions say a turn is one plan. But this is a fairly simple read-only task. Let me think: the refined loop says use refine_plan for the whole turn. But it also says \"If you have nothing left to do, write the conclusion instead\". I should probably do the exploration with tool calls. The system prompt describes refine_plan as the main loop. However for a simple task, direct tool calls are fine. Let me just do the work — but to comply, maybe use refine_plan with tools nodes.\n\nActually, let me just do direct tool calls to explore since it's a read-only inspection. But the harness rules say \"every call you make goes inside a plan\". Hmm. Let me use refine_plan with a tools node doing glob/grep calls.\n\nLet me first check the directory structure. Let me plan:\n\nNode A (tools): glob for D:\\code\\",
+  "finalText": "## 体检结果（全程只读，未改动任何文件）\n\n**1. `src/` 下的 .ts 文件：8 个**\n\n| 文件 | 职责 |\n|---|---|\n| `src/index.ts` | 插件入口、配置 schema、装配各模块 |\n| `src/plan.ts` | 计划数据结构、`buildWaves` 分层、`@@节点名@@` 占位符替换 |\n| `src/tool.ts` | `refine_plan` 工具定义、`runPlan` 执行计划、派生子代理 |\n| `src/batch.ts` | 批次调度（波次切分、串/并行、失败重试接线） |\n| `src/concurrency.ts` | 并发判定规则：`isReadOnlyCommand` / `DEFAULT_OVERRIDES` / `mayRunTogether` |\n| `src/gate.ts` | 「模型不能自己调工具」闸门 + 轮次预算 |\n| `src/policy.ts` | 按会话开关 `/dsh-refine-loop on\\|off` |\n| `src/repair.ts` | 计划内单次失败调用的自修复循环 |\n\n**2. `verify/` 下的 .spec.ts：5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n\n（全仓 `**/*.spec.ts` 搜索结果一致，没有 verify/ 之外的 spec。）\n\n**3. 出现 `isConcurrencySafe` 的文件：3 个（`src/` 里 0 个）**\n\n- `README.md`（262、376、381、387 行）— 引用的是 harness 侧 `packages/core/tools/src/index.ts` 的字段\n- `bench/task.mjs`（26、43 行）— 基准任务文本本身\n- `bench/results/survey-off-1.json` — 上一轮跑出来的历史输出存档，非源码\n\n插件源码**没有**这个字符串：它实际靠 `runner.executionMode(...)` 返回的 `mode.kind === 'parallel'`（`src/batch.ts`）取 harness 的答案，自己那一层规则在 `src/concurrency.ts` 的 `mayRunTogether`；配置开关叫 `respectConcurrencySafety`。\n\n**4. 出现 `delegationDepth` 的文件：8 个**\n\n- `src/tool.ts:219` — 唯一的实际强制点（`agent?.session.header.delegationDepth ?? 0`，与 `maxAgentDepth` 比较）\n- `verify/plan.spec.ts:224` — 规格里构造的 `header: { delegationDepth: 1 }` 桩\n- `bench/task.mjs`（27、44、90 行）、`bench/show-overlap-bar.mjs:47`、`bench/show-one-session.mjs:26`、`bench/show-formation.mjs:94`、`bench/sessions.mjs:117` — 基准/看会话树的展示脚本\n- `bench/results/survey-off-1.json` — 历史输出存档\n\n**5. 架构评价**\n\n两个关键约束都是**单点集中**的，这是这套设计最扎实的部分：并发安全的规则只住在 `src/concurrency.ts` 的 `mayRunTogether` 里、只被 `src/batch.ts` 一个决策点调用（`respectConcurrencySafety` 只是被 `index/tool/batch` 三处透传的布尔开关），`delegationDepth` 在源码里更只有 `src/tool.ts:219` 一处读取，其余命中全在 bench 展示脚本里。真正的短板在测试侧：8 个源模块只有 5 个 spec，`src/repair.ts`（失败自修复这条最复杂的路径）和 `src/index.ts`（配置装配）**零覆盖**——`verify/` 里搜 \"repair\" 一个命中都没有；而 `verify/run-specs.mjs:21` 把 5 个 spec 文件名写死了，新增 spec 不会被自动执行，加上 `bench/task.mjs:44` 还以为 `delegationDepth` 的强制点在 `gate.ts`（实际在 `tool.ts`），说明测试与基准两边都在悄悄跟实现漂移。"
+}
