@@ -15,7 +15,6 @@
       name: '@zyn19940107/dsh-refine-loop'
       config:
         enabled: true
-        chainLimit: 2
         maxBatchSize: 8
         maxBatchTimeoutMs: 600000
         maxAgentDepth: 1

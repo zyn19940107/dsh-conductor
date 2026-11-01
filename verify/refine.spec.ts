@@ -4,7 +4,7 @@
  */
 
 import { parseBatchArgs, renderBatch, type BatchOutput } from '../src/batch.js'
-import { ChainDetector } from '../src/gate.js'
+
 import { parsePolicyCommand } from '../src/policy.js'
 
 let failures = 0
@@ -45,29 +45,6 @@ console.log('parseBatchArgs')
   check('refuses a call without a name', parseBatchArgs({ criteria: ['x'], calls: [{ arguments: {} }] }) === undefined)
   check('refuses a plan that is not an object', parseBatchArgs('nonsense') === undefined)
   check('trims the criteria', parseBatchArgs({ criteria: ['  x  '], calls: [{ name: 'read' }] })?.criteria[0] === 'x')
-}
-
-console.log('ChainDetector')
-{
-  const detector = new ChainDetector()
-
-  detector.count('s1', 'read')
-  check('one call in a step is a chain step', detector.takeChainStep('s1') === true)
-
-  detector.count('s1', 'read')
-  detector.count('s1', 'glob')
-  check('two calls in a step are not a chain step', detector.takeChainStep('s1') === false)
-
-  detector.count('s1', 'refine_plan')
-  check('a plan step is not a chain step', detector.takeChainStep('s1') === false)
-
-  detector.count('s1', 'read')
-  check('the streak grows', detector.bumpStreak('s1') === 1)
-  check('the streak grows again', detector.bumpStreak('s1') === 2)
-  detector.resetStreak('s1')
-  check('the streak resets', detector.bumpStreak('s1') === 1)
-
-  check('another session has its own count', detector.takeChainStep('s2') === false)
 }
 
 console.log('parsePolicyCommand')

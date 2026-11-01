@@ -28,7 +28,7 @@
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyChainRule, applyPlanGate, ChainDetector, PlanGate } from './gate.js'
+import { applyPlanGate, PlanGate } from './gate.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 
@@ -55,8 +55,6 @@ export const REFINE_GUIDANCE = [
   + 'independent, which need a child with no context, which need a child that inherits this conversation, '
   + 'and what depends on what. Then hand that shape over in one refine_plan call. A turn cannot start any '
   + 'other way: the first call of a turn is the plan.',
-  '- Draw the whole shape before you start. Use it whenever the turn has more than one thing to do, or when part of '
-  + 'the work belongs to a child agent. One plan costs one round trip; a step per item costs one each.',
   '- A node is one of three kinds. "tools": calls that run together. "subagent": a self-contained task for '
   + 'a child that starts with no context — use it when the task needs nothing from this conversation, such '
   + 'as researching a topic, auditing a file, or doing a scoped piece of work. "subagent_fork": a task for '
@@ -66,8 +64,8 @@ export const REFINE_GUIDANCE = [
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',
-  '- When the next step depends on the result of the previous one there is nothing to plan: say so and take '
-  + 'the steps one at a time.',
+  '- The plan runs in one round trip and every result comes back together, so you write the conclusion of '
+  + 'all of them in one reply. If you need more work after it, draw another plan.',
   'These are the rules for the refined loop. Do not go looking for them elsewhere — the tool is already in '
   + 'your tool table and the rules are already here.',
 ].join('\n')
@@ -81,14 +79,6 @@ export const REFINE_GUIDANCE = [
  */
 export const DEFAULT_ENABLED = true
 
-/**
- * How many chain steps in a row the rule waits for before it speaks.
- *
- * Two is the shortest run that is a chain rather than a coincidence, and the
- * rule speaks on the step after it, so the agent is told before it has spent
- * a third round trip on the same pattern.
- */
-export const DEFAULT_CHAIN_LIMIT = 2
 
 /**
  * The largest plan the tool accepts, in nodes.
@@ -176,8 +166,6 @@ export const DEFAULT_PLAN_PULLBACKS = 2
 export interface Config {
   /** Whether the plugin is mounted at all. */
   enabled: Volatile<boolean>
-  /** How many chain steps in a row the rule waits for before it speaks. */
-  chainLimit: Volatile<number>
   /** The largest plan the tool accepts, in nodes. */
   maxBatchSize: Volatile<number>
   /** The budget for one plan, in milliseconds. */
@@ -202,7 +190,6 @@ export interface Config {
 
 export const Config = z.object({
   enabled: z.boolean().default(DEFAULT_ENABLED).volatile(),
-  chainLimit: z.number().step(1).min(1).default(DEFAULT_CHAIN_LIMIT).volatile(),
   maxBatchSize: z.number().step(1).min(1).default(DEFAULT_MAX_BATCH_SIZE).volatile(),
   maxBatchTimeoutMs: z.number().step(1).min(1).default(DEFAULT_MAX_BATCH_TIMEOUT_MS).volatile(),
   maxAgentDepth: z.number().step(0).min(0).default(DEFAULT_MAX_AGENT_DEPTH).volatile(),
@@ -236,8 +223,6 @@ export function apply(ctx: Context, config: Config): void {
   // The conversations that opted out of the plugin. One conversation turning it
   // off changes no other conversation.
   const policy = new SessionPolicy()
-  // What one conversation's steps looked like.
-  const detector = new ChainDetector()
   // Whether a conversation has opened its turn with a plan.
   const planGate = new PlanGate()
 
@@ -265,10 +250,6 @@ export function apply(ctx: Context, config: Config): void {
     agentNodeTimeoutMs: () => config.agentNodeTimeoutMs.get(),
   })
 
-  applyChainRule(ctx, detector, {
-    chainLimit: () => config.chainLimit.get(),
-    appliesTo: (sessionId) => policy.appliesTo(sessionId),
-  })
 
   applyPlanGate(ctx, planGate, {
     requirePlan: () => config.requirePlan.get(),
