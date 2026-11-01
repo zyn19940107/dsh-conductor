@@ -24,6 +24,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { PLAN_TOOL } from './tool.js'
 
 /**
@@ -35,6 +36,7 @@ import { PLAN_TOOL } from './tool.js'
 export class PlanGate {
   private readonly before = new Map<string, number>()
   private readonly planned = new Map<string, ToolCallId>()
+  private readonly rounds = new Map<string, number>()
 
   /**
    * Count one pullback for a tool the agent called itself.
@@ -71,6 +73,40 @@ export class PlanGate {
   }
 
   /**
+   * Count one round the loop ran for the same request.
+   *
+   * @param sessionId - the session the round belongs to.
+   * @returns how many rounds the request has used.
+   */
+  bumpRound(sessionId: string): number {
+    const count = (this.rounds.get(sessionId) ?? 0) + 1
+    this.rounds.set(sessionId, count)
+    return count
+  }
+
+  /**
+   * How many rounds the current request has used.
+   *
+   * @param sessionId - the session the request belongs to.
+   * @returns the round count.
+   */
+  roundsUsed(sessionId: string): number {
+    return this.rounds.get(sessionId) ?? 0
+  }
+
+  /**
+   * Forget one conversation's rounds.
+   *
+   * A person speaking starts a new request, and a new request gets its own
+   * budget.
+   *
+   * @param sessionId - the session the request belongs to.
+   */
+  resetRounds(sessionId: string): void {
+    this.rounds.delete(sessionId)
+  }
+
+  /**
    * Forget one conversation's pullbacks and its plan.
    *
    * @param sessionId - the session the turn belongs to.
@@ -89,6 +125,22 @@ export const PLAN_REQUIRED = 'Do not call tools yourself — every call you make
   + 'nodes: the calls that run together, the tasks that need a child with no context, the tasks that need a '
   + 'child that inherits this conversation, and what depends on what. The plan runs in one round trip and '
   + 'returns every result together — or write the conclusion, which ends the turn.'
+
+/**
+ * What the loop says when a plan has run and the next round starts.
+ *
+ * A round is: the model decides, and a plan runs. The turn does not end after a
+ * plan — the next round starts with this message, and the model decides again.
+ */
+export const NEXT_ROUND = 'The plan has run — every result is above. This is the next round: hand over '
+  + `another plan with ${PLAN_TOOL} for what is left, or write the conclusion. Writing the conclusion answers `
+  + 'the request and ends the loop.'
+
+/**
+ * What the loop says when its round budget is spent.
+ */
+export const ROUNDS_SPENT = 'The loop has run its budget of rounds. Write the conclusion now: what the '
+  + 'results settle, and what is left for the next request.'
 
 /**
  * Whether a call is the model's own call rather than one a plan made.
@@ -112,6 +164,7 @@ export function isModelCall(execution: { readonly callId: ToolCallId, readonly r
  * @param appliesTo - whether the rules apply to this conversation.
  * @param requirePlan - whether tool calls have to go inside a plan.
  * @param planPullbacks - how many times the conversation may be pulled back.
+ * @param maxRounds - how many rounds the loop may run for one request.
  * @returns the refusal reason, or undefined when the call may run.
  */
 export function planRefusal(
@@ -121,10 +174,13 @@ export function planRefusal(
   appliesTo: (sessionId: string) => boolean,
   requirePlan: boolean,
   planPullbacks: number,
+  maxRounds: number,
 ): string | undefined {
   // A conversation that opted out is left alone.
   if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
+  // The loop's budget is spent: only the conclusion can end it now.
+  if (gate.roundsUsed(sessionId) > maxRounds) return ROUNDS_SPENT
   // The plan is how the work is handed over.
   if (toolName === PLAN_TOOL) return undefined
   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined
@@ -147,17 +203,32 @@ export function applyPlanGate(
     const decision = await next()
     if (decision.kind !== 'enter') return decision
     const sessionId = payload.agent.session.id
+    // A person speaking starts a new request, and a new request gets its own
+    // budget for rounds.
+    if (payload.messages.some(message => message.source?.kind === 'user')) {
+      gate.resetRounds(sessionId)
+    }
     if (payload.step === 1) {
       gate.reset(sessionId)
       return decision
     }
-    // The plan has run: the turn is over. What it produced is what the turn
-    // produced. Coming back to draw another plan is the chain this plugin is
-    // here to replace.
-    if (gate.hasPlanned(sessionId)) {
-      return { kind: 'reject' }
+    if (!gate.hasPlanned(sessionId)) return decision
+    // The plan has run. That is one round: the results are in the conversation,
+    // and the next round decides what they mean — another plan, or the
+    // conclusion that answers the request and ends the loop.
+    gate.reset(sessionId)
+    const round = gate.bumpRound(sessionId)
+    const text = round <= config.maxRounds() ? NEXT_ROUND : ROUNDS_SPENT
+    return {
+      kind: 'enter',
+      messages: [
+        ...decision.messages,
+        createUserMessage({
+          content: [{ type: 'text', text }],
+          source: { kind: 'system-prompt' },
+        }),
+      ],
     }
-    return decision
   })
 
   ctx.tools.guard((execution) => {
@@ -174,6 +245,7 @@ export function applyPlanGate(
       config.appliesTo,
       config.requirePlan(),
       config.planPullbacks(),
+      config.maxRounds(),
     )
   })
 }
@@ -186,6 +258,8 @@ export interface PlanGateConfig {
   requirePlan: () => boolean
   /** How many times the conversation may be pulled back before it hands over a plan. */
   planPullbacks: () => number
+  /** How many rounds one request may run before the loop stops on its own. */
+  maxRounds: () => number
   /** Whether the rules apply to this conversation. */
   appliesTo: (sessionId: string) => boolean
 }

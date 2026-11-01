@@ -31,6 +31,8 @@ import { buildOverrides } from './concurrency.js'
 import { applyPlanGate, PlanGate } from './gate.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
+import { describeFailure, parseRepair, repairSystem } from './repair.js'
+import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'refine-loop'
@@ -39,7 +41,7 @@ export const name = 'refine-loop'
  * Services this plugin needs: the tool registry, the prompt assembly, and the
  * command registry the per-conversation switch is registered in.
  */
-export const inject = ['tools', 'systemPrompt', 'commands']
+export const inject = ['tools', 'systemPrompt', 'commands', 'llm']
 
 /**
  * The refined loop, as the model should see it.
@@ -168,6 +170,15 @@ export const DEFAULT_REQUIRE_PLAN = true
  * many refusals the turn is left alone.
  */
 export const DEFAULT_PLAN_PULLBACKS = 2
+/**
+ * How many rounds one request may run before the loop stops on its own.
+ *
+ * The loop is the point: a plan runs, and the next round decides what its
+ * results mean. This is the valve that keeps a model that never concludes from
+ * running forever — when it is reached the turn simply ends and the conversation
+ * waits for a person.
+ */
+export const DEFAULT_MAX_ROUNDS = 16
 /** How many times a turn may be pulled back after it handed over its plan. */
 
 /** Plugin config. */
@@ -194,6 +205,8 @@ export interface Config {
   requirePlan: Volatile<boolean>
   /** How many times a step may be pulled back before it is left alone. */
   planPullbacks: Volatile<number>
+  /** How many rounds one request may run before the loop stops on its own. */
+  maxRounds: Volatile<number>
   /** How many times a turn may be pulled back after it handed over its plan. */
 }
 
@@ -209,6 +222,7 @@ export const Config = z.object({
   shellTool: z.string().default(DEFAULT_SHELL_TOOL).volatile(),
   requirePlan: z.boolean().default(DEFAULT_REQUIRE_PLAN).volatile(),
   planPullbacks: z.number().step(0).min(0).default(DEFAULT_PLAN_PULLBACKS).volatile(),
+  maxRounds: z.number().step(1).min(1).default(DEFAULT_MAX_ROUNDS).volatile(),
 })
 
 /**
@@ -258,15 +272,57 @@ export function apply(ctx: Context, config: Config): void {
     maxAgentDepth: () => config.maxAgentDepth.get(),
     agentNodeTimeoutMs: () => config.agentNodeTimeoutMs.get(),
     onPlanStarted: (sessionId, callId) => planGate.markPlanned(sessionId, callId),
+    repair: (config: LlmCallConfig) => (failed, error, signal) => repairFailedCall(ctx, config, failed, error, signal),
   })
 
 
   applyPlanGate(ctx, planGate, {
     requirePlan: () => config.requirePlan.get(),
     planPullbacks: () => config.planPullbacks.get(),
+    maxRounds: () => config.maxRounds.get(),
     appliesTo: (sessionId: string) => policy.appliesTo(sessionId),
   })
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
 }
+
+/**
+ * Ask the conversation's own model what a failed call should have been.
+ *
+ * The plugin owns no provider: the repair runs on the same model the
+ * conversation already uses, so a plan's failure is fixed by the model that
+ * wrote the plan — the call → think → call loop, run once, scoped to the one
+ * call that failed.
+ *
+ * @param ctx - the plugin context supplying the model service.
+ * @param config - the conversation's own call configuration.
+ * @param failed - the call that failed.
+ * @param error - what the tool said.
+ * @param signal - the plan's cancellation signal.
+ * @returns the corrected call, or undefined when there is nothing usable.
+ */
+async function repairFailedCall(
+  ctx: Context,
+  config: LlmCallConfig,
+  failed: { name: string, arguments: unknown },
+  error: string,
+  signal: AbortSignal,
+): Promise<{ name: string, arguments: unknown } | undefined> {
+  const reply = await ctx.llm.stream({
+    provider: config.provider,
+    model: config.model,
+    system: repairSystem(),
+    messages: [{
+      role: 'user',
+      content: [{ type: 'text', text: describeFailure(failed, error) }],
+    }],
+    signal,
+  })
+  let text = ''
+  for await (const chunk of reply) {
+    if (chunk.type === 'text-delta') text += chunk.text
+  }
+  return parseRepair(text, failed.name)
+}
+

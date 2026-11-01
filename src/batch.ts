@@ -166,13 +166,40 @@ export interface BatchRunner {
 }
 
 /**
+ * Ask the model what a failed call should have been.
+ *
+ * @param failed - the call as the plan wrote it.
+ * @param error - what the tool said.
+ * @param signal - the plan's cancellation signal.
+ * @returns the corrected call, or undefined when the model gave no usable one.
+ */
+export type RepairCall = (
+  failed: { name: string, arguments: unknown },
+  error: string,
+  signal: AbortSignal,
+) => Promise<{ name: string, arguments: unknown } | undefined>
+
+/**
+ * How many times one failed call may be repaired.
+ */
+export const MAX_REPAIRS = 2
+
+/**
  * Run one call of a batch and describe what it produced.
+ *
+ * A plan is written before anything has run, so its calls are guesses. The plan
+ * is one round trip and the turn ends when it has run, so a call that fails
+ * inside it is repaired here: call the tool, read the error, ask the model what
+ * the call should have been, call the tool again with that. Only the failing
+ * call goes to the model; the rest of the plan is untouched.
  *
  * @param runner - the tool registry the call runs through.
  * @param call - the call to run.
  * @param agent - the agent the batch belongs to.
  * @param signal - the abort signal of the batch.
  * @param scheduled - how the call was scheduled.
+ * @param rootCallId - the call the plan itself runs under.
+ * @param repair - how a failed call is repaired, when it may be.
  * @returns the item result.
  */
 async function runOne(
@@ -182,30 +209,42 @@ async function runOne(
   signal: AbortSignal,
   scheduled: BatchSchedule,
   rootCallId: ToolCallId,
+  repair: RepairCall | undefined,
 ): Promise<BatchItemResult> {
-  try {
-    const result = await runner.execute({
-      callId: nextCallId(),
-      rootCallId,
-      name: call.name,
-      arguments: call.arguments,
-      ...(agent === undefined ? {} : { agent }),
-      signal,
-    })
-    const output = contentToText(result.content, result.value)
-    if (result.isError) {
-      return {
-        name: call.name,
-        ok: false,
-        scheduled,
-        output,
-        error: result.error?.message ?? 'the call failed',
+  let name = call.name
+  let args = call.arguments
+  const tries = repair === undefined ? 1 : MAX_REPAIRS + 1
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    let output = ''
+    let error = 'the call failed'
+    try {
+      const result = await runner.execute({
+        callId: nextCallId(),
+        rootCallId,
+        name,
+        arguments: args,
+        ...(agent === undefined ? {} : { agent }),
+        signal,
+      })
+      output = contentToText(result.content, result.value)
+      if (!result.isError) {
+        return { name: call.name, ok: true, scheduled, output, error: '' }
       }
+      error = result.error?.message ?? 'the call failed'
+    } catch (caught: unknown) {
+      error = errorMessage(caught)
     }
-    return { name: call.name, ok: true, scheduled, output, error: '' }
-  } catch (error: unknown) {
-    return { name: call.name, ok: false, scheduled, output: '', error: errorMessage(error) }
+    if (repair === undefined || attempt === tries - 1) {
+      return { name: call.name, ok: false, scheduled, output, error }
+    }
+    const fixed = await repair({ name, arguments: args }, error, signal)
+    if (fixed === undefined) {
+      return { name: call.name, ok: false, scheduled, output, error }
+    }
+    name = fixed.name
+    args = fixed.arguments
   }
+  return { name: call.name, ok: false, scheduled, output: '', error: 'the call failed' }
 }
 
 /**
@@ -233,6 +272,7 @@ export async function runBatch(
   respectConcurrencySafety: boolean,
   rootCallId: ToolCallId,
   overrides: Readonly<Record<string, ConcurrencyOverride>> = {},
+  repair?: RepairCall,
 ): Promise<BatchOutput> {
   const calls = args.calls
   const results: BatchItemResult[] = new Array(calls.length)
@@ -266,14 +306,14 @@ export async function runBatch(
       await Promise.all(wave.indexes.map(async (index) => {
         const call = calls[index]
         if (call === undefined) return
-        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId)
+        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId, repair)
       }))
       continue
     }
     for (const index of wave.indexes) {
       const call = calls[index]
       if (call === undefined) continue
-      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId)
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair)
     }
   }
 

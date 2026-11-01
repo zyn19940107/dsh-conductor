@@ -18,6 +18,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { defineTool, type ToolExecution } from '@deepseek-ai/dsh-tools'
 import {
   renderBatch,
@@ -25,6 +26,7 @@ import {
   type BatchArgs,
   type BatchOutput,
   type BatchRunner,
+  type RepairCall,
 } from './batch.js'
 import { mayRunTogether, type ConcurrencyOverride } from './concurrency.js'
 import {
@@ -187,6 +189,7 @@ async function runNode(
   overrides: Readonly<Record<string, ConcurrencyOverride>>,
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
+  repair: RepairCall | undefined,
 ): Promise<PlanNodeResult> {
   if (node.kind === 'tools') {
     const calls = node.calls.map(call => ({
@@ -201,6 +204,7 @@ async function runNode(
       respectConcurrencySafety,
       rootCallId,
       overrides,
+      repair,
     )
     const failed = batch.results.filter(item => !item.ok)
     return {
@@ -297,6 +301,7 @@ export async function runPlan(
   overrides: Readonly<Record<string, ConcurrencyOverride>>,
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
+  repair?: RepairCall,
 ): Promise<PlanOutput> {
   const built = buildWaves(plan.nodes)
   if ('error' in built) {
@@ -321,6 +326,7 @@ export async function runPlan(
       overrides,
       maxAgentDepth,
       agentNodeTimeoutMs,
+      repair,
     )))
     for (const result of settled) {
       results.set(result.id, result)
@@ -389,6 +395,8 @@ export function applyPlanTool(
     agentNodeTimeoutMs: () => number
     /** Told when a plan starts running, so a rule can know the turn handed its plan over. */
     onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
+    /** Build the repair for one conversation, from its own call configuration. */
+    repair?: (config: LlmCallConfig) => RepairCall
   },
 ): void {
   ctx.tools.register(defineTool({
@@ -500,6 +508,12 @@ export function applyPlanTool(
       }
       const agent: Agent | undefined = exec.agent
       if (agent !== undefined) options.onPlanStarted?.(agent.session.id, exec.callId)
+      // A failed call is repaired on the conversation's own route: the latest
+      // request header carries the call configuration the conversation is on.
+      const ownConfig = agent?.session.requestHeader()?.config
+      const repair = options.repair === undefined || ownConfig === undefined
+        ? undefined
+        : options.repair(ownConfig)
       return await runPlan(
         ctx.tools,
         parsed,
@@ -510,6 +524,7 @@ export function applyPlanTool(
         options.overrides(),
         options.maxAgentDepth(),
         options.agentNodeTimeoutMs(),
+        repair,
       )
     },
   }))
