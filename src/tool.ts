@@ -33,6 +33,7 @@ import {
   AGENT_NODE_KINDS,
   buildWaves,
   dependenciesOf,
+  parseNextSlice,
   parsePlanArgs,
   substitutePlaceholders,
   type PlanArgs,
@@ -404,18 +405,24 @@ export function applyPlanTool(
      * round and the turn must end so that round can start.
      */
     onPlanFinished?: (agent: Agent) => boolean
+    /** Ask the conversation's own model a question, and get its text back. */
+    ask?: AskModel
+    /** How many times one plan may ask for another slice. */
+    maxSlices: () => number
   },
 ): void {
   ctx.tools.register(defineTool({
     name: PLAN_TOOL,
     timeoutMs: options.timeoutMs(),
-    description: 'Run one plan of work and return every result together. A turn is one plan: this call carries '
-      + 'the whole shape of the turn — the observable criteria that decide whether it succeeded, and the nodes '
-      + 'it is made of. A node is one of three kinds — "tools" (several calls that run together), "subagent" (a '
-      + 'self-contained task for a child that starts with no context)'
-      + 'that inherits this conversation) — and a node may name the nodes it depends on, so the ones that '
-      + 'depend on nothing run together and the next layer waits for them. Choose "subagent" for a task that '
-      + 'needs nothing from this conversation.',
+    description: 'Run one plan of work and return every result together. A turn is one plan: this call '
+      + 'carries the whole shape of the turn — the observable criteria that decide whether it succeeded, and '
+      + 'the nodes it is made of. A node is one of two kinds — "tools" (several calls that run together) or '
+      + '"subagent" (a self-contained task for a child that starts with no context) — and a node may name the '
+      + 'nodes it depends on, so the ones that depend on nothing run together and the next layer waits for '
+      + 'them. Choose "subagent" for work that has to look at a result before it knows the next call, such as '
+      + 'searching, tracing, or auditing something you cannot name in advance. Set "more": true when even the '
+      + 'nodes themselves depend on what comes back: the plan then runs, shows you those results, and asks you '
+      + 'for the next slice. Without it the plan is one shot — every call in it is fixed before anything runs.',
     parameters: {
       criteria: {
         type: 'array',
@@ -423,6 +430,12 @@ export function applyPlanTool(
         required: true,
         description: 'The observable criteria that decide whether this plan succeeded. Each one is something '
           + 'you could check against the results.',
+      },
+      more: {
+        type: 'boolean',
+        description: 'Set true when these nodes are only the first slice: when they have run, you are asked '
+          + 'for the next slice with their results in hand. Use it when the next call depends on a result you '
+          + 'do not have yet — a line number a grep will find, a file name a glob will return.',
       },
       nodes: {
         type: 'array',
@@ -521,7 +534,7 @@ export function applyPlanTool(
       const repair = options.repair === undefined || ownConfig === undefined
         ? undefined
         : options.repair(ownConfig)
-      const output = await runPlan(
+      let output = await runPlan(
         ctx.tools,
         parsed,
         agent,
@@ -533,6 +546,33 @@ export function applyPlanTool(
         options.agentNodeTimeoutMs(),
         repair,
       )
+      // The plan asked to be continued: its nodes were the first slice. Show the
+      // model what came back and ask for the next slice, the same way a failed
+      // call is repaired — that is how a serial chain whose next call depends on
+      // a result stays inside one plan instead of costing another turn.
+      if (parsed.more && ownConfig !== undefined && options.ask !== undefined) {
+        const ask = options.ask(ownConfig)
+        const nodes = [...output.nodes]
+        for (let slice = 0; slice < options.maxSlices(); slice += 1) {
+          const reply = await ask({ system: MORE_SYSTEM, prompt: continuePrompt(parsed.criteria, nodes) }, exec.signal)
+          const next = parseNextSlice(reply, parsed.criteria)
+          if (next.done) break
+          const more = await runPlan(
+            ctx.tools,
+            next.plan,
+            agent,
+            exec.signal,
+            options.respectConcurrencySafety(),
+            exec.callId,
+            options.overrides(),
+            options.maxAgentDepth(),
+            options.agentNodeTimeoutMs(),
+            repair,
+          )
+          nodes.push(...more.nodes)
+          output = { ...output, nodes }
+        }
+      }
       // The plan has run. If the loop has a round left, the next one is already
       // queued; ending this turn is what lets the harness open it.
       if (agent !== undefined && options.onPlanFinished?.(agent) === true) {
@@ -547,3 +587,46 @@ export function applyPlanTool(
  * The kinds of node that start an agent.
  */
 export { AGENT_NODE_KINDS, mayRunTogether }
+
+/**
+ * Ask the conversation's own model one question and read its answer.
+ *
+ * @param request - the system text and the question.
+ * @param signal - the plan's cancellation signal.
+ * @returns what the model said.
+ */
+export type Ask = (request: { system: string, prompt: string }, signal: AbortSignal) => Promise<string>
+
+/**
+ * Build the asker for one conversation, from its own call configuration.
+ */
+export type AskModel = (config: LlmCallConfig) => Ask
+
+const MORE_SYSTEM = [
+  'You are continuing a plan that asked to be continued after its first slice.',
+  'You get the criteria and what each node of the plan has produced so far.',
+  'Reply with exactly one JSON object and nothing else:',
+  '{"nodes": [ ...nodes for the next slice... ], "more": true|false}',
+  'or {"done": true} when the criteria are met and nothing is left.',
+  'A node is {"id","kind":"tools"|"subagent","calls":[...]|"task":...}.',
+  'Node ids must be new. Use what the earlier nodes produced: a call argument can be',
+  'the whole output of an earlier node as "@@nodeId@@".',
+].join('\n')
+
+/**
+ * Describe what the plan has produced so far, for the model that continues it.
+ *
+ * @param criteria - the plan's criteria.
+ * @param nodes - every node that has run.
+ * @returns the text of the question.
+ */
+function continuePrompt(criteria: readonly string[], nodes: readonly PlanNodeResult[]): string {
+  const lines = ['Criteria:', ...criteria.map(criterion => `- ${criterion}`), '', 'What has run so far:']
+  for (const node of nodes) {
+    lines.push('', `${node.id} (${node.kind}) — ${node.ok ? 'ok' : 'failed'}`)
+    if (node.error !== '') lines.push(`  error: ${node.error}`)
+    const output = node.output.length > 1500 ? `${node.output.slice(0, 1500)}\n… (truncated)` : node.output
+    if (output !== '') lines.push(...output.split('\n').map(line => `  | ${line}`))
+  }
+  return lines.join(String.fromCharCode(10))
+}

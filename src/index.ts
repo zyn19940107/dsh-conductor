@@ -181,6 +181,14 @@ export const DEFAULT_PLAN_PULLBACKS = 2
  * waits for a person.
  */
 export const DEFAULT_MAX_ROUNDS = 16
+/**
+ * How many times one plan may ask the model for another slice.
+ *
+ * A plan that says `more` is continued: the plugin shows the model what its
+ * nodes produced and asks what the next slice is. This bounds that loop the same
+ * way {@link DEFAULT_MAX_ROUNDS} bounds the round loop.
+ */
+export const DEFAULT_MAX_SLICES = 4
 /** How many times a turn may be pulled back after it handed over its plan. */
 
 /** Plugin config. */
@@ -209,6 +217,8 @@ export interface Config {
   planPullbacks: Volatile<number>
   /** How many rounds one request may run before the loop stops on its own. */
   maxRounds: Volatile<number>
+  /** How many times one plan may ask for another slice. */
+  maxSlices: Volatile<number>
   /** How many times a turn may be pulled back after it handed over its plan. */
 }
 
@@ -225,6 +235,7 @@ export const Config = z.object({
   requirePlan: z.boolean().default(DEFAULT_REQUIRE_PLAN).volatile(),
   planPullbacks: z.number().step(0).min(0).default(DEFAULT_PLAN_PULLBACKS).volatile(),
   maxRounds: z.number().step(1).min(1).default(DEFAULT_MAX_ROUNDS).volatile(),
+  maxSlices: z.number().step(0).min(0).default(DEFAULT_MAX_SLICES).volatile(),
 })
 
 /**
@@ -288,6 +299,9 @@ export function apply(ctx: Context, config: Config): void {
       return true
     },
     repair: (config: LlmCallConfig) => (failed, error, signal) => repairFailedCall(ctx, config, failed, error, signal),
+    maxSlices: () => config.maxSlices.get(),
+    ask: (callConfig: LlmCallConfig) => (request, signal) =>
+      askModel(ctx, callConfig, request.system, request.prompt, signal),
   })
 
 
@@ -300,6 +314,41 @@ export function apply(ctx: Context, config: Config): void {
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
+}
+
+/**
+ * Ask the conversation's own model one question and read its answer.
+ *
+ * The plugin owns no provider: this goes through the same route the
+ * conversation is already on, which is what lets a plan continue itself — the
+ * model that wrote the plan is the model that says what the next slice is.
+ *
+ * @param ctx - the plugin context supplying the model service.
+ * @param config - the conversation's call configuration.
+ * @param system - the instruction for this question.
+ * @param prompt - the question itself.
+ * @param signal - the cancellation signal of the plan.
+ * @returns what the model said.
+ */
+async function askModel(
+  ctx: Context,
+  config: LlmCallConfig,
+  system: string,
+  prompt: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const stream = ctx.llm.stream({
+    provider: config.provider,
+    model: config.model,
+    system,
+    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+    signal,
+  })
+  let text = ''
+  for await (const chunk of stream) {
+    if (chunk.type === 'text-delta') text += chunk.text
+  }
+  return text
 }
 
 /**
