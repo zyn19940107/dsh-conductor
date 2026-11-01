@@ -12,6 +12,13 @@
  * survives being published.
  */
 
+import { DISCOVERY, FANOUT, MULTIHOP } from './scenarios.mjs'
+
+/**
+ * The scenario tasks that say where the plugin helps and where it does not.
+ */
+const SCENARIOS = { discovery: DISCOVERY, fanout: FANOUT, multihop: MULTIHOP }
+
 /**
  * The plugin health check: independent lookups, one synthesis.
  *
@@ -94,7 +101,7 @@ export const REVIEW = {
 /**
  * Every task, keyed by the name the runner takes.
  */
-export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW }
+export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS }
 
 /**
  * Build a criterion checker from a list of requirements.

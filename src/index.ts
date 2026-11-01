@@ -89,19 +89,18 @@ export const REFINE_GUIDANCE = [
 /**
  * The refined loop, as a delegated child should see it.
  *
- * A child is where the ordinary chain belongs: it looks at a result, then
- * decides the next call. The rule does not hold it, and the guidance has to say
- * so — a child told "you may not call tools yourself" while nothing stops it is
- * a child working against its own instructions.
+ * A child's turn is one plan too — that is what batches its calls and keeps its
+ * context from being re-sent step after step — but the plan should be small: the
+ * parent already decided what the child is for.
  */
 export const CHILD_GUIDANCE = [
   'Refined loop, as a delegated child:',
-  `- You may call tools directly. That is the normal way to work here: run a call, look at the result, then `
-  + 'decide the next one.',
-  '- Read what the task points at, and read it in slices: what you pull into a result is re-sent on every '
-  + 'later step, so dumping whole files in is the fastest way to make yourself slow.',
-  `- ${PLAN_TOOL} is available when you already know every call you need: it runs them in one round trip and `
-  + 'returns every result together. It is optional.',
+  `- Hand your calls over in one ${PLAN_TOOL} call. It runs them together and returns every result at once, `
+  + 'which is what keeps your own context from being sent again on every step.',
+  '- Keep the plan small: this task is one thing the parent already decided. Do not survey anything wider '
+  + 'than the task says.',
+  '- Put what you need into the calls themselves — exact paths, exact patterns. A plan is written before '
+  + 'anything runs, so a guess becomes an empty result.',
   '- Your plan may not start another agent — you are already the delegated child.',
 ].join(String.fromCharCode(10))
 

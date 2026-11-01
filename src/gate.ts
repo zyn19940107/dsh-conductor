@@ -173,12 +173,15 @@ export function planRefusal(
   // A conversation that opted out is left alone.
   if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
-  // A delegated child is an executor, not a planner. Its task is one thing the
-  // parent already decided; making it write its own plan buys a second round of
-  // thinking the parent already paid for, and measured 2-8 seconds per plan on
-  // tasks that take the parent twenty seconds end to end. It may still hand
-  // over a plan when it already knows every call, but it is not required to.
-  if (delegationDepth > 0) return undefined
+  // A child is a turn too, and a turn is one plan.
+  //
+  // Both ways were measured. Leaving a child free to take one step per call is
+  // cheaper for a small task (chain: 73s → 46s) and catastrophic for a large
+  // one: a child given a real survey walked 14 steps and cost 1.2M tokens, and a
+  // review's children walked 75 steps between them and cost 4.1M — every step
+  // re-sends the history the earlier steps left behind. A plan batches the
+  // child's calls, which is exactly what bounds that.
+  void delegationDepth
   // The plan is how the work is handed over.
   if (toolName === PLAN_TOOL) return undefined
   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined
