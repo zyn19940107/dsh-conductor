@@ -77,9 +77,47 @@ export const REFINE_GUIDANCE = [
   + 'the path is spelled out.',
   '- The plan runs in one round trip and every result comes back together. A result may be too long to '
   + 'fit and be left out of what you see — the rest is in the spill file, and the next plan can read it.',
+  '- A child starts with nothing: it does not see this conversation, and it cannot see what you already '
+  + 'found. Put that into its task — the exact files, the line numbers your grep already returned, the shape '
+  + 'of answer you want back. A child told to survey a directory discovers everything from scratch and reads '
+  + 'the whole thing; a child told "these two files, these lines, answer in this shape" costs a fraction of '
+  + 'that. The information you already have is the cheapest thing you can give it.',
   'These are the rules for the refined loop. Do not go looking for them elsewhere — the tool is already in '
   + 'your tool table and the rules are already here.',
 ].join('\n')
+
+/**
+ * The refined loop, as a delegated child should see it.
+ *
+ * A child is where the ordinary chain belongs: it looks at a result, then
+ * decides the next call. The rule does not hold it, and the guidance has to say
+ * so — a child told "you may not call tools yourself" while nothing stops it is
+ * a child working against its own instructions.
+ */
+export const CHILD_GUIDANCE = [
+  'Refined loop, as a delegated child:',
+  `- You may call tools directly. That is the normal way to work here: run a call, look at the result, then `
+  + 'decide the next one.',
+  '- Read what the task points at, and read it in slices: what you pull into a result is re-sent on every '
+  + 'later step, so dumping whole files in is the fastest way to make yourself slow.',
+  `- ${PLAN_TOOL} is available when you already know every call you need: it runs them in one round trip and `
+  + 'returns every result together. It is optional.',
+  '- Your plan may not start another agent — you are already the delegated child.',
+].join(String.fromCharCode(10))
+
+/**
+ * Whether a rendering scope belongs to a delegated child.
+ *
+ * The agent is its own scope key, so the depth in its session header says
+ * whether this prompt is being rendered for a child.
+ *
+ * @param scope - the scope the system prompt is being rendered for.
+ * @returns true when that scope is a delegated child.
+ */
+function isDelegatedChild(scope: unknown): boolean {
+  const header = (scope as { session?: { header?: { delegationDepth?: number } } } | undefined)?.session?.header
+  return (header?.delegationDepth ?? 0) > 0
+}
 
 /**
  * Whether the plugin is mounted at all.
@@ -270,7 +308,7 @@ export function apply(ctx: Context, config: Config): void {
     // takes the guidance out of the system prompt.
     text: ({ scope }) => {
       if (ctx.tools.get(PLAN_TOOL, scope) === undefined) return ''
-      return REFINE_GUIDANCE
+      return isDelegatedChild(scope) ? CHILD_GUIDANCE : REFINE_GUIDANCE
     },
   })
 

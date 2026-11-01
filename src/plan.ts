@@ -82,6 +82,15 @@ export type PlanWaves =
 const PLACEHOLDER = /^@@([^@]+)@@$/u
 
 /**
+ * A placeholder anywhere inside a string.
+ *
+ * The anchored form above replaces a whole argument; this one lets a plan paste
+ * a result into a sentence — which is how a child gets the facts it needs
+ * instead of being told to go and find them again.
+ */
+const INLINE_PLACEHOLDER = /@@([^@\n]+)@@/gu
+
+/**
  * Read the plan out of a tool call.
  *
  * A call that carries no plan is refused: a plan without criteria, without
@@ -206,8 +215,10 @@ export function collectPlaceholders(value: unknown): string[] {
   const found: string[] = []
   const walk = (entry: unknown): void => {
     if (typeof entry === 'string') {
-      const match = PLACEHOLDER.exec(entry)
-      if (match !== null && !found.includes(match[1]!)) found.push(match[1]!)
+      for (const match of entry.matchAll(INLINE_PLACEHOLDER)) {
+        const id = match[1]!
+        if (!found.includes(id)) found.push(id)
+      }
       return
     }
     if (Array.isArray(entry)) {
@@ -318,14 +329,25 @@ export function dependenciesOf(
  */
 export function substitutePlaceholders(value: unknown, outputs: ReadonlyMap<string, string>): unknown {
   if (typeof value === 'string') {
-    const match = PLACEHOLDER.exec(value)
-    if (match === null) return value
-    const id = match[1]!
-    const output = outputs.get(id)
-    if (output === undefined) {
-      throw new Error(`the argument refers to the output of "${id}", and that node has not produced one`)
+    const exact = PLACEHOLDER.exec(value)
+    if (exact !== null) {
+      const id = exact[1]!
+      const output = outputs.get(id)
+      if (output === undefined) {
+        throw new Error(`the argument refers to the output of "${id}", and that node has not produced one`)
+      }
+      return output
     }
-    return output
+    if (!value.includes('@@')) return value
+    // A placeholder inside a sentence: paste the result where it stands, so a
+    // child can be given the facts instead of being sent to find them.
+    return value.replace(INLINE_PLACEHOLDER, (whole, id: string) => {
+      const output = outputs.get(id)
+      if (output === undefined) {
+        throw new Error(`the argument refers to the output of "${id}", and that node has not produced one`)
+      }
+      return output
+    })
   }
   if (Array.isArray(value)) {
     return value.map(entry => substitutePlaceholders(entry, outputs))

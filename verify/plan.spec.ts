@@ -144,7 +144,8 @@ console.log('substitutePlaceholders')
 {
   const outputs = new Map([['read', 'the file list']])
   check('replaces an exact placeholder', substitutePlaceholders('@@read@@', outputs) === 'the file list')
-  check('leaves an inline placeholder alone', substitutePlaceholders('x @@read@@ y', outputs) === 'x @@read@@ y')
+  check('pastes an inline placeholder where it stands',
+    substitutePlaceholders('x @@read@@ y', outputs) === 'x the file list y')
   check('replaces inside an object',
     JSON.stringify(substitutePlaceholders({ pattern: '@@read@@' }, outputs)) === '{"pattern":"the file list"}')
   check('replaces inside an array',
