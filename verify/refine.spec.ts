@@ -71,7 +71,7 @@ console.log('renderBatch')
   check('names the criteria', text.includes('the file exists'))
   check('names every item', text.includes('read') && text.includes('glob'))
   check('carries the failure', text.includes('it failed'))
-  check('asks for a short answer', text.includes('keep it short'))
+  check('does not ask for a conclusion', !text.includes('conclusion'))
 }
 
 if (failures > 0) {

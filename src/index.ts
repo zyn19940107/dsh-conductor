@@ -54,9 +54,7 @@ export const REFINE_GUIDANCE = [
   '- Draw the plan in your reasoning before you act: the shape of this turn — which items are '
   + 'independent, which need a child with no context, which need a child that inherits this conversation, '
   + 'and what depends on what. Then hand that shape over in one refine_plan call. A turn is one plan: give '
-  + 'the plan, run it, read the results, write the conclusion. One plan per turn: never hand over a second '
-  + 'one — what the plan did not settle belongs to the '
-  + 'next round — say so in the conclusion, and the next round draws the next plan.',
+  + 'the plan, run it, and the turn is over: the results it produced are what this turn produced.',
   '- A node is one of three kinds. "tools": calls that run together. "subagent": a self-contained task for '
   + 'a child that starts with no context — use it when the task needs nothing from this conversation, such '
   + 'as researching a topic, auditing a file, or doing a scoped piece of work. "subagent_fork": a task for '
@@ -69,12 +67,8 @@ export const REFINE_GUIDANCE = [
   '- Write the tool calls of a node with absolute paths. A plan is written before anything has run, so a '
   + 'relative path is a guess: the same call that returns nothing when guessed can return everything when '
   + 'the path is spelled out.',
-  '- The plan runs in one round trip and every result comes back together, so you write the conclusion of '
-  + 'all of them in one reply. A result may be too long to fit and be left out of what you see — that is not '
-  + 'a reason to go on working: name what was left out in the conclusion, and the next round reads it.',
-  '- Keep that conclusion short: what the results settle, what they do not settle, what the next round picks '
-  + 'up. Do not restate the results — the next round reads them. A result too long to fit is in the spill '
-  + 'file; say which node and which lines the next round needs.',
+  '- The plan runs in one round trip and every result comes back together. That result is the turn: the '
+  + 'next round starts from it.',
   'These are the rules for the refined loop. Do not go looking for them elsewhere — the tool is already in '
   + 'your tool table and the rules are already here.',
 ].join('\n')

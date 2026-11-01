@@ -209,8 +209,7 @@ console.log('runPlan')
 
   const text = renderPlan(output)
   check('the render names every node', text.includes('read') && text.includes('judge') && text.includes('fresh'))
-  check('the render asks for a short answer', text.includes('keep it short'))
-  check('the render says not to restate the results', text.includes('Do not restate the results'))
+  check('the render says the turn is over', text.includes('Every result is above. The turn is over.'))
 }
 
 console.log('a plan may not start an agent from inside a child')

@@ -197,8 +197,16 @@ export function applyPlanGate(
   config: PlanGateConfig,
 ): void {  ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
-    if (decision.kind === 'enter' && payload.step === 1) {
-      gate.reset(payload.agent.session.id)
+    if (decision.kind !== 'enter') return decision
+    const sessionId = payload.agent.session.id
+    if (payload.step === 1) {
+      gate.reset(sessionId)
+      return decision
+    }
+    // The plan ran: this turn is over. The results it produced are the turn's
+    // answer, and the next round starts from them.
+    if (gate.hasPlanned(sessionId)) {
+      return { kind: 'reject' }
     }
     return decision
   })
