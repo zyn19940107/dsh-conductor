@@ -158,6 +158,7 @@ export function isModelCall(execution: { readonly callId: ToolCallId, readonly r
  * @param appliesTo - whether the rules apply to this conversation.
  * @param requirePlan - whether tool calls have to go inside a plan.
  * @param planPullbacks - how many times the conversation may be pulled back.
+ * @param delegationDepth - how deep the calling agent is; a delegated child is 1.
  * @returns the refusal reason, or undefined when the call may run.
  */
 export function planRefusal(
@@ -167,10 +168,16 @@ export function planRefusal(
   appliesTo: (sessionId: string) => boolean,
   requirePlan: boolean,
   planPullbacks: number,
+  delegationDepth = 0,
 ): string | undefined {
   // A conversation that opted out is left alone.
   if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
+  // A delegated child works the ordinary way: it looks at a result and decides
+  // the next call. That is the chain itself, and forcing a plan on it is what
+  // makes a child write calls it cannot know yet — a grep's line numbers, the
+  // files a glob will find.
+  if (delegationDepth > 0) return undefined
   // The plan is how the work is handed over.
   if (toolName === PLAN_TOOL) return undefined
   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined
@@ -222,6 +229,7 @@ export function applyPlanGate(
       config.appliesTo,
       config.requirePlan(),
       config.planPullbacks(),
+      agent.session.header.delegationDepth ?? 0,
     )
   })
 }
