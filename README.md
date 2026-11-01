@@ -148,6 +148,19 @@ review  on  3:122.0s agents=4 tokens=1659346 mainCtx=41885 correct=4/4 plan=y/3
 
 这是那次跑出来的真实计划（完整 JSON 在 [`docs/example-plan.json`](docs/example-plan.json)）：
 
+```mermaid
+graph TD
+  local["local<br/>tools"]
+  gh_repo["gh-repo<br/>subagent"]
+  npm_plugins["npm-plugins<br/>subagent"]
+  gh_articles["gh-articles<br/>subagent"]
+  brief["brief<br/>subagent_fork"]
+  local --> brief
+  gh_repo --> brief
+  npm_plugins --> brief
+  gh_articles --> brief
+```
+
 | 节点 | 类型 | 依赖 | 干什么 |
 |---|---|---|---|
 | `local` | `tools` | — | 读本地安装，补准确的包名（2 个 `ops_bash`） |
