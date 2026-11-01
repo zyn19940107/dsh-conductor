@@ -51,10 +51,11 @@ export const REFINE_GUIDANCE = [
   'Refined loop:',
   `- ${PLAN_TOOL}: one call that carries the whole shape of the turn and returns every result together. `
   + 'Give it the observable criteria that decide whether it succeeded, and the nodes it is made of.',
-  '- Draw the plan in your reasoning before you act: the shape of the whole turn — which items are '
+  '- Draw the plan in your reasoning before you act: the shape of this turn — which items are '
   + 'independent, which need a child with no context, which need a child that inherits this conversation, '
-  + 'and what depends on what. Then hand that shape over in one refine_plan call. A turn cannot start any '
-  + 'other way: the first call of a turn is the plan.',
+  + 'and what depends on what. Then hand that shape over in one refine_plan call. A turn is one plan: give '
+  + 'the plan, run it, read the results, write the conclusion. What the plan did not settle belongs to the '
+  + 'next round — say so in the conclusion, and the next round draws the next plan.',
   '- A node is one of three kinds. "tools": calls that run together. "subagent": a self-contained task for '
   + 'a child that starts with no context — use it when the task needs nothing from this conversation, such '
   + 'as researching a topic, auditing a file, or doing a scoped piece of work. "subagent_fork": a task for '
@@ -64,8 +65,12 @@ export const REFINE_GUIDANCE = [
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',
+  '- Write the tool calls of a node with absolute paths. A plan is written before anything has run, so a '
+  + 'relative path is a guess: the same call that returns nothing when guessed can return everything when '
+  + 'the path is spelled out.',
   '- The plan runs in one round trip and every result comes back together, so you write the conclusion of '
-  + 'all of them in one reply. If you need more work after it, draw another plan.',
+  + 'all of them in one reply. A result may be too long to fit and be left out of what you see — that is not '
+  + 'a reason to go on working: name what was left out in the conclusion, and the next round reads it.',
   'These are the rules for the refined loop. Do not go looking for them elsewhere — the tool is already in '
   + 'your tool table and the rules are already here.',
 ].join('\n')
@@ -161,6 +166,8 @@ export const DEFAULT_REQUIRE_PLAN = true
  * many refusals the turn is left alone.
  */
 export const DEFAULT_PLAN_PULLBACKS = 2
+/** How many times a turn may be pulled back after it handed over its plan. */
+export const DEFAULT_CONCLUSION_PULLBACKS = 10
 
 /** Plugin config. */
 export interface Config {
@@ -182,10 +189,12 @@ export interface Config {
   concurrentShell: Volatile<boolean>
   /** The shell tool the read-only rule applies to. */
   shellTool: Volatile<string>
-  /** Whether a turn has to open with a plan. */
+  /** Whether every step has to be one plan. */
   requirePlan: Volatile<boolean>
-  /** How many times a turn may be pulled back before it is left alone. */
+  /** How many times a step may be pulled back before it is left alone. */
   planPullbacks: Volatile<number>
+  /** How many times a turn may be pulled back after it handed over its plan. */
+  conclusionPullbacks: Volatile<number>
 }
 
 export const Config = z.object({
@@ -200,6 +209,7 @@ export const Config = z.object({
   shellTool: z.string().default(DEFAULT_SHELL_TOOL).volatile(),
   requirePlan: z.boolean().default(DEFAULT_REQUIRE_PLAN).volatile(),
   planPullbacks: z.number().step(0).min(0).default(DEFAULT_PLAN_PULLBACKS).volatile(),
+  conclusionPullbacks: z.number().step(0).min(0).default(DEFAULT_CONCLUSION_PULLBACKS).volatile(),
 })
 
 /**
@@ -248,12 +258,14 @@ export function apply(ctx: Context, config: Config): void {
     ),
     maxAgentDepth: () => config.maxAgentDepth.get(),
     agentNodeTimeoutMs: () => config.agentNodeTimeoutMs.get(),
+    onPlanStarted: (sessionId, callId) => planGate.markPlanned(sessionId, callId),
   })
 
 
   applyPlanGate(ctx, planGate, {
     requirePlan: () => config.requirePlan.get(),
     planPullbacks: () => config.planPullbacks.get(),
+    conclusionPullbacks: () => config.conclusionPullbacks.get(),
   })
 
   applyPolicyCommand(ctx, policy)

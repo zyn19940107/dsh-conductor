@@ -181,10 +181,12 @@ async function runOne(
   agent: Agent | undefined,
   signal: AbortSignal,
   scheduled: BatchSchedule,
+  rootCallId: ToolCallId,
 ): Promise<BatchItemResult> {
   try {
     const result = await runner.execute({
       callId: nextCallId(),
+      rootCallId,
       name: call.name,
       arguments: call.arguments,
       ...(agent === undefined ? {} : { agent }),
@@ -220,6 +222,7 @@ async function runOne(
  * @param agent - the agent the batch belongs to.
  * @param signal - the abort signal of the batch.
  * @param respectConcurrencySafety - whether a tool's own exclusivity is honoured.
+ * @param rootCallId - the call the plan itself runs under.
  * @returns the batch output.
  */
 export async function runBatch(
@@ -228,6 +231,7 @@ export async function runBatch(
   agent: Agent | undefined,
   signal: AbortSignal,
   respectConcurrencySafety: boolean,
+  rootCallId: ToolCallId,
   overrides: Readonly<Record<string, ConcurrencyOverride>> = {},
 ): Promise<BatchOutput> {
   const calls = args.calls
@@ -262,14 +266,14 @@ export async function runBatch(
       await Promise.all(wave.indexes.map(async (index) => {
         const call = calls[index]
         if (call === undefined) return
-        results[index] = await runOne(runner, call, agent, signal, 'concurrent')
+        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId)
       }))
       continue
     }
     for (const index of wave.indexes) {
       const call = calls[index]
       if (call === undefined) continue
-      results[index] = await runOne(runner, call, agent, signal, 'serial')
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId)
     }
   }
 

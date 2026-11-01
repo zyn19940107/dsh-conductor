@@ -1,0 +1,59 @@
+{
+  "task": "survey",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 383420,
+  "sessionId": "session-a36b27fe-71e7-48f7-bdca-4d54841e98eb",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 13,
+  "toolCalls": 21,
+  "tools": [
+    "glob",
+    "glob",
+    "refine_plan",
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "read",
+    "pwsh",
+    "job_kill",
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "pwsh",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 54163,
+    "outputTokens": 9292,
+    "cacheReadTokens": 439663,
+    "totalTokens": 503118
+  },
+  "formation": {
+    "agents": 2,
+    "input": 189258,
+    "output": 29893,
+    "cacheRead": 972844,
+    "total": 1191995,
+    "steps": 22
+  },
+  "mainPrompt": 54378,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 17046,
+  "thinkingPreview": "I need to open with a refine_plan call. Let me design the plan.\n\nThe task: health check of the plugin at D:\\code\\vibe\\dsh-refine-loop, read-only. Answer 5 questions:\n1. how many .ts files in src, and their names\n2. how many .spec.ts files in verify dir, and names\n3. which files contain \"isConcurrencySafe\"\n4. which files contain \"delegationDepth\"\n5. 2-3 sentence architecture evaluation\n\nNodes: independent tool calls — glob for src/*.ts, glob for verify/*.spec.ts, grep for isConcurrencySafe, grep for delegationDepth. Then a final read of some key files to write the architecture assessment (depends on the previous results).\n\nLet me plan:\n- node \"find-files\": tools — glob src/**/*.ts, glob verify/**/*.spec.ts, glob all files\n- node \"grep-symbols\": tools — grep isConcurrencySafe, grep delegationDepth\n- node \"read-architecture\": subagent? Actually for question 5 I need to read the source files",
+  "finalText": "体检完成,全程只读(`glob`/`grep`/`read` + 只读 PowerShell 枚举),**未修改、创建或删除任何文件**。\n\n> 方法说明:`glob` 对本插件的绝对路径解析失败(两种 pattern 均返回 \"No files found\"),清单改用 `Get-ChildItem` 枚举 + `Select-String` 交叉确认。检索时**排除了 `node_modules` 与 `bench/results*/`** —— 后者是历史基准运行记录,里面正好存着本题的任务文本,会把第 3、4 问污染成几十条假命中。\n\n---\n\n## 1. `src/` 下的 .ts —— **7 个**(扁平,无子目录)\n\n| 文件 | 一句话职责 |\n|---|---|\n| `src/index.ts` | Cordis 装配:Config(schemastery,全 `volatile()`)、`REFINE_GUIDANCE` 提示词、4 个子模块接线、`DEFAULT_MAX_AGENT_DEPTH = 1`(:104) |\n| `src/tool.ts` | `refine_plan` 工具本体:参数 schema、节点派发(`tools`/`subagent`/`subagent_fork`)、深度拒绝(:213)、结果渲染 |\n| `src/plan.ts` | 计划数据模型:节点类型、`@@nodeId@@` 占位符、`parsePlanArgs`(:85)、依赖分层与环检测 |\n| `src/batch.ts` | 批内执行 + wave 调度(并发波/独占屏障),只依赖 `BatchRunner` 窄端口 |\n| `src/concurrency.ts` | 并发安全判定:只读命令白名单、自写 shell lexer、`mayRunTogether`(:222) |\n| `src/gate.ts` | 门禁:`PlanGate` + 纯函数 `planRefusal`(:99) |\n| `src/policy.ts` | 会话级开关(`/dsh-refine-loop on/off`) |\n\n排除 `node_modules` 后,整个插件只有 **12 个 .ts**。\n\n## 2. `verify/` 下的 .spec.ts —— **5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n\n同目录另有 3 个 `.mjs` 脚手架(`run-specs.mjs`、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`),**不是 spec**。断言是自研 `check()` 脚本,不是 vitest/jest;`run-specs.mjs` 用 esbuild 打包后每个 spec 单进程跑。\n\n## 3. 出现 `\"isConcurrencySafe\"` 的文件 —— **`.ts` 源码里 0 处**\n\n| 文件 | 命中 | 性质 |\n|---|---|---|\n| `README.md` | 223 / 315 / 320 / 326 | 讲 harness 机制,以及插件为何自己另做一层 |\n| `bench/task.mjs` | 26 / 43 | 基准任务文本与判据 |\n| `bench/results*/survey-*.json` | 各 1–2 处 | 历史基准运行记录(生成物,已排除) |\n\n权威定义全在 harness:`packages/core/tools/src/index.ts:280`(声明)、**`:1303-1312` `executionMode` 是唯一消费点**(`if (!tool?.isConcurrencySafe) return { kind: 'exclusive' }`,只有严格 `=== true` 才 parallel)。插件**从不直接读这个标志**,而是经 `src/batch.ts:243-251` 调 `runner.executionMode(...)` 间接取用,再叠自己那层 `mayRunTogether`。\n\n## 4. 出现 `\"delegationDepth\"` 的文件 —— **7 个**\n\n| 文件 | 行 | 性质 |\n|---|---|---|\n| `src/gate.ts` | 93 / 102 / 111 / 161 | 纯函数入参 + `agent.session.header.delegationDepth ?? 0`(:161) |\n| `src/tool.ts` | 213 | `const depth = agent?.session.header.delegationDepth ?? 0`,`>= maxAgentDepth` 则拒绝再派代理 |\n| `verify/plan.spec.ts` | 222 | 假 Agent 造 header |\n| `bench/task.mjs` | 27 / 44 / 90 | 基准任务文本与判据 |\n| `bench/sessions.mjs` | 117 | 基准会话脚本 |\n| `bench/show-formation.mjs` | 94 | 基准展示脚本 |\n| `bench/results*/survey-*.json` | 多处 | 历史基准运行记录(生成物,已排除) |\n\nharness 侧的权威读取口是 `packages/subagent/subagent/src/depth.ts:28-36` 的 `delegationDepthOf(agent)` = `Math.max(header.delegationDepth ?? 0, runtime subagentDepth ?? 0)`,强制点在 `child-agent.ts:50-56` `resolveChildDepth`。\n\n---\n\n## 5. 架构评价**分层边界清晰、依赖单向**:`plan.ts`(纯模型无 IO)→ `batch.ts`(经 `BatchRunner` 窄端口执行)→ `concurrency.ts`(纯判定)→ `gate.ts`/`policy.ts`(Cordis 扩展点)→ `index.ts`(装配),7 个模块职责单一,spec 与模块近乎 1:1。**但两个跨层契约都不是插件单点定义的,这是主要风险**:`isConcurrencySafe` 由 harness 的 `executionMode` 独家定义并独家消费,插件只间接取用,却在 `src/concurrency.ts:176-180` 又自己复制了一份 `glob`/`grep` 的并发安全覆盖(README:326 承认这是因为 harness 那版改动还没发版);`delegationDepth` 由 harness 的 `delegationDepthOf` 独家定义并强制,插件却在 `tool.ts:213` 与 `gate.ts:161` 直读 `header.delegationDepth`,**丢掉了 `max(header, runtime subagentDepth)` 的单调语义**——只带 runtime 深度恢复出来的子代理会被算成深度 0 而被放行;再加上插件的 `maxAgentDepth`(默认 1)与 harness subagent 的 `maxDepth`(默认 1)是两套独立预算,叠加后实际可达两层嵌套。**次一级的问题是\"文档/注释说一套、代码做另一套\"**:`index.ts:19-21`、`policy.ts:117,164-166`、`cordis.patch.yml:6-7`、`verify/refine.spec.ts:2` 都在讲一条并不存在的 \"chain detector\"(src 里只有 `PlanGate`),`refine.spec.ts` 一半断言压在与运行时脱钩的遗留 `parseBatchArgs`(`batch.ts:83`,唯一消费者就是测试)上,而 5 个 spec 全部用手写 `BatchRunner`/`Agent` 桩而非真实 registry/session 断言——**契约一旦在 harness 侧漂移,这套 verify 不会红**。"
+}

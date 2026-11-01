@@ -183,6 +183,7 @@ async function runNode(
   agent: Agent | undefined,
   signal: AbortSignal,
   respectConcurrencySafety: boolean,
+  rootCallId: ToolCallId,
   overrides: Readonly<Record<string, ConcurrencyOverride>>,
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
@@ -198,6 +199,7 @@ async function runNode(
       agent,
       signal,
       respectConcurrencySafety,
+      rootCallId,
       overrides,
     )
     const failed = batch.results.filter(item => !item.ok)
@@ -231,6 +233,7 @@ async function runNode(
       result = await runWithDeadline(
         () => runner.execute({
           callId: nextPlanCallId(),
+          rootCallId,
           name: node.kind,
           arguments: {
             description: node.id,
@@ -290,6 +293,7 @@ export async function runPlan(
   agent: Agent | undefined,
   signal: AbortSignal,
   respectConcurrencySafety: boolean,
+  rootCallId: ToolCallId,
   overrides: Readonly<Record<string, ConcurrencyOverride>>,
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
@@ -313,6 +317,7 @@ export async function runPlan(
       agent,
       signal,
       respectConcurrencySafety,
+      rootCallId,
       overrides,
       maxAgentDepth,
       agentNodeTimeoutMs,
@@ -382,19 +387,19 @@ export function applyPlanTool(
     maxAgentDepth: () => number
     /** The budget for one agent node, in milliseconds. */
     agentNodeTimeoutMs: () => number
+    /** Told when a plan starts running, so a rule can know the turn handed its plan over. */
+    onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
   },
 ): void {
   ctx.tools.register(defineTool({
     name: PLAN_TOOL,
     timeoutMs: options.timeoutMs(),
-    description: 'Run one plan of work and return every result together. The plan is the whole shape of the '
-      + 'turn: give it the observable criteria that decide whether it succeeded, and the nodes it is made of. '
-      + 'A node is one of three kinds — "tools" (several calls that run together), "subagent" (a '
+    description: 'Run one plan of work and return every result together. A turn is one plan: this call carries '
+      + 'the whole shape of the turn — the observable criteria that decide whether it succeeded, and the nodes '
+      + 'it is made of. A node is one of three kinds — "tools" (several calls that run together), "subagent" (a '
       + 'self-contained task for a child that starts with no context), or "subagent_fork" (a task for a child '
       + 'that inherits this conversation) — and a node may name the nodes it depends on, so the ones that '
-      + 'depend on nothing run together and the next layer waits for them. Use it whenever the turn has more '
-      + 'than one thing to do, or when part of the work belongs to a child agent: one plan costs one round '
-      + 'trip for the whole shape, while a step per item costs one each. Choose "subagent" for a task that '
+      + 'depend on nothing run together and the next layer waits for them. Choose "subagent" for a task that '
       + 'needs nothing from this conversation, and "subagent_fork" for one that builds on what was said here.',
     parameters: {
       criteria: {
@@ -494,12 +499,14 @@ export function applyPlanTool(
           + 'Split it, or narrow it to the nodes that belong together.')
       }
       const agent: Agent | undefined = exec.agent
+      if (agent !== undefined) options.onPlanStarted?.(agent.session.id, exec.callId)
       return await runPlan(
         ctx.tools,
         parsed,
         agent,
         exec.signal,
         options.respectConcurrencySafety(),
+        exec.callId,
         options.overrides(),
         options.maxAgentDepth(),
         options.agentNodeTimeoutMs(),

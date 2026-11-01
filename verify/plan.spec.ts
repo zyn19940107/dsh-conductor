@@ -4,6 +4,7 @@
 
 import { runPlan, renderPlan, type PlanOutput } from '../src/tool.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { BatchRunner } from '../src/batch.js'
 import {
   buildWaves,
@@ -189,6 +190,7 @@ console.log('runPlan')
     undefined,
     new AbortController().signal,
     true,
+    ToolCallId('refine-loop:test:root'),
     {},
     1,
     300000,
@@ -230,6 +232,7 @@ console.log('a plan may not start an agent from inside a child')
     agent,
     new AbortController().signal,
     true,
+    ToolCallId('refine-loop:test:root'),
     {},
     1,
     300000,
@@ -261,6 +264,7 @@ console.log('a node that runs out of time is reported, and the plan carries on')
     undefined,
     new AbortController().signal,
     true,
+    ToolCallId('refine-loop:test:root'),
     {},
     1,
     120,

@@ -1,5 +1,5 @@
 /**
- * The rule that makes a turn open with a plan.
+ * The rule that makes a turn one plan.
  *
  * A plan is only worth having if the agent reaches for it. Left alone, an
  * agent asked to do several independent things tends to take one step per
@@ -7,44 +7,61 @@
  * steps is a round trip to the model, and every one of them re-reads the
  * history the earlier ones left behind.
  *
- * The rule makes the plan the first call of the turn instead of something the
- * agent may or may not reach for. A turn that opens with a plan carries the
- * whole shape of the work — the items that are independent, the tasks that
- * belong to a child agent, and what depends on what — and the plan's results
- * come back together.
+ * The rule gives the turn a shape: the agent hands over one plan, the plan
+ * runs, the results come back together, and the agent writes the conclusion.
+ * What is left over belongs to the next round — the rule does not let the
+ * agent keep working past the plan it already handed over, because that is
+ * how a turn turns back into a chain.
  *
  * The rule is a pullback, not a cage: after a couple of refusals the agent is
  * left alone, because a rule that traps an agent is worse than a rule it
- * ignores. A child agent is never held to the rule — the turn it was handed
- * was already planned.
+ * ignores.
  *
  * @module @zyn19940107/dsh-refine-loop/gate
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import { PLAN_TOOL } from './tool.js'
 
 /**
  * What one conversation's plan state looks like.
  *
- * The state is per conversation: whether the turn has opened with a plan, and
- * how many times the conversation has been pulled back for not doing so.
+ * The state is per conversation: whether the turn has handed over its plan,
+ * and how many times the conversation has been pulled back on each count.
  */
 export class PlanGate {
-  private readonly planned = new Set<string>()
-  private readonly pullbacks = new Map<string, number>()
+  private readonly planned = new Map<string, ToolCallId>()
+  private readonly before = new Map<string, number>()
+  private readonly after = new Map<string, number>()
 
   /**
-   * Record that the conversation opened its turn with a plan.
+   * Record the call the turn handed its plan over with.
+   *
+   * Only the first plan of a turn is recorded: the turn keeps the plan it
+   * started with, so a later plan is a call that wants to keep working.
    *
    * @param sessionId - the session the plan belongs to.
+   * @param callId - the call the plan was handed over with.
    */
-  markPlanned(sessionId: string): void {
-    this.planned.add(sessionId)
+  markPlanned(sessionId: string, callId: ToolCallId): void {
+    if (!this.planned.has(sessionId)) {
+      this.planned.set(sessionId, callId)
+    }
   }
 
   /**
-   * Whether the conversation has opened its turn with a plan.
+   * The call the turn handed its plan over with.
+   *
+   * @param sessionId - the session the plan belongs to.
+   * @returns the call, or undefined when the turn has not handed one over.
+   */
+  planCallId(sessionId: string): ToolCallId | undefined {
+    return this.planned.get(sessionId)
+  }
+
+  /**
+   * Whether the turn has handed over its plan.
    *
    * @param sessionId - the session the plan belongs to.
    * @returns true when a plan was made.
@@ -59,9 +76,21 @@ export class PlanGate {
    * @param sessionId - the session the refusal belongs to.
    * @returns how many refusals the turn has collected.
    */
-  bumpPullback(sessionId: string): number {
-    const count = (this.pullbacks.get(sessionId) ?? 0) + 1
-    this.pullbacks.set(sessionId, count)
+  bumpBefore(sessionId: string): number {
+    const count = (this.before.get(sessionId) ?? 0) + 1
+    this.before.set(sessionId, count)
+    return count
+  }
+
+  /**
+   * Record one refusal to keep working past the turn's plan.
+   *
+   * @param sessionId - the session the refusal belongs to.
+   * @returns how many refusals the turn has collected.
+   */
+  bumpAfter(sessionId: string): number {
+    const count = (this.after.get(sessionId) ?? 0) + 1
+    this.after.set(sessionId, count)
     return count
   }
 
@@ -72,60 +101,91 @@ export class PlanGate {
    */
   reset(sessionId: string): void {
     this.planned.delete(sessionId)
-    this.pullbacks.delete(sessionId)
+    this.before.delete(sessionId)
+    this.after.delete(sessionId)
   }
 }
 
 /**
  * What the agent is told when it tries to act before the turn has a plan.
  */
-export const PLAN_REQUIRED = 'This turn has to open with a plan. Before you call anything else, hand the '
-  + `shape of the turn to ${PLAN_TOOL}: the criteria that decide whether it succeeded, and the nodes — the `
-  + 'calls that run together, the tasks that need a child with no context, the tasks that need a child that '
+export const PLAN_REQUIRED = 'This turn is one plan. Before you call anything else, hand the turn over as a '
+  + `plan with ${PLAN_TOOL}: the criteria that decide whether it succeeded, and the nodes — the calls `
+  + 'that run together, the tasks that need a child with no context, the tasks that need a child that '
   + 'inherits this conversation, and what depends on what. The plan runs in one round trip and returns every '
   + 'result together.'
 
 /**
- * Whether a call may run before the turn has opened with a plan.
+ * What the agent is told when it tries to keep working past the turn's plan.
+ */
+export const PLAN_DONE = 'This turn already handed over its plan, and the plan\'s results are in front of '
+  + 'you. Do not call any tool again in this turn — the turn ends with what the plan produced. Write that '
+  + 'conclusion now: what the plan produced, what it did not settle, and what the next round has to pick up. '
+  + 'The next round draws the next plan.'
+
+/**
+ * Whether a call is the model's own call rather than one a plan made.
+ *
+ * The harness marks a nested call with the root call it runs under, so the
+ * calls a plan makes are told apart from the calls the model asked for.
+ *
+ * @param execution - the call about to run.
+ * @returns true when the model asked for this call itself.
+ */
+export function isModelCall(execution: { readonly callId: ToolCallId, readonly rootCallId: ToolCallId }): boolean {
+  return execution.rootCallId === execution.callId
+}
+
+/**
+ * Whether a call may run.
  *
  * @param toolName - the tool being called.
+ * @param callId - the call being made.
  * @param sessionId - the session the call belongs to.
  * @param delegationDepth - how deep the calling agent is.
  * @param gate - the state the plan state is kept in.
- * @param requirePlan - whether a turn has to open with a plan.
- * @param maxPullbacks - how many times the turn may be pulled back.
+ * @param requirePlan - whether a turn has to be one plan.
+ * @param planPullbacks - how many times the turn may be pulled back before it handed over its plan.
+ * @param conclusionPullbacks - how many times the turn may be pulled back after it handed over its plan.
  * @returns the refusal reason, or undefined when the call may run.
  */
 export function planRefusal(
   toolName: string,
+  callId: ToolCallId,
   sessionId: string,
   delegationDepth: number,
   gate: PlanGate,
   requirePlan: boolean,
-  maxPullbacks: number,
+  planPullbacks: number,
+  conclusionPullbacks: number,
 ): string | undefined {
   if (!requirePlan) return undefined
-  if (toolName === PLAN_TOOL) return undefined
-  if (gate.hasPlanned(sessionId)) return undefined
-  // A child agent was handed a turn that was already planned.
+  // A child agent was handed work that was already planned.
   if (delegationDepth > 0) return undefined
-  if (gate.bumpPullback(sessionId) > maxPullbacks) return undefined
-  return PLAN_REQUIRED
+  const planCall = gate.planCallId(sessionId)
+  if (planCall === undefined) {
+    // The turn has not handed over its plan yet: the plan is the first call.
+    if (toolName === PLAN_TOOL) return undefined
+    if (gate.bumpBefore(sessionId) > planPullbacks) return undefined
+    return PLAN_REQUIRED
+  }
+  // The call the plan was handed over with is the plan itself.
+  if (callId === planCall) return undefined
+  // The turn already handed over its plan: what is left is the conclusion.
+  if (gate.bumpAfter(sessionId) > conclusionPullbacks) return undefined
+  return PLAN_DONE
 }
-
 /**
- * Make a turn open with a plan.
+ * Make a turn one plan.
  *
- * The plan is only the shape of the work if it comes before the work. An
- * agent that starts calling tools has already chosen the first thing to do,
- * and the plan it draws afterwards is a plan of what is left rather than of
- * the whole turn — so the first tool call of a turn is refused unless it is
- * the plan itself.
+ * The plan is only the shape of the work if it comes before the work, and it
+ * is only the shape of the whole turn if the turn stops when the plan's
+ * results arrive. So the first tool call of a turn has to be the plan, and
+ * every call after it has to be the conclusion.
  *
- * The refusal is a pullback, not a cage: after a couple of them the agent is
+ * The refusal is a pullback, not a cage: after a couple of them the turn is
  * left alone, because a rule that traps an agent is worse than a rule it
- * ignores. A child agent is never held to the rule — the turn it was handed
- * was already planned.
+ * ignores.
  *
  * @param ctx - the plugin context supplying the agent runtime and the registry.
  * @param gate - the state the plan state is kept in.
@@ -135,16 +195,7 @@ export function applyPlanGate(
   ctx: Context,
   gate: PlanGate,
   config: PlanGateConfig,
-): void {
-  ctx.on('tools/pre-execute', async (exec, next) => {
-    const agent = exec.agent
-    if (agent !== undefined && exec.name === PLAN_TOOL) {
-      gate.markPlanned(agent.session.id)
-    }
-    return next()
-  })
-
-  ctx.on('agent/pre-step', async (payload, next) => {
+): void {  ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind === 'enter' && payload.step === 1) {
       gate.reset(payload.agent.session.id)
@@ -155,13 +206,19 @@ export function applyPlanGate(
   ctx.tools.guard((execution) => {
     const agent = execution.agent
     if (agent === undefined) return undefined
+    // Only the calls the model asked for are held to the rule. The calls a
+    // plan makes are nested under the plan's own call, and they are the
+    // plan's business — the rule is about what the model does between rounds.
+    if (!isModelCall(execution)) return undefined
     return planRefusal(
       execution.name,
+      execution.callId,
       agent.session.id,
       agent.session.header.delegationDepth ?? 0,
       gate,
       config.requirePlan(),
       config.planPullbacks(),
+      config.conclusionPullbacks(),
     )
   })
 }
@@ -170,8 +227,10 @@ export function applyPlanGate(
  * The rule's configuration, read when the rule runs.
  */
 export interface PlanGateConfig {
-  /** Whether a turn has to open with a plan. */
+  /** Whether a turn has to be one plan. */
   requirePlan: () => boolean
-  /** How many times a turn may be pulled back before it is left alone. */
+  /** How many times the turn may be pulled back before it handed over its plan. */
   planPullbacks: () => number
+  /** How many times the turn may be pulled back after it handed over its plan. */
+  conclusionPullbacks: () => number
 }

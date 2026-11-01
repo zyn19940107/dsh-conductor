@@ -2,9 +2,9 @@
 #
 # One row mounts this package. It replaces nothing: every tool the profile
 # already had stays mounted and stays visible. This plugin adds one tool
-# (`refine_plan`), the guidance that says when to use it, the rule that
-# makes a turn open with a plan, and the rule that intercepts a chain of
-# one-call steps.
+# (`refine_plan`), the guidance that says when to use it, and the rule that
+# makes a turn one plan: the turn hands over one plan, the plan runs, the
+# results come back together, and the turn ends with the conclusion.
 #
 # The plugin never chooses a search backend and never decides what a call
 # means — it only decides how many calls travel together, and how a turn
@@ -21,6 +21,7 @@
         agentNodeTimeoutMs: 300000
         requirePlan: true
         planPullbacks: 2
+        conclusionPullbacks: 10
         respectConcurrencySafety: true
         concurrentTools:
           - glob
