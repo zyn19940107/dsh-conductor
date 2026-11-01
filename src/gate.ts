@@ -121,7 +121,7 @@ export const PLAN_REQUIRED = 'This turn is one plan. Before you call anything el
 export const PLAN_DONE = 'This turn already handed over its plan, and the plan\'s results are in front of '
   + 'you. Do not call any tool again in this turn — the turn ends with what the plan produced. Write that '
   + 'conclusion now: what the plan produced, what it did not settle, and what the next round has to pick up. '
-  + 'The next round draws the next plan.'
+  + 'The next round draws the next plan. Do not hand over another plan in this turn.'
 
 /**
  * Whether a call is the model's own call rather than one a plan made.
