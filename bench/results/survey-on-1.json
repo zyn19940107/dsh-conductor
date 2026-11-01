@@ -1,0 +1,39 @@
+{
+  "task": "survey",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 69589,
+  "sessionId": "session-0fd80623-4ee5-4318-8068-0b0a41d91e6a",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 27553,
+    "outputTokens": 5068,
+    "cacheReadTokens": 11443,
+    "totalTokens": 44064
+  },
+  "formation": {
+    "agents": 2,
+    "input": 100799,
+    "output": 15134,
+    "cacheRead": 229555,
+    "total": 345488,
+    "steps": 7
+  },
+  "mainPrompt": 27681,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 9801,
+  "thinkingPreview": "The task is a read-only health check of a plugin directory. I need to:\n1. Count .ts files in src/ and list names\n2. Count .spec.ts files in verify/ and list names\n3. Find files containing \"isConcurrencySafe\"\n4. Find files containing \"delegationDepth\"\n5. Evaluate architecture\n\nThis is read-only, no modifications. Let me use glob and grep tools.\n\nLet me first check the directory exists.\n\nLet me do parallel calls: glob for src/**/*.ts, glob for verify/**/*.spec.ts, grep for isConcurrencySafe, grep for delegationDepth.\n\nNote the grep tool defaults to the session workspace which is D:\\code\\vibe. Let me set path appropriately.\n\nLet me make the calls.\n\nActually, I should consider using refine_plan per the instructions. But this is a simple read-only investigation with parallel tool calls — the instructions say the refined loop: \"refine_plan: one call that carries the whole shape of the turn and",
+  "finalText": "## 体检结果(只读,未修改任何文件)\n\n### 1. `src` 目录的 .ts 文件:**8 个**\n\n| 文件 | 行数 | 职责 |\n|---|---:|---|\n| `src/tool.ts` | 632 | `refine_plan` 工具本体:schema、`runPlan`(wave → 节点执行)、子代理节点生成、`more` 切片循环 |\n| `src/index.ts` | 392 | 组合根:zod `Config` + 默认值、prompt 文本、`apply()` 装配、`askModel`/`repairFailedCall` |\n| `src/plan.ts` | 341 | plan 数据模型:`PlanNode`/`PlanArgs` 解析、`@@nodeId@@` 占位符、`buildWaves` 分层、`parseNextSlice` |\n| `src/batch.ts` | 353 | 节点内调度器:wave 拆成并发/串行栅栏、`runOne` + 单次失败修复、`renderBatch` |\n| `src/concurrency.ts` | 234 | 并发判定:`READ_ONLY_COMMANDS`/`UNSAFE_FLAGS`、shell 词法、`isReadOnlyCommand`、`ConcurrencyOverride`、`mayRunTogether` |\n| `src/gate.ts` | 250 | \"模型不许自己调工具,必须交成一张 plan\" 的 pullback 守卫:`PlanGate`、`planRefusal`、`applyPlanGate` |\n| `src/policy.ts` | ~230 | 每会话开关:`SessionPolicy`、`/dsh-refine-loop on\\|off` 命令、`parsePolicyCommand` |\n| `src/repair.ts` | 172 | 修复循环:`askForRepair`、`repairSystem`、`describeFailure`、`parseRepair` |\n\n(`lib/` 是 `.gitignore` 掉的构建产物,不计。)\n\n### 2. `verify` 目录的 .spec.ts 文件:**6 个**\n\n`batch.spec.ts`(149)、`concurrency.spec.ts`(113)、`gate.spec.ts`(71)、`plan.spec.ts`(261)、`refine.spec.ts`(72)、`repair.spec.ts`(150)。\n同目录另有 3 个非 spec 辅助脚本:`run-specs.mjs`、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`。\n\n### 3. 出现 `isConcurrencySafe` 的文件:**3 个 —— 但 `src/` 和 `verify/` 里 0 命中**\n\n- `README.md`(4 处:262、376、381、387)—— 说的是 **harness 侧**的属性名,并注明\"正解应该改 harness 的 `glob.ts`/`grep.ts`,但要等发版才生效\"。\n- `bench/task.mjs`(26、43)—— benchmark 的判题文本。\n- `bench/results/survey-off-1.json`(62–63)—— 上一轮 bench 录下来的模型回答,是**产物不是源码**。\n\n关键发现:这个概念在插件里**用另一套命名**实现了 —— `src/concurrency.ts` 的 `mayRunTogether` / `ConcurrencyOverride`,`src/batch.ts:294-295` 的串行栅栏判定,以及从 `src/index.ts` → `src/tool.ts` → `src/batch.ts` 一路下传的 `respectConcurrencySafety` 开关。\n\n### 4. 出现 `delegationDepth` 的文件:**9 个**\n\n- `src/tool.ts:220` —— `agent?.session.header.delegationDepth ?? 0`,**全插件唯一的深度执行点**(`runNode` 里 `depth >= maxAgentDepth` 就拒绝再起子代理)。\n- `src/gate.ts:161/171/181/233` —— 守卫接收 `delegationDepth` 参数,但 `181` 行 `void delegationDepth` **显式丢弃**(子代理与父代理同等待遇)。\n- `verify/plan.spec.ts:224` —— 用 `{ session: { id: 'child', header: { delegationDepth: 1 } } }` 造假 Agent,断言节点被拒。\n- `bench/sessions.mjs:117`、`bench/show-formation.mjs:94`、`bench/show-one-session.mjs:26`、`bench/show-overlap-bar.mjs:47` —— bench 报表脚本读深度。\n- `bench/task.mjs:27/44/90` —— 判题文本。\n- `bench/results/survey-off-1.json:62-63` —— bench 产物。\n\n### 5. 架构评价(两三句)\n\n插件按关注点切得很干净、单组合根:`src/index.ts` 只做配置与装配,`plan.ts` 管数据模型,`tool.ts` 管 plan工具与节点执行,`batch.ts` 管节点内调度,`concurrency.ts` 管只读分类,`gate.ts` 管硬约束,`policy.ts` 管会话开关,`repair.ts` 管修复提示词。两个核心概念的模型不对称得很刻意:**并发安全是三层答案**(harness 自己的判定作为 `ownAnswer` 传入 `mayRunTogether`,插件的 override 表只对\"没表态\"的工具生效,结果落成 `batch.ts` 的串行栅栏),而 **delegation depth 是 harness 拥有的状态**,插件只读、只在一处(`tool.ts`)做硬限制,`gate.ts` 拿到后直接丢弃。`verify\\` 目录基本是 `src\\` 的模块级镜像,直接 import `../src/*.js` 而非构建产物 `lib/`,用手写 fake 驱动。\n\n---\n\n**顺带发现的几个问题(仅报告,未改动):**\n\n1. **README 描述了代码里不存在的节点类型。** README209/244/249/264 行讲第三种节点 `subagent_fork`,但 `src/plan.ts` 的 `PlanNodeKind = 'tools' | 'subagent'`,`parsePlanArgs` 会拒绝它。`src/tool.ts:455-459` 的 schema 描述还留着被删掉的 `subagent_fork` 说明的残句,拼成了 `'\"\"' + 'the task builds on what has been said here.'`。\n2. **`verify/repair.spec.ts` 从未执行。** `verify/run-specs.mjs:21` 硬编码了 `['refine','batch','concurrency','plan','gate']`,漏掉了 `repair.spec.ts`(150 行、12 项断言),`pnpm specs` 跑不到它。\n3. **组合根完全没有测试。** 没有任何 spec import `src/index.ts` —— `apply`、`Config`、`REFINE_GUIDANCE` 都没覆盖;`src/policy.ts` 也没有专门 spec,`SessionPolicy.turnOff/turnOn`、`runPolicyCommand`、`applyPolicyMessage` 都未被测。\n4. **`MAX_REPAIRS = 2` 在 `src/batch.ts:185` 和 `src/repair.ts:21` 各定义一份,`batch.ts` 用自己那份。**\n5. `src/tool.ts:589` 把 `AGENT_NODE_KINDS`、`mayRunTogether` 从别处 re-export 出去,公共出口从 `tool.ts` 漏出去而不是 `index.ts`。"
+}

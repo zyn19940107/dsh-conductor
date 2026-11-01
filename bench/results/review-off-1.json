@@ -1,0 +1,60 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 113864,
+  "sessionId": "session-f86becdd-679e-4314-be2a-d252d4c313b7",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 14,
+  "toolCalls": 22,
+  "tools": [
+    "read",
+    "read",
+    "read",
+    "glob",
+    "grep",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "read",
+    "pwsh",
+    "pwsh",
+    "grep",
+    "read",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 69615,
+    "outputTokens": 11108,
+    "cacheReadTokens": 732928,
+    "totalTokens": 813651
+  },
+  "formation": {
+    "agents": 1,
+    "input": 69615,
+    "output": 11108,
+    "cacheRead": 732928,
+    "total": 813651,
+    "steps": 14
+  },
+  "mainPrompt": 86074,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 29222,
+  "thinkingPreview": "Let me look at supporting files to understand context: batch.ts, concurrency.ts, and the main index.ts for config defaults (maxAgentDepth, planPullbacks, etc.). The user asked for independent review of each part. Let me read a bit more to be accurate about things like delegation depth and restrictions on subagents.\n\nLet me check the project structure.\nLet me read index.ts for defaults and the `subagent` tool behavior, and batch.ts briefly to know how tools node calls run (concurrency). Also check whether the \"subagent\" tool is registered and what restrictions apply (e.g., `run_in_background: false`, depth limit).\n\nLet me read index.ts and batch.ts.\nNow I have enough context. Let me also verify the \"subagent\" tool in the harness — the tool named `subagent` is executed via `runner.execute({ name: node.kind, arguments: { description, prompt, run_in_background: false } })`. The node.kind is ",
+  "finalText": "三个文件已分别读完（只读，未修改任何文件）。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构 / 节点种类 / 占位符语法\n\n**数据结构**：一张小 DAG。\n\n- `PlanArgs = { more: boolean, criteria: string[], nodes: PlanNode[] }`（plan.ts:44-58）——`criteria` 是判断这一轮成败的可观测判据，`more` 表示\"这只是第一片\"。\n- `PlanNode = { id, kind, calls, task, after }`（plan.ts:30-41）；`PlanToolCall = { name, arguments }`（plan.ts:22-27）。\n- `buildWaves(nodes)` 把节点按依赖深度分层（wave），同层并发；有环 / 自依赖 / 依赖不存在的节点时返回 `{ error: 一句话原因 }` 而不是抛异常（plan.ts:235-287）。\n\n**节点有哪三种 —— 代码里只有两种，这是一处文档与实现脱节**：\n\n- 实现的类型是 `PlanNodeKind = 'tools' | 'subagent'`（plan.ts:16），`parsePlanArgs` 对第三种一票否决：任何不是这两个的 kind 直接返回 `undefined`（plan.ts:114），工具随后抛\"refine_plan needs criteria and a non-empty list of nodes…\"（tool.ts:522）。\n- \"三种\"来自 README 与散文：README:238-244 列的是 `tools` / `subagent`（从零开始的子代理）/ `subagent_fork`（继承本对话的子代理），`index.ts:15-18` 与 `tool.ts:5-8` 的模块注释也还在讲\"继承本对话的孩子\"。\n- 但提交 `4be5ed3`（\"图里只剩两种节点:tools 和 subagent,subagent_fork 拿掉了\"）把第三种从代码里删掉时 **README 没跟着改**：README:244 仍列 `subagent_fork`，README:264 的示例 JSON 直接写 `\"kind\": \"subagent_fork\"` —— 这份示例交给现在的实现会当场被拒。\n- 部署侧其实**有这个工具**（沙盒 profile 里 `tool-subagent` 配了 `provider: fork, toolName: subagent_fork`），而 `tool.ts:242` 又是直接用 `name: node.kind` 当工具名去派发——接线在，唯独 `PlanNodeKind` 拦住了它。\n- 同一处删改还留下了模型可见的残渣：`tool.ts:455-459` 里 `kind` 的参数说明以 `+ '\"\"' + 'the task builds on what has been said here.'` 收尾，是被删掉的第三种节点的半截话。\n- `AGENT_NODE_KINDS = ['subagent']`（plan.ts:19）是\"会启动代理的 kind\"清单，当前只有一项。\n\n**占位符语法**：`@@nodeId@@`，**整个参数值必须恰好等于这个占位符**（正则 `^@@([^@]+)@@$`，plan.ts:82）。\n\n- 不用 `{{...}}`：harness 把双花括号留给自己的 prompt 变量，section 里出现一个就拒绝渲染（plan.ts:74-80；index.ts:250-256 还为此加了启动期断言）。\n- 占位符**嵌在更长的字符串里不替换**，原样传下去（plan.ts:319-323，spec:147 断言）。\n- 占位符**自带一条依赖边**：`parsePlanArgs` 会把被引用的节点 id 自动加进引用方的 `after`（plan.ts:147-158），所以它一定先于引用方跑完；解析不到时 `substitutePlaceholders` 抛错，**绝不会把字面量 `@@id@@` 传进工具**（plan.ts:325-328）。\n- 收集是递归的，穿透对象与数组（`collectPlaceholders`，plan.ts:205-223）。\n\n---\n\n## 2. `src/gate.ts` —— 这条插件的规则与触发条件\n\n**规则一句话**：模型不自己调工具，它做的每一次工具调用都必须写进计划里，由计划去跑（gate.ts:10-11）。这是**执行层拦截**（`ctx.tools.guard`），不是提示层建议。\n\n**触发条件**（五项同时成立才拒绝）：\n\n1. 本会话没退出（`appliesTo(sessionId)`，gate.ts:174；按会话 opt-out）。\n2. `requirePlan` 为真（默认开，index.ts:166）。\n3. 调的不是计划工具本身 `refine_plan`（gate.ts:183）。\n4. 是模型自己发起的顶层调用：`isModelCall` 判定 `rootCallId === callId`；计划内部发起的嵌套调用不算（gate.ts:148-150、225）。\n5. 拽回预算未用完：`gate.bumpBefore(sessionId) > planPullbacks` 才放行（gate.ts:184）。默认 `planPullbacks = 2`，即**前两次直接工具调用被拒并回一句 PLAN_REQUIRED 提示，从第三次起放手不管**——这是\"pullback 不是笼子\"，不是无限拦截。\n\n**计数器的生命周期**：每轮开始时（`agent/pre-step` 且 `payload.step === 1`）`gate.reset(sessionId)` 清零该会话的拽回数与\"已交过计划\"标记（gate.ts:209-212）；用户发言时另清一轮预算（gate.ts:206-208）。\n\n**规则不管的事（容易误解的地方）**：\n\n- **计划跑完之后规则就不再管了**。`hasPlanned` / `markPlanned` 记录了状态，但拒绝路径里从未被查过（grep 全仓：`hasPlanned` 只有定义没有调用）。真正结束这一轮的是 `tool.ts:578-580` 的 `exec.concludeTurn()`，不是闸门。文件头注释（gate.ts:13-17）说的正是这件事：模型写结论就收尾，闸门不判这个。\n- **子代理没有被豁免**：`delegationDepth` 传进来了却被 `void delegationDepth` 显式丢弃（gate.ts:181），即不按深度放行；harness 侧子代理的工具调用是其会话的根调用（`rootCallId = exec.rootCallId ?? callId`，core/tools/src/index.ts:1395），照样撞上这条规则。\n- 残留：`createUserMessage` 是未使用的 import（gate.ts:27）。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来 / 子代理受什么限制\n\n**跑起来的链路**（`refine_plan` 一次调用带完整张图）：\n\n1. `ctx.tools.register(defineTool(...))` 注册工具 `refine_plan`（tool.ts:45、414），参数是 `criteria` / `more` / `nodes`。\n2. `execute` → `parsePlanArgs` 校验归一（tool.ts:520）；节点数超 `maxBatchSize`（默认 8）直接报错（tool.ts:524-528）。\n3. `runPlan` → `buildWaves` 分层；图不成立（成环 / 自依赖 / 依赖不存在）抛\"the plan does not hold together: …\"（tool.ts:307-310）。\n4. **按 wave 推进，wave 内 `Promise.all` 并发**（tool.ts:316-336），后一层等前一层。\n5. `tools` 节点：先做占位符替换，再交给 `runBatch`（batch.ts）——批次内部再按 `mayRunTogether` 拆成并发段与串行段（默认尊重工具自身的独占声明；`glob`/`grep` 和只读 shell 命令被列为可并发）；单个调用失败最多修 2 次（`MAX_REPAIRS`），修复由**本会话自己的模型**出题（batch.ts:185、index.ts:301/369）。\n6. `subagent` 节点：`runner.execute({ name: 'subagent', arguments: { description: node.id, prompt: buildAgentPrompt(...), run_in_background: false } })`（tool.ts:238-254）——**前台**跑，prompt = 节点任务 + 其依赖节点的产出。\n7. 每个代理节点有**自己的截止时间**（tool.ts:122-141、232-257）"
+}
