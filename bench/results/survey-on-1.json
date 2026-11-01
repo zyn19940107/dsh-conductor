@@ -1,0 +1,40 @@
+{
+  "task": "survey",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 48919,
+  "sessionId": "session-0a43d10f-832b-4841-821f-214e4cca2421",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 10216,
+    "outputTokens": 6777,
+    "cacheReadTokens": 44800,
+    "totalTokens": 61793
+  },
+  "formation": {
+    "agents": 1,
+    "input": 10216,
+    "output": 6777,
+    "cacheRead": 44800,
+    "total": 61793,
+    "steps": 3
+  },
+  "mainPrompt": 22922,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 18203,
+  "thinkingPreview": "The user wants a read-only health check of the plugin at D:\\code\\vibe\\dsh-refine-loop. Questions 1-4 are file discovery/grep, question 5 is an architectural assessment.\n\nThis is a read-only task. The dsh-plugin-sandbox skill is for modifying/debugging plugins — the task here is just a read-only inspection. The AGENTS.md says \"改/调任何 DSH 插件前先调用它\". This is a health check (体检), read-only. Hmm, does it \"clearly match\" the skill? The skill is about developing/debugging/modifying plugins in a sandbox. A read-only file inventory doesn't really need the sandbox harness. But \"体检\" is inspection. I think the sandbox skill isn't needed for pure file listing/grepping. The instruction says call the skill before acting on a task that names or clearly matches. This is read-only file analysis, not modifying/debugging. I'll skip it—actually, let me be careful. AGENTS.md says \"改/调任何 DSH 插件前先调用它\" — we're not",
+  "finalText": "## 体检结果（全程只读，未修改任何文件）\n\n> 说明：仓库里 `bench/task.mjs` 本身就包含这五个问题，`bench/results/survey-off-1.json` 里存着上一轮基准运行的完整回答。所以下面的 grep 命中里有一部分是\"基准任务自己\"的文件，我把源码命中和基准脚手架命中分开列。\n\n---\n\n### 1. `src/` 下的 `.ts` 文件：**7 个**\n\n| 文件 | 职责（按命名与调用关系推断） |\n|---|---|\n| `src/index.ts` | 插件装配入口，package.json 里唯一的 build entry |\n| `src/tool.ts` | `refine_plan` 工具本体，体量最大 |\n| `src/plan.ts` | plan 的数据结构（DAG / 节点 / 依赖） |\n| `src/batch.ts` | 批量执行器，一次调用携带整批 |\n| `src/concurrency.ts` | 并发安全判定（插件自建的那一套） |\n| `src/gate.ts` | 强制\"一个 turn = 一个 plan\"的规则 |\n| `src/policy.ts` | 会话级开关 `/dsh-refine-loop on/off` |\n\n### 2. `verify/` 下的 `.spec.ts` 文件：**5 个**\n\n`batch.spec.ts`、`concurrency.spec.ts`、`gate.spec.ts`、`plan.spec.ts`、`refine.spec.ts`\n\n（另有若干 `.mjs` 辅助脚本在同目录，属 runner 而非 spec。）\n\n### 3. 出现 `\"isConcurrencySafe\"` 的文件：**3 个，全部不是 `.ts` 源码**\n\n- `README.md` — 行 251 / 360 / 365 / 371\n- `bench/task.mjs` — 行 26 / 43（基准任务的问题原文）\n- `bench/results/survey-off-1.json` — 行 52 / 53（上一轮运行记录）\n\n**`src/` 和 `verify/` 里一次都没有。** 这意味着插件**没有采用 harness 的 `isConcurrencySafe` 字段**，而是在 `src/concurrency.ts` 里自建了一套并发判定（覆盖 glob / grep / ops_bash 一类只读工具），在 `batch.ts` / `tool.ts` 里调用。README 第 371 行自己也点明了这是\"插件这一层\"对 harness 缺失的临时补位。\n\n### 4. 出现 `\"delegationDepth\"` 的文件：**7 个**\n\n| 类别 | 文件 | 行 |\n|---|---|---|\n| 源码 | `src/gate.ts` | 145（注释）、156（形参）、164（`depth > 0` 直接放行子代理）、217（从 `agent.session.header` 读取） |\n| 源码 | `src/tool.ts` | 215（`depth >= maxAgentDepth` 时拒绝再派子代理） |\n| 测试 | `verify/plan.spec.ts` | 224 |\n| 基准脚本 | `bench/sessions.mjs` | 117 |\n| 基准脚本 | `bench/show-formation.mjs` | 94 |\n| 基准脚本 | `bench/task.mjs` | 27 / 44 |\n| 基准产物 | `bench/results/survey-off-1.json` | 52 / 53 |\n\n⚠️ **一处未settle**：ripgrep 默认忽略 `.gitignore`，`lib/`（构建产物）很可能被跳过；上一轮基准运行记录里提到 `lib/index.js` 含有一份编译后的 `delegationDepth`。这一条我这轮没法交叉验证，下一轮只需 `grep --no-ignore lib/` 即可确认。\n\n---\n\n### 5. 架构评价\n\n**分层是干净的、职责单一的**：`plan`（纯数据模型）/ `gate`（纯规则）/ `policy`（会话开关）三个模块几乎不碰 harness，能被纯函数级单测覆盖；`tool.ts` 作为唯一\"胖集成点\"把 DSH agent 的调度语义收敛在一处；`verify` 的 5 个 spec 与 `src` 的 7 个模块基本一一对应（`policy.ts` / `index.ts` 无独立 spec，`refine.spec.ts` 对应的是 `tool.ts` 而非同名模块）——测试与模块的映射关系是清楚的。**真正的风险在两处耦合**：`isConcurrencySafe` 缺失这件事，插件的解法是**在插件层平行复刻了 harness 的概念**（`src/concurrency.ts` 的自建覆盖表），而不是等 harness 发版——README 已自认这是\"补位\"；等 harness 的 `isConcurrencySafe` 真正落地后，这层会变成需要删掉的重复逻辑；同时 `delegationDepth` 是从 `agent.session.header` 这样一个**内部 header 字段**上读的，它既不在 harness 的公开工具契约里、也不在 `src` 内部定义，是一条跨版本易碎的隐式依赖。**一句话**：模块切分和测试分层是合格的，但插件的价值支点（并发安全、子代理深度）都建立在 harness 的私有/缺失契约上，属于\"能在当前版本跑通，但升级时可能静默失效\"的结构。"
+}

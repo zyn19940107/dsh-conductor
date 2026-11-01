@@ -1,0 +1,41 @@
+{
+  "task": "survey",
+  "condition": "on",
+  "index": 2,
+  "exitCode": 0,
+  "wallMs": 116510,
+  "sessionId": "session-78eb63e5-fd33-41e7-885b-6a59823bc809",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 3,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "pwsh",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 15580,
+    "outputTokens": 3998,
+    "cacheReadTokens": 48896,
+    "totalTokens": 68474
+  },
+  "formation": {
+    "agents": 2,
+    "input": 84624,
+    "output": 11562,
+    "cacheRead": 563968,
+    "total": 660154,
+    "steps": 16
+  },
+  "mainPrompt": 27162,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 4717,
+  "thinkingPreview": "The user wants a read-only inspection of D:\\code\\vibe\\dsh-refine-loop plugin. Let me plan.\n\nThe task: count .ts files in src directory, count .spec.ts files in verify directory, find files containing \"isConcurrencySafe\" and \"delegationDepth\", then evaluate architecture.\n\nThis is a read-only task. Let me use refine_plan as per instructions... Actually, the refined loop says draw plan and use refine_plan. But also simple tool calls can be done. Let me use refine_plan to structure.\n\nActually, for a simple task like this, I can just make the glob/grep calls. But the developer says the refined loop: \"refine_plan: one call that carries the whole shape of the turn and returns every result together.\" Let me use it.\n\nLet me first check the directory structure. Actually let me just do parallel calls: glob for src/**/*.ts, glob for verify/**/*.spec.ts, grep for isConcurrencySafe, grep for delegatio",
+  "finalText": "## 体检完成（全程只读，未修改任何文件）\n\n> 说明:计划里的 `glob src/**/*.ts` / `verify/**/*.spec.ts` 因 glob 前缀语义返回了空,所以文件清单是子代理逐个 read 目录实际核对出来的;`grep` 命中则是工具直出。本轮没有再调用工具,下面所有结论均来自这两路已完成的节点。\n\n---\n\n### 1. `src/` 下的 `.ts` 文件:**7 个**(无子目录)\n\n| 文件 | 行数 | 一句话职责 |\n|---|---|---|\n| `src/index.ts` | 273 | 插件装配入口:zod `Config`、`REFINE_GUIDANCE` 提示词、`apply()` 把 tool/gate/policy/prompt 挂到 cordis context |\n| `src/tool.ts` | 521 | `refine_plan` 工具本体:注册 schema、`runPlan()` 按 wave 跑节点、派子代理 + 单节点超时、渲染结果 |\n| `src/plan.ts` | 295 | plan 数据结构与图算法:解析校验、`buildWaves`(分层 + 环检测)、`@@nodeId@@` 占位符收集/替换 |\n| `src/batch.ts` | 314 | 批执行器 `runBatch`:按并发安全性切屏障波次,串行/并发执行,汇总 `schedule` |\n| `src/concurrency.ts` | 234 | 并发判定:`READ_ONLY_COMMANDS` 白名单、shell 词法只读判定、`DEFAULT_OVERRIDES`、`mayRunTogether()` |\n| `src/gate.ts` | 236 | 「一个 turn = 一张图」规则:`PlanGate` 会话状态、`planRefusal` 拒绝理由、`ctx.tools.guard` 挂载 |\n| `src/policy.ts` | 233 | 会话级开关 `/dsh-refine-loop on/off`:`ctx.tools.restrict/lift` 工具表开关 |\n\n### 2. `verify/` 下的 `.spec.ts` 文件:**5 个**\n\n`batch.spec.ts`(166)、`plan.spec.ts`(282)、`concurrency.spec.ts`(123)、`gate.spec.ts`(101)、`refine.spec.ts`(81)\n\n同目录另有 3 个 `.mjs` 辅助脚本(`run-specs.mjs` 是 runner,`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs` 是调试工具),不算 spec。注意 **`refine.spec.ts` 没有对应的 `src/refine.ts`** —— 它测的是工具层行为。\n\n### 3. 出现 `\"isConcurrencySafe\"` 的文件:**5 个,源码里 0 个**\n\n| 文件 | 行 | 性质 |\n|---|---|---|\n| `README.md` | 251 / 360 / 365 / 371 | 文档:说明这是「插件这一层」对 harness 缺失的临时补位 |\n| `bench/task.mjs` | 26 / 43 | 基准任务文件本身就写着这五个问题 |\n| `bench/results/survey-off-1.json` | 52 / 53 | 上一轮基准运行存档 |\n| `bench/results/survey-on-1.json` | 39 | 上一轮基准运行存档 |\n| `bench/results/survey-off-2.json` | 48 / 49 | 上一轮基准运行存档 |\n\n**`src/` 和 `verify/` 里一次都没有。** 插件不直接读这个字段:它走 `runner.executionMode(exec)`(`src/batch.ts:247`)间接拿到 harness 的答案,再由 `src/concurrency.ts:222` 的 `mayRunTogether(toolName, args, ownAnswer, overrides)` 判定 —— `ownAnswer===true` 直接放行,否则查插件自己的 override(`always` / `read-only`)。默认覆盖 `glob`/`grep`,`read-only` 分支由 `isReadOnlyCommand` 判 shell。\n\n### 4. 出现 `\"delegationDepth\"` 的文件:**源码 2 个 + 测试 1 个 + 脚手架若干**\n\n**源码(语义点):**\n- `src/gate.ts` — 行 145(注释)、156(形参)、**164(`delegationDepth > 0` 直接放行子代理)**、217(从 `agent.session.header.delegationDepth ?? 0` 读入)\n- `src/tool.ts` — 行 215(`const depth = agent?.session.header.delegationDepth ?? 0`),216-225 处 `depth >= maxAgentDepth`(默认 1,`index.ts:109`)时拒绝再派子代理\n\n**测试:** `verify/plan.spec.ts` 行 224(伪造 `session.header.delegationDepth: 1`)\n\n**脚手架/产物:** `bench/sessions.mjs:117`、`bench/show-formation.mjs:94`、`bench/task.mjs:27/44/90`、`bench/results/*.json`;另有构建产物 `lib/index.js`(在 `.gitignore` 里,grep 默认看不见)。\n\n关键点:**`delegationDepth` 不是插件自己维护的计数器**,而是 harness 写在会话头里的属性,插件只读;它与并发判定**没有交互** —— 并发判定完全发生在 `batch.ts` 的 tools 节点内,`delegationDepth` 只管 agent 节点能否派子代理。\n\n### 5. 架构评价(两三句话)\n\n依赖方向单向收敛、无循环依赖(`plan.ts`/`concurrency.ts` 是叶子,`batch → concurrency`,`tool → {batch, concurrency, plan}`),但 `tool.ts` 521 行成了事实上的公共头 —— `gate.ts`/`policy.ts` 只为一个字符串常量 `PLAN_TOOL` 就得依赖整个工具模块,`tool.ts:521` 还重复 re-export 了 `mayRunTogether`/`AGENT_NODE_KINDS`,模块边界已经渗漏。**状态却分散在两个互不相干的内存 Map** 里(`PlanGate` 与 `SessionPolicy` 都是无 TTL 的进程内单例,后者 opt-out 后只增不减)。测试是真跑代码(每个 spec 独立进程),但所有 harness 依赖(`executionMode`/`execute`/`Agent`/`ctx.tools`)都被假实现替换,`src/index.ts` 和 `src/policy.ts` 零覆盖 —— **验的是插件自己的算法,不是插件与 harness 的接线**。\n\n> 一个具体隐患:harness 若按 README:371 给 `glob` 补上 `isConcurrencySafe: () => true`,`ownAnswer` 变 true 后,插件的 override 分支会变成死代码,`read-only` shell 规则静默降级 —— 两边会同时改而无人测出来。\n\n---\n\n### 本轮没解决的\n- `src/**/*.ts` / `verify/**/*.spec.ts` 的 glob 直接命中为空(工具前缀语义问题),文件清单是子代理读目录核对的;若要留档,下一轮应用 `src/*.ts` + `verify/*.spec.ts` 或 `Get-ChildItem` 重取一次机器可验证的输出。\n- `lib/index.js` 的 `delegationDepth` 命中来自子代理的 read(grep 因 `.gitignore` 不可见),本轮未独立复核。\n- 未运行 `pnpm specs`(runner 会创建 `verify/.build/`,属写入,超出只读边界)。\n\n### 下一轮可接手的\n若需要可复现的机器输出,只需重跑 `Get-ChildItem` 列举 + 一次 `Select-String`(含 `lib/`),仍是纯只读;要补测试缺口则需要先加载 `dsh-plugin-sandbox` skill 再动代码。"
+}

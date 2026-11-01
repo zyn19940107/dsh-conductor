@@ -1,0 +1,54 @@
+{
+  "task": "survey",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 42566,
+  "sessionId": "session-72599f66-42f6-4031-8d8f-29e140db2ded",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 9,
+  "toolCalls": 16,
+  "tools": [
+    "glob",
+    "pwsh",
+    "grep",
+    "grep",
+    "read",
+    "pwsh",
+    "pwsh",
+    "grep",
+    "pwsh",
+    "grep",
+    "read",
+    "read",
+    "grep",
+    "read",
+    "grep",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 25874,
+    "outputTokens": 4367,
+    "cacheReadTokens": 147010,
+    "totalTokens": 177251
+  },
+  "formation": {
+    "agents": 1,
+    "input": 25874,
+    "output": 4367,
+    "cacheRead": 147010,
+    "total": 177251,
+    "steps": 9
+  },
+  "mainPrompt": 26002,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 7277,
+  "thinkingPreview": "The file listing is clear. Now let me grep for \"isConcurrencySafe\" and \"delegationDepth\".\n\nNote: there's also a \"refine.spec.ts\" — interesting, the src has batch.ts, concurrency.ts, gate.ts, index.ts, plan.ts, policy.ts, tool.ts — 7 files. But there's a refine.spec.ts but no refine.ts. Let me check.\n\nLet me grep for the two terms.\nInteresting — the grep tool seems to have excluded some files? Let me check: `isConcurrencySafe` shows README.md and bench/task.mjs, but not src/concurrency.ts. That's odd. The README says \"插件对此加了一层自己的判定\". Let me check src/concurrency.ts directly — maybe grep's default excludes some files, or maybe the src file uses a different naming.\n\nWait, grep found `isConcurrencySafe` in README line 360-371 but nothing in src/. Let me verify by reading src/concurrency.ts.\n\nAlso note bench/task.mjs is a benchmark task file that literally contains the same 5 questions — inte",
+  "finalText": "体检完成，全程只读，未修改任何文件。\n\n---\n\n## 1. `src/` 下的 `.ts` 文件：**7 个**\n\n| 文件 | 行数 | 职责 |\n|---|---|---|\n| `batch.ts` | 314 | 批量执行器：一次调用携带整批，返回所有结果 |\n| `concurrency.ts` | 234 | 并发判定：哪些调用可以同时跑 |\n| `gate.ts` | 236 | 强制\"一个 turn = 一个 plan\"的规则 |\n| `index.ts` | 273 | 插件装配入口（唯一 build entry） |\n| `plan.ts` | 295 | plan 的数据结构：DAG、节点、依赖 |\n| `policy.ts` | 233 | 会话级开关 `/dsh-refine-loop on/off` |\n| `tool.ts` | 521 | `refine_plan` 工具本体（最大） |\n\n## 2. `verify/` 下的 `.spec.ts`：**5 个**\n\n`batch.spec.ts` (166)、`concurrency.spec.ts` (123)、`gate.spec.ts` (101)、`plan.spec.ts` (282)、`refine.spec.ts` (81)\n\n同目录还有 3 个 `.mjs` 辅助脚本（`run-specs.mjs` 用 esbuild 打包后逐进程跑）、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`，不算 spec。\n\n## 3. `\"isConcurrencySafe\"` —— **只出现在 2 个文件，且都不是 `.ts`**\n\n- `README.md`（行 251 / 360 / 365 / 371）\n- `bench/task.mjs`（行 26 / 43）\n\n`src/` 和 `verify/` 里**一次都没有**。插件没有采用 harness 的这个字段，而是自建了一套：`src/concurrency.ts` 里的 `ConcurrencyOverride`（`always` / `read-only`）+ `mayRunTogether()`，默认覆盖 `glob` / `grep` / `ops_bash`，由 `batch.ts:255` 和 `tool.ts` 调用。README 第 371 行自己也承认这是\"插件这一层\"对 harness 缺失的临时补位。\n\n## 4. `\"delegationDepth\"` —— 命中 9 个文件\n\n**源码（5 处）：**\n- `src/gate.ts` — 行 145（注释）、156（形参）、164（`depth > 0` 直接放行子代理）、217（从 `agent.session.header` 读取）\n- `src/tool.ts` — 行 215（`depth >= maxAgentDepth` 时拒绝再派子代理）\n\n**测试（1 处）：** `verify/plan.spec.ts:224`\n\n**构建产物：** `lib/index.js`（行 464 / 763 / 765 / 792）— esbuild 从 `src/index.ts` 打包而来，不是独立源码\n\n**bench 脚本：** `bench/sessions.mjs:117`、`bench/show-formation.mjs:94`、`bench/task.mjs:27,44,90`\n\n## 5. 架构评价\n\n**职责切分干净且测试对齐**：plan（声明形状）/ tool（入口）/ batch（执行）/ concurrency（并发判定）/ gate（规则）/ policy（开关）/ index（装配）七个模块单一职责，spec 与模块基本一一对应（`plan.spec`→plan+tool，`concurrency.spec`→concurrency，`gate.spec`→gate，`batch.spec`+`refine.spec`→batch+policy），只有装配层 `index.ts` 无直测——这在插件里是合理取舍。\n\n**最脆的一环是自建并发判定**：`isConcurrencySafe` 在源码里完全缺席，意味着插件维护了 harness 并发语义的一份**影子实现**（自己判定\"只读命令\"、自己配 allowlist 和危险 flag 表）。README 已明说这是\"等 harness 发版\"的过渡方案，一旦上游补上字段，两套语义（尤其 shell 的只读判定）容易漂移，且漂移时没有任何测试会报警——这是唯一需要持续盯的点。\n\n**规则设计务实但依赖模型自觉**：gate 用\"拉动而非囚笼\"的策略（超过 pullback 次数就放行），加上 `delegationDepth > 0` 直接豁免子代理，规避了规则陷阱死锁；代价是并发安全性最终仍由模型行为兜底，插件侧只能通过 bench 脚本事后观测，缺少运行时的强不变量。"
+}

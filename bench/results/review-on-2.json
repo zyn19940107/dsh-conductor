@@ -1,0 +1,40 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 2,
+  "exitCode": 0,
+  "wallMs": 198077,
+  "sessionId": "session-11ea1346-ffdf-4e3b-a4c7-6eaffdc03a3e",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 18198,
+    "outputTokens": 5890,
+    "cacheReadTokens": 51512,
+    "totalTokens": 75600
+  },
+  "formation": {
+    "agents": 2,
+    "input": 126883,
+    "output": 19730,
+    "cacheRead": 1497912,
+    "total": 1644525,
+    "steps": 23
+  },
+  "mainPrompt": 29393,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 9721,
+  "thinkingPreview": "The user wants me to review three files in D:\\code\\vibe\\dsh-refine-loop: src/plan.ts, src/gate.ts, src/tool.ts. Read-only, no modifications.\n\nLet me start by exploring the directory structure and reading the files.\n\nLet me use refine_plan? The instructions say to use refine_plan for a turn's plan. But this is a read-only review task. Let me think: the system prompt says \"Refined loop: refine_plan: one call that carries the whole shape of the turn and returns every result together.\" I should probably use refine_plan to orchestrate. But also, simpler reads might be fine. Given the harness guidance strongly suggests using refine_plan, let me do it with three parallel read nodes.\n\nActually, let me first check the files exist. I can do a glob and reads. Let me do it in a single refine_plan with nodes that read the files. But refine_plan nodes are tool calls that run together — that works for ",
+  "finalText": "## 1. `src/plan.ts` —— 计划的数据结构\n\n**顶层结构**：`criteria` + `nodes` 两块，是一张小图而不是任务列表（`plan.ts:43-49`）：\n\n```ts\nexport interface PlanArgs {\n  criteria: string[]   // 可观测的判据：什么能算成功\n  nodes: PlanNode[]\n}\n```\n\n**节点结构**（`plan.ts:30-41`）：`{ id, kind, calls, task, after }`——`id` 是节点名，`after` 是它依赖的节点 id 列表；`calls` 只对 tools 节点有意义，`task` 只对 agent 节点有意义（解析时另一项被置空，`plan.ts:127` / `plan.ts:133`）。`tools` 节点里的一次调用是 `{ name, arguments }`（`plan.ts:22-27`）。\n\n**节点三种 kind**（`plan.ts:16`、`:19`）：\n\n```ts\nexport type PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'\nexport const AGENT_NODE_KINDS = ['subagent', 'subagent_fork']\n```\n\n- `tools`：若干调用一起跑\n- `subagent`：交给**从零开始**的子代理（任务必须自包含）\n- `subagent_fork`：交给**继承本对话**的子代理\n\n**占位符语法：`@@nodeId@@`**（`plan.ts:73`）：\n\n```ts\nconst PLACEHOLDER = /^@@([^@]+)@@$/u\n```\n\n三个要点：① 整个参数必须**恰好**是占位符，嵌在长字符串里原样保留（`plan.ts:61-66`；`verify/plan.spec.ts:147` 断言 `'x @@read@@ y'` 不替换）；② 故意不用 `{{ }}`，因为 harness 保留双花括号给自己的提示词变量（`plan.ts:68-71`）；③ 解不出来**报错而不是传字面量**（`plan.ts:279-281`）。另外，占位符本身即是一条依赖边——引用了谁的输出就自动把谁塞进 `after`（`plan.ts:137-148`），查找是递归的（`collectPlaceholders`，`plan.ts:159-177`）。图按依赖深度切层（`buildWaves`，`plan.ts:189-241`），有环或依赖不存在就返回 `{ error }`（`plan.ts:57-59`）。\n\n## 2. `src/gate.ts` —— 规则与触发条件\n\n**规则本体**：「一轮就是一张图」——本轮**第一个**工具调用必须是 `refine_plan`，图跑完之后**本轮不能再调任何工具**，只能写结论（`gate.ts:178-188` 的文档段；对外表述见 `README.md:269-300`）。文案是插件里的硬编码 TS 常量，不是模板文件：`PLAN_REQUIRED`（`gate.ts:109-117`，\"This turn is one plan. Before you call anything else, hand the turn over as a plan with refine_plan…\"）和 `PLAN_DONE`（`gate.ts:119-124`，\"This turn already handed over its plan… Write that conclusion now\"）。另有一段进系统提示词的 `REFINE_GUIDANCE`（`src/index.ts:50-76`，经 `ctx.systemPrompt.section` 注册）。\n\n**触发条件**（判定函数 `planRefusal`，`gate.ts:152-177`）：\n\n| 条件 | 证据 |\n|---|---|\n| 总开关 `requirePlan` 为 false 时完全不拦 | `gate.ts:162`；默认 true（`index.ts:160`） |\n| **子代理永不受约束**（`delegationDepth > 0` 直接放行） | `gate.ts:163-164` |\n| 只拦模型自己发起的调用 | `isModelCall` = `execution.rootCallId === execution.callId`（`gate.ts:135-137`，挂在 `gate.ts:212` 的 `ctx.tools.guard`） |\n| 尚未交图：只有 `refine_plan` 放行，其余返回 `PLAN_REQUIRED` | `gate.ts:166-171` |\n| 已交图：交图那个 callId 放行，其余返回 `PLAN_DONE` | `gate.ts:173-176` |\n| 「拽不动就放手」：拒绝次数超限后放行 | `planPullbacks` 默认 2（`index.ts:168`）、`conclusionPullbacks` 默认 10（`index.ts:170`），计数在 `gate.ts:79-95` |\n\n**执行机制**：`ctx.tools.guard()` 返回字符串即拒绝该次执行（`gate.ts:205-224`）；每轮开始时状态重置（`agent/pre-step` 且 `decision.kind === 'enter' && step === 1` 时 `gate.reset`，`gate.ts:198-204`）；「本轮交过图」由工具侧回写 `onPlanStarted → markPlanned`，且一轮只记第一次（`gate.ts:47-51`，接线在 `index.ts:261`）。状态按会话隔离（`PlanGate` 的三个 Map，`gate.ts:33-36`）。\n\n## 3. `src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n**入口**：`PLAN_TOOL = 'refine_plan'`（`tool.ts:41-42`），用 `ctx.tools.register(defineTool({...}))` 注册（`tool.ts:394-396`），参数 schema 里 `kind` 枚举正是三种节点（`tool.ts:425`），`arguments` 字段的描述里写明「正好是 `@@nodeId@@` 的参数会变成那个节点的产出」（`tool.ts:439-440`）。\n\n**跑法**：`execute`（`tool.ts:491-514`）→ `parsePlanArgs` 校验（不合法的计划直接抛错）→ 节点数超过 `maxBatchSize` 抛错 → `onPlanStarted` 回调 → `runPlan(...)`（`tool.ts:290-342`）：先 `buildWaves`（不成立就抛「the plan does not hold together」），逐层 `Promise.all` 并发，同层同时跑、层间顺序；`schedule` 由并发层数算出 `concurrent | mixed | serial`（`tool.ts:331-334`）；输出是 `{ criteria, waves, schedule, nodes: [{id, kind, ok, output, error}] }`。\n\n**节点分发**（`runNode`，`tool.ts:177-273`）：\n- `tools` 节点：先用 `substitutePlaceholders` 替换参数，再交给 `runBatch` 走 harness 工具注册表管线（`tool.ts:191-204`）。\n- `subagent` / `subagent_fork` 节点：**直接调用 harness 里同名的子代理工具**——`runner.execute({ name: node.kind, arguments: { description: node.id, prompt: buildAgentPrompt(...), run_in_background: false } })`（`tool.ts:231-249`）；依赖节点的产出以文本块附在 prompt 尾部（`tool.ts:149-160`）。\n\n**子代理受到的限制**（插件自己施加的、有源码证据的）：\n\n| 限制 | 证据 | 默认值 |\n|---|---|---|\n| **不得再往下派代理**（深度上限） | `tool.ts:215-225`：`depth >= maxAgentDepth` 时该节点直接失败并给出错误 | `maxAgentDepth = 1`（`index.ts:102-109`） |\n| **单个代理节点的时间预算**，超时 abort 且该节点记为失败，其余节点结果照常返回 | `tool.ts:119-138`（`runWithDeadline`） | `agentNodeTimeoutMs = 300000`（`index.ts:111-118`） |\n| **前台同步跑** | `tool.ts:241` `ru"
+}

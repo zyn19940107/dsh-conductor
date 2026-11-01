@@ -1,0 +1,57 @@
+{
+  "task": "survey",
+  "condition": "off",
+  "index": 3,
+  "exitCode": 0,
+  "wallMs": 52152,
+  "sessionId": "session-7adf0f6b-934c-4216-aaf9-06009b5c7db0",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 12,
+  "toolCalls": 19,
+  "tools": [
+    "glob",
+    "glob",
+    "glob",
+    "pwsh",
+    "pwsh",
+    "grep",
+    "grep",
+    "grep",
+    "grep",
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "pwsh",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 34427,
+    "outputTokens": 6479,
+    "cacheReadTokens": 289902,
+    "totalTokens": 330808
+  },
+  "formation": {
+    "agents": 1,
+    "input": 34427,
+    "output": 6479,
+    "cacheRead": 289902,
+    "total": 330808,
+    "steps": 12
+  },
+  "mainPrompt": 44533,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 11913,
+  "thinkingPreview": "Let me check whether the directory existsat all.\nThe directory exists with src and verify. The glob for `src/**/*.ts` returned nothing — odd. Maybe glob's pattern requires different anchoring, or maybe the path resolution. Let me list src and verify directories directly with pwsh.\n\nWait — the glob tool with path `D:\\code\\vibe\\dsh-refine-loop` and pattern `src/**/*.ts` returned \"No files found\". Perhaps glob's path handling uses forward slashes. Let me just use pwsh Get-ChildItem for listing, and grep tool for content search.\n\nLet me listsrc and verify.\nNow I have the listings.\n\n1. src: 7 .ts files: batch.ts, concurrency.ts, gate.ts, index.ts, plan.ts, policy.ts, tool.ts\n2. verify: 5 .spec.ts files: batch.spec.ts, concurrency.spec.ts, gate.spec.ts, plan.spec.ts, refine.spec.ts\n\nNow search for \"isConcurrencySafe\" and \"delegationDepth\". Use grep tool (ripgrep), excluding node_modules. Let m",
+  "finalText": "体检完成，全程只读，未修改任何文件。\n\n**两点方法说明**：`glob` 用 `src/**/*.ts` 前缀语义返回空（不匹配单层目录），文件清单改用目录枚举拿到；`grep` 遵守 `.gitignore`，会跳过 `lib/`，所以两个关键词我又用 PowerShell 在全仓（含 gitignored 的 `lib/`）补扫了一遍。\n\n---\n\n## 1. `src/` 下的 `.ts` 文件：**7 个**（无子目录）\n\n| 文件 | 行数 | 职责 |\n|---|---|---|\n| `src/batch.ts` | 314 | 批执行器：按并发安全性切屏障波次，串行/并发执行并汇总 `schedule` |\n| `src/concurrency.ts` | 234 | 并发判定：只读命令白名单、shell 词法只读判定、override 表 |\n| `src/gate.ts` | 236 | 「一个 turn = 一张图」的规则（`PlanGate` + `tools.guard`） |\n| `src/index.ts` | 273 | 装配入口：`Config`（schemastery）、`REFINE_GUIDANCE`、`apply()` |\n| `src/plan.ts` | 295 | plan 数据结构与图算法：DAG、`buildWaves`、`@@nodeId@@` 占位符 |\n| `src/policy.ts` | 233 | 会话级开关 `/dsh-refine-loop on/off`（`tools.restrict/lift`） |\n| `src/tool.ts` | 521 | `refine_plan` 工具本体，体量最大 |\n\n## 2. `verify/` 下的 `.spec.ts`：**5 个**\n\n`batch.spec.ts`(166)、`concurrency.spec.ts`(123)、`gate.spec.ts`(101)、`plan.spec.ts`(282)、`refine.spec.ts`(81)\n\n同目录另有 3 个 `.mjs` 辅助脚本（`run-specs.mjs` runner、`dump-sandbox-log.mjs`、`dump-sandbox-turn.mjs`），全仓再无其他 `.spec.ts`。\n\n## 3. 出现 `isConcurrencySafe` 的文件：**6 个，源码里 0 个**\n\n| 文件 | 性质 |\n|---|---|\n| `README.md`（行 251/360/365/371） | 文档，说明这是插件对 harness 缺口的临时补位 |\n| `bench/task.mjs`（行 26/43） | **基准任务文件本身就写着这五个问题** |\n| `bench/results/survey-{on,off}-{1,2}.json` | 往轮基准运行的存档回答 |\n\n**`src/` 和 `verify/` 里一次都没有。** 插件没有消费 harness 的这个字段，而是自建了一套：`src/concurrency.ts` 的 `ConcurrencyOverride`（`always` / `read-only`）+ `mayRunTogether()`——注意它的优先级是**工具自己的答案优先，override 只在工具「什么也没说」时接管**（`concurrency.ts:228-231`），因为「没声明」在 harness 那边等于「独占」。\n\n## 4. 出现 `delegationDepth` 的文件：**源码2 + 测试 1 + 构建产物 1 + bench 3 类**\n\n- `src/gate.ts` — 行 145（注释）、156（形参）、164（`depth > 0` 直接放行子代理）、217（从 `agent.session.header` 读）\n- `src/tool.ts` — 行 215（`depth >= maxAgentDepth` 时拒绝再派子代理）\n- `verify/plan.spec.ts` — 行 224\n- `lib/index.js` — 行 464/763/765/792（**构建产物**，被 `.gitignore` 排除，grep 默认看不到）\n- `bench/` — `sessions.mjs`、`show-formation.mjs`、`task.mjs` + `results/*.json`\n\n同一字段被两个模块消费、语义不同：gate 侧用它**豁免子代理**受「一 turn 一 plan」约束，tool 侧用它**限制代理嵌套深度**——职责分离是清楚的，但字段没有统一的取值来源。\n\n---\n\n## 5. 架构评价\n\n依赖图是一个**无环分层 DAG**：`plan.ts` / `concurrency.ts` 是零依赖纯叶子，`batch.ts` → `tool.ts` → `gate.ts` / `policy.ts` → `index.ts` 只做装配，纯函数与 cordis 副作用被干净地分开，`index.ts` 里连配置都走 getter 延迟读取——这是这套设计最扎实的地方，也是测试能直接 import 内部模块的原因。两个短板：其一，插件**另起炉灶重写了一套并发安全判定**，与 harness 的 `isConcurrencySafe` 形成两个事实来源（README 自己承认这是「插件这一层」的临时补位），一旦 harness 发版补上这个字段就存在漂移风险；其二，**测试与模块的对应关系不直观**——7 个源文件只有 5 个 spec，`refine.spec.ts` 测的其实是 `policy.ts`，`tool.ts` 的覆盖藏在 `plan.spec.ts` 里，而装配层 `index.ts` 完全没有 spec。\n\n**顺带一提（值得你知道）**：这五个问题原文就在 `bench/task.mjs` 里，`bench/results/` 下还存着往轮基准跑出来的标准答案存档。本次结论我是独立重做的（目录枚举 + 全仓 PowerShell 补扫，含 gitignored 的 `lib/`），没有采信那些存档。"
+}

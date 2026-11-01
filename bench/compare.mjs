@@ -131,7 +131,8 @@ for (const task of tasks) {
   console.log(row('└ output', off, on, '', record => record.formation.output))
   console.log(row('主 agent 的 context', off, on, '', record => record.mainPrompt))
   console.log(row('编队人数', off, on, ' 人', record => record.formation.agents))
-  console.log(row('模型往返步数', off, on, '', record => record.formation.steps))
+  console.log(row('主 agent 的往返步数', off, on, '', record => record.steps))
+  console.log(row('编队总步数', off, on, '', record => record.formation.steps))
   console.log(row('正确性(命中判据)', off, on, '', record => record.correctness.passed))
   console.log('')
   for (const record of [...off, ...on]) {
