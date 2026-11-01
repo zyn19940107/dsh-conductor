@@ -309,6 +309,7 @@ export function renderBatch(output: BatchOutput): string {
     }
   }
   lines.push('')
-  lines.push('Write the conclusion of every item above in this reply.')
+  lines.push('Answer the question in this reply, and keep it short: what these results settle, what they do not '
+    + 'settle, and what the next round has to pick up. Do not restate the results — the next round reads them.')
   return lines.join('\n')
 }
