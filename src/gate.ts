@@ -173,11 +173,12 @@ export function planRefusal(
   // A conversation that opted out is left alone.
   if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
-  // A delegated child works the ordinary way: it looks at a result and decides
-  // the next call. That is the chain itself, and forcing a plan on it is what
-  // makes a child write calls it cannot know yet — a grep's line numbers, the
-  // files a glob will find.
-  if (delegationDepth > 0) return undefined
+  // A child is a turn too, and a turn is one plan. Measured both ways: a child
+  // left to take one step per call costs several times what a child that hands
+  // its calls over in one plan costs, because every step of a chain re-sends
+  // the history the earlier steps left behind. The child's plan batches its
+  // calls, which is the whole point of the rule.
+  void delegationDepth
   // The plan is how the work is handed over.
   if (toolName === PLAN_TOOL) return undefined
   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined

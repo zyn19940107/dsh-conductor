@@ -13,10 +13,10 @@
  */
 
 /** The kinds of node a plan may hold. */
-export type PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'
+export type PlanNodeKind = 'tools' | 'subagent'
 
 /** The node kinds that start an agent. */
-export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent', 'subagent_fork']
+export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent']
 
 /** One call inside a tools node. */
 export interface PlanToolCall {
@@ -101,7 +101,7 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     const kind = item.kind
     if (typeof id !== 'string' || id.trim() === '') return undefined
     if (typeof kind !== 'string') return undefined
-    if (kind !== 'tools' && kind !== 'subagent' && kind !== 'subagent_fork') return undefined
+    if (kind !== 'tools' && kind !== 'subagent') return undefined
     const nodeId = id.trim()
     if (seen.has(nodeId)) return undefined
     seen.add(nodeId)

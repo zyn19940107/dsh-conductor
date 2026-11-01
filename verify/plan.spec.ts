@@ -70,7 +70,7 @@ console.log('parsePlanArgs')
     criteria: ['everything ran'],
     nodes: [
       { id: 'read', kind: 'tools', calls: [{ name: 'glob', arguments: { pattern: '*' } }] },
-      { id: 'judge', kind: 'subagent_fork', task: 'judge it', after: ['read'] },
+      { id: 'judge', kind: 'subagent', task: 'judge it', after: ['read'] },
     ],
   })
   check('accepts a plan', parsed !== undefined)
@@ -167,7 +167,7 @@ console.log('runPlan')
     executionMode: () => ({ kind: 'parallel' }),
     async execute(exec) {
       calls.push(exec.name)
-      if (exec.name === 'subagent_fork') {
+      if (exec.name === 'subagent') {
         prompts.push(String((exec.arguments as { prompt?: string }).prompt ?? ''))
       }
       return {
@@ -183,7 +183,7 @@ console.log('runPlan')
       criteria: ['every node ran'],
       nodes: [
         { id: 'read', kind: 'tools', calls: [{ name: 'glob', arguments: { pattern: '*' } }], task: '', after: [] },
-        { id: 'judge', kind: 'subagent_fork', calls: [], task: 'judge the listing', after: ['read'] },
+        { id: 'judge', kind: 'subagent', calls: [], task: 'judge the listing', after: ['read'] },
         { id: 'fresh', kind: 'subagent', calls: [], task: 'look it up', after: [] },
       ],
     },
@@ -201,7 +201,7 @@ console.log('runPlan')
   check('the plan had two layers', output.waves === 2)
   check('the shape is mixed', output.schedule === 'mixed')
   check('the tool node ran its call', calls.includes('glob'))
-  check('the fork node ran', calls.includes('subagent_fork'))
+  check('the child node ran', calls.includes('subagent'))
   check('the fresh node ran', calls.includes('subagent'))
   check('the fork child was given the dependency output',
     prompts.some(prompt => prompt.includes('judge the listing') && prompt.includes('ran glob')))

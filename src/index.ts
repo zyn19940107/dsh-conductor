@@ -61,18 +61,14 @@ export const REFINE_GUIDANCE = [
   + 'one refine_plan call. The plan runs, its results come back together, and the turn is over: what the '
   + 'plan produced is what this turn produced. If you have nothing left to do, write the conclusion instead — '
   + 'that ends the turn too.',
-  '- A node is one of three kinds. "tools": a batch of calls written before anything has run — they run '
+  '- A node is one of two kinds. "tools": a batch of calls written before anything has run — they run '
   + 'together and nothing looks at a result before the next call, so it cannot correct itself; use it when '
-  + 'the calls are plain and sure, such as reading files you can name exactly. "subagent"/"subagent_fork": '
-  + 'the ordinary call → think → call chain, run inside the plan — the child sees each result and decides '
-  + 'the next call, so it can work its own way out of a failure; use it when the work needs looking at what '
-  + 'came back, such as searching, tracing, or auditing something you cannot name in advance.',
-  '- Choose "subagent" unless the task genuinely needs this conversation. A "subagent" starts with nothing; '
-  + 'a "subagent_fork" carries this whole conversation into the child and re-sends it on every step the child '
-  + 'takes, so one forked child costs several times what a fresh one costs. Use "subagent_fork" only when the '
-  + 'task cannot even be stated without what was already said here — a follow-up on a conclusion of this '
-  + 'conversation, or a review of it. A search, a file audit, or reading code by name never needs it: those '
-  + 'go to "subagent".',
+  + 'the calls are plain and sure, such as reading files you can name exactly. "subagent": the ordinary '
+  + 'call → think → call chain, run inside the plan — the child starts with no context and decides each next '
+  + 'call from the result before it, so it can work its own way out of a failure; use it when the work needs '
+  + 'looking at what came back, such as searching, tracing, or auditing something you cannot name in advance.',
+  '- A child starts with nothing. It must be able to state its whole task in the plan: do not reach for the '
+  + 'conversation when writing it, because it will not have it.',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',
@@ -84,38 +80,6 @@ export const REFINE_GUIDANCE = [
   'These are the rules for the refined loop. Do not go looking for them elsewhere — the tool is already in '
   + 'your tool table and the rules are already here.',
 ].join('\n')
-
-/**
- * Whether a rendering scope belongs to a delegated child.
- *
- * The agent is its own scope key, so the depth in its session header is what
- * says whether the guidance is being rendered for a child.
- *
- * @param scope - the scope the system prompt is being rendered for.
- * @returns true when that scope is a delegated child.
- */
-function isDelegatedChild(scope: unknown): boolean {
-  const header = (scope as { session?: { header?: { delegationDepth?: number } } } | undefined)?.session?.header
-  return (header?.delegationDepth ?? 0) > 0
-}
-
-/**
- * The refined loop, as a delegated child should see it.
- *
- * A child is where the ordinary chain belongs: it reads a result, then decides
- * the next call — a grep's line numbers, the files a glob found, whether the
- * first attempt was even the right one. The plan is there when the child already
- * knows its calls, not as a fence around it.
- */
-export const CHILD_GUIDANCE = [
-  'Refined loop, as a delegated child:',
-  `- You may call tools directly. That is the normal way to work here: look at a result, then decide the next call.`,
-  `- ${PLAN_TOOL} is available when you already know every call you need: it runs them in one round trip and `
-  + 'returns every result together, which is worth it for several independent calls. It is not required.',
-  '- A plan is written before anything runs, so its arguments are fixed. Use it for calls whose arguments you '
-  + 'know now; use direct calls when the next argument depends on a result you do not have yet.',
-  '- A plan of yours may not start another agent — you are already the delegated child.',
-].join(String.fromCharCode(10))
 
 /**
  * Whether the plugin is mounted at all.
@@ -295,10 +259,7 @@ export function apply(ctx: Context, config: Config): void {
     // takes the guidance out of the system prompt.
     text: ({ scope }) => {
       if (ctx.tools.get(PLAN_TOOL, scope) === undefined) return ''
-      // A delegated child is the ordinary call → think → call chain: it must be
-      // able to look at a result before it writes the next call, so the rule
-      // does not hold it and the guidance says so.
-      return isDelegatedChild(scope) ? CHILD_GUIDANCE : REFINE_GUIDANCE
+      return REFINE_GUIDANCE
     },
   })
 

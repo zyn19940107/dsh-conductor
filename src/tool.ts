@@ -412,10 +412,10 @@ export function applyPlanTool(
     description: 'Run one plan of work and return every result together. A turn is one plan: this call carries '
       + 'the whole shape of the turn — the observable criteria that decide whether it succeeded, and the nodes '
       + 'it is made of. A node is one of three kinds — "tools" (several calls that run together), "subagent" (a '
-      + 'self-contained task for a child that starts with no context), or "subagent_fork" (a task for a child '
+      + 'self-contained task for a child that starts with no context)'
       + 'that inherits this conversation) — and a node may name the nodes it depends on, so the ones that '
       + 'depend on nothing run together and the next layer waits for them. Choose "subagent" for a task that '
-      + 'needs nothing from this conversation, and "subagent_fork" for one that builds on what was said here.',
+      + 'needs nothing from this conversation.',
     parameters: {
       criteria: {
         type: 'array',
@@ -437,11 +437,11 @@ export function applyPlanTool(
             },
             kind: {
               type: 'string',
-              enum: ['tools', 'subagent', 'subagent_fork'],
+              enum: ['tools', 'subagent'],
               required: true,
               description: '"tools" runs calls together. "subagent" hands a self-contained task to a child '
                 + 'that starts with no context — use it when the task needs nothing from this conversation. '
-                + '"subagent_fork" hands a task to a child that inherits this conversation — use it when '
+                + '""'
                 + 'the task builds on what has been said here.',
             },
             calls: {
@@ -459,7 +459,7 @@ export function applyPlanTool(
             },
             task: {
               type: 'string',
-              description: 'The task of an agent node. Only for kind "subagent" or "subagent_fork". State '
+              description: 'The task of an agent node. Only for kind "subagent". State '
                 + 'everything the child needs: a child that starts with no context knows nothing but this.',
             },
             after: {
@@ -489,7 +489,7 @@ export function applyPlanTool(
               additionalProperties: false,
               properties: {
                 id: { type: 'string', required: true },
-                kind: { type: 'string', enum: ['tools', 'subagent', 'subagent_fork'], required: true },
+                kind: { type: 'string', enum: ['tools', 'subagent'], required: true },
                 ok: { type: 'boolean', required: true },
                 output: { type: 'string', required: true },
                 error: { type: 'string', required: true },
