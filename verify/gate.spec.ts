@@ -1,110 +1,81 @@
 /**
- * The rule that makes a turn one plan.
+ * The rule that keeps the agent's tool calls inside a plan.
+ *
+ * The agent does not call tools itself. Every call it makes goes inside a
+ * plan. What it does after a plan has run is its own business.
  */
 
-import { PlanGate, planRefusal, isModelCall, PLAN_REQUIRED, PLAN_DONE } from '../src/gate.js'
-import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import { PlanGate, PLAN_REQUIRED, planRefusal } from '../src/gate.js'
 
 let failures = 0
 
 /**
- * Assert one condition.
+ * Check one expectation.
  *
- * @param {string} name - what is being asserted.
- * @param {boolean} condition - the condition that must hold.
- * @param {string} detail - what to print when it does not.
+ * @param what - what is being checked.
+ * @param ok - whether it holds.
  */
-function check(name: string, condition: boolean, detail = ''): void {
-  if (condition) {
-    console.log(`  ok   ${name}`)
-    return
-  }
-  failures += 1
-  console.log(`  FAIL ${name}${detail === '' ? '' : ` — ${detail}`}`)
+function check(what: string, ok: boolean): void {
+  console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`)
+  if (!ok) failures += 1
 }
 
-console.log('a turn opens with its plan')
+console.log('a tool the agent calls itself is pulled back')
 {
   const gate = new PlanGate()
-  check('a direct call before the plan is refused',
-    planRefusal('glob', ToolCallId('call-s1'), 's1', gate, () => true, true, 2, 10) === PLAN_REQUIRED)
-  check('the plan itself is never refused',
-    planRefusal('refine_plan', ToolCallId('call-s1'), 's1', gate, () => true, true, 2, 10) === undefined)
-  check('the refusal names the tool',
-    (planRefusal('glob', ToolCallId('call-s1'), 's1', gate, () => true, true, 2, 10) ?? '').includes('refine_plan'))
-}
-
-console.log('a turn stops when its plan has run')
-{
-  const gate = new PlanGate()
-  gate.markPlanned('s2', ToolCallId('plan-2'))
-  check('a direct call after the plan is refused',
-    planRefusal('glob', ToolCallId('call-s2'), 's2', gate, () => true, true, 2, 10) === PLAN_DONE)
-  check('the call that handed the plan over is the plan itself, and it runs',
-    planRefusal('refine_plan', ToolCallId('plan-2'), 's2', gate, () => true, true, 2, 10) === undefined)
-  check('the refusal asks for the conclusion',
-    (planRefusal('glob', ToolCallId('call-s2'), 's2', gate, () => true, true, 2, 10) ?? '').includes('conclusion'))
+  check('a direct call is refused',
+    planRefusal('glob', 's1', gate, () => true, true, 2) === PLAN_REQUIRED)
+  check('the refusal says the call goes inside a plan',
+    (planRefusal('glob', 's1', gate, () => true, true, 2) ?? '').includes('inside a plan'))
   const fresh = new PlanGate()
-  fresh.markPlanned('s2b', ToolCallId('plan-2b'))
-  check('a second plan is refused too',
-    planRefusal('refine_plan', ToolCallId('call-s2b'), 's2b', fresh, () => true, true, 2, 10) === PLAN_DONE)
+  check('the refusal offers the conclusion as the other way out',
+    (planRefusal('glob', 's1b', fresh, () => true, true, 2) ?? '').includes('conclusion'))
 }
 
-console.log('the calls a plan makes are not held to the rule')
-{
-  const root = ToolCallId('root-1')
-  const nested = ToolCallId('nested-1')
-  check('the call the model asked for is its own',
-    isModelCall({ callId: root, rootCallId: root }) === true)
-  check('a call a plan made is nested',
-    isModelCall({ callId: nested, rootCallId: root }) === false)
-}
-
-console.log('a child agent is held to the rule too')
+console.log('the plan is how the work is handed over')
 {
   const gate = new PlanGate()
-  check('a child must hand over a plan as well',
-    planRefusal('glob', ToolCallId('call-s3'), 's3', gate, () => true, true, 2, 10) === PLAN_REQUIRED)
-  check('the child may hand over a plan',
-    planRefusal('refine_plan', ToolCallId('call-s3b'), 's3', gate, () => true, true, 2, 10) === undefined)
+  check('the plan is never refused',
+    planRefusal('refine_plan', 's1', gate, () => true, true, 2) === undefined)
 }
 
-console.log('the rule gives up rather than trap the agent')
+console.log('the rule is a pullback, not a cage')
 {
   const gate = new PlanGate()
-  planRefusal('glob', ToolCallId('call-s4'), 's4', gate, () => true, true, 2, 10)
-  planRefusal('glob', ToolCallId('call-s4'), 's4', gate, () => true, true, 2, 10)
-  check('the third attempt before the plan is allowed through',
-    planRefusal('glob', ToolCallId('call-s4'), 's4', gate, () => true, true, 2, 10) === undefined)
+  check('the first direct call is refused',
+    planRefusal('glob', 's1', gate, () => true, true, 2) === PLAN_REQUIRED)
+  check('the second direct call is refused',
+    planRefusal('glob', 's1', gate, () => true, true, 2) === PLAN_REQUIRED)
+  check('after the pullbacks run out the agent is left alone',
+    planRefusal('glob', 's1', gate, () => true, true, 2) === undefined)
 }
 
 console.log('a conversation that opted out is left alone')
 {
   const gate = new PlanGate()
   check('nothing is refused for a conversation that opted out',
-    planRefusal('glob', ToolCallId('call-s7'), 's7', gate, () => false, true, 2, 10) === undefined)
+    planRefusal('glob', 's7', gate, () => false, true, 2) === undefined)
 }
 
 console.log('the rule can be turned off')
 {
   const gate = new PlanGate()
   check('nothing is refused when the rule is off',
-    planRefusal('glob', ToolCallId('call-s5'), 's5', gate, () => true, false, 2, 10) === undefined)
+    planRefusal('glob', 's2', gate, () => true, false, 2) === undefined)
 }
 
-console.log('a new turn starts over')
+console.log('a new turn starts from scratch')
 {
   const gate = new PlanGate()
-  gate.markPlanned('s6', ToolCallId('plan-6'))
-  check('the turn has a plan', gate.hasPlanned('s6') === true)
-  gate.reset('s6')
-  check('the new turn has none', gate.hasPlanned('s6') === false)
-  check('and the new turn is held to the rule again',
-    planRefusal('glob', ToolCallId('call-s6'), 's6', gate, () => true, true, 2, 10) === PLAN_REQUIRED)
+  planRefusal('glob', 's3', gate, () => true, true, 2)
+  planRefusal('glob', 's3', gate, () => true, true, 2)
+  gate.reset('s3')
+  check('after a reset the first call of the new turn is refused again',
+    planRefusal('glob', 's3', gate, () => true, true, 2) === PLAN_REQUIRED)
 }
 
 if (failures > 0) {
-  console.error(`\n${failures} check(s) failed`)
+  console.error(`${failures} check(s) failed`)
   process.exit(1)
 }
-console.log('\nall checks passed')
+console.log('all checks passed')

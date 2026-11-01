@@ -100,6 +100,11 @@ async function run() {
     }
     events.push(event)
     if (event.type === 'final') finalText = String(event.text ?? '')
+    // The turn's answer is whatever it produced: the assistant's text and the
+    // results of the tools it ran. With the plugin on, the plan's result is the
+    // turn's answer — there is no closing summary to read.
+    if (event.type === 'text') finalText += String.fromCharCode(10) + String(event.text ?? '')
+    if (event.type === 'tool_result') finalText += String.fromCharCode(10) + String(event.result ?? '')
     if (event.type === 'session') sessionId = String(event.sessionId ?? '')
   }
   if (exitCode !== 0) {
