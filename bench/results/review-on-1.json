@@ -3,40 +3,42 @@
   "condition": "on",
   "index": 1,
   "exitCode": 0,
-  "wallMs": 175499,
-  "sessionId": "session-f4c6c525-71d2-473e-bdaf-da467cafc696",
+  "wallMs": 157693,
+  "sessionId": "session-097ee501-1d79-40cd-b0a5-1cc3f76ed936",
   "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
   "steps": 4,
   "toolCalls": 4,
   "tools": [
-    "glob",
-    "glob",
     "refine_plan",
+    "read",
+    "grep",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 31132,
-    "outputTokens": 9968,
-    "cacheReadTokens": 66304,
-    "totalTokens": 107404
+    "inputTokens": 32256,
+    "outputTokens": 9193,
+    "cacheReadTokens": 85504,
+    "totalTokens": 126953
   },
   "formation": {
     "agents": 4,
-    "input": 262129,
-    "output": 70130,
-    "cacheRead": 3745006,
-    "total": 4077265,
-    "steps": 75
+    "input": 148613,
+    "output": 30458,
+    "cacheRead": 479999,
+    "total": 659070,
+    "steps": 22
   },
-  "mainPrompt": 41841,
+  "mainPrompt": 43019,
   "correctness": {
-    "passed": 4,
+    "passed": 3,
     "total": 4,
-    "missing": []
+    "missing": [
+      "代理节点的类型名(缺:subagent_fork)"
+    ]
   },
   "planned": true,
   "planAgentNodes": 3,
-  "thinkingChars": 14971,
-  "thinkingPreview": "I need to use refine_plan. Let me design the plan: three independent subagents each reviewing one file, then a synthesis. Actually I could do the reads myself as \"tools\" nodes since I know exact paths — but the task says review three parts independently. The files are named exactly: src/plan.ts, src/gate.ts, src/tool.ts under D:\\code\\vibe\\dsh-refine-loop.\n\nReading the files is a plain \"tools\" node — I know the paths. But the analysis requires reading and understanding. Reading with the read tool returns content to me, then I synthesize. But in a plan, results come back together and I see them. That works: a tools node that reads all three files, plus subagents for deeper analysis?\n\nLet me think about what's most robust. The question asks specific facts:\n1. plan.ts — plan data structure, three kinds of nodes, placeholder syntax in call args\n2. gate.ts — what rule does this plugin enforce,",
-  "finalText": "已完成三份独立审查(只读,未修改任何文件)。有一处需要先纠正前提:**当前代码里节点只有两种,不是三种**——第三种 `subagent_fork` 只活在 README 和 gate 文案里,是删改后没清干净的残留。\n\n---\n\n## 1. `src/plan.ts` — 计划的数据结构、节点种类、占位符语法\n\n**数据结构**(plan.ts:16-58):\n\n```ts\nexport type PlanNodeKind = 'tools' | 'subagent'          // plan.ts:16\nexport const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent']  // plan.ts:19\n\nexport interface PlanToolCall { name: string; arguments: unknown }      // plan.ts:22-27\nexport interface PlanNode {\n  id: string; kind: PlanNodeKind\n  calls: PlanToolCall[]; task: string; after: string[]                // plan.ts:30-41\n}\nexport interface PlanArgs {\n  more: boolean; criteria: string[]; nodes: PlanNode[]                 // plan.ts:44-58\n}\n```\n\n计划是一张**小图**:`after` 是依赖边,`buildWaves`(plan.ts:246-298)按依赖深度分层成波次,同一波并发、跨波串行。图不成图(重名/自依赖/依赖不存在/成环)返回 `{error}` 而不是抛异常。另有两个辅助类型:`PlanWaves = {waves} | {error}`(plan.ts:66-68)、`NextSlice = {done:true} | {done:false, plan}`(plan.ts:175-177)。\n\n**节点种类 —— 实际只有两种:**\n\n| kind | 含义 | 出处 |\n|---|---|---|\n| `'tools'` | 一批调用一起跑,必须 ≥1 个具名 call | plan.ts:134-147, tool.ts:453 |\n| `'subagent'` | 交给一个\"无上下文起步\"的子代理的任务,必须非空 `task` | plan.ts:150-152 |\n\n第三种 `subagent_fork`(继承本对话的子代理)在代码里**不存在**:`PlanNodeKind` 只有两个成员(plan.ts:16),解析器显式拒绝其他值(plan.ts:123),schema 的 `enum` 也是 `['tools','subagent']`(tool.ts:453、505)。但 README 仍在讲三种(README.md:238-249、264),`PLAN_REQUIRED` 文案里还留着\"the tasks that need a child that inherits this conversation\"(gate.ts:125-126),tool.ts 的 kind 描述里还留着残句 `\"\"` + \"the task builds on what has been said here.\"(tool.ts:455-458)——三处都是同一个未清理的尾巴。\n\n**占位符语法:`@@nodeId@@`**\n\n```ts\nconst PLACEHOLDER = /^@@([^@]+)@@$/u          // plan.ts:82  整个参数恰好是占位符\nconst INLINE_PLACEHOLDER = /@@([^@\\n]+)@@/gu    // plan.ts:91  句子中间的占位符\n```\n\n刻意**不用** `{{}}`:harness 自己保留双花括号做 prompt 变量,冲突会被整段拒渲染,所以用 `@@…@@` 独占(plan.ts:77-80)。行为要点:\n\n- 整个参数 = `@@id@@` → 替换成该节点输出;出现在句中 → 就地粘贴(plan.ts:330-350)。\n- 解析不到 → 抛错 `the argument refers to the output of \"X\", and that node has not produced one`(plan.ts:337、347),是错误不是字面量。\n- **占位符自动建边**:call 参数里的 `@@id@@` 会被塞进 `after`,即使计划没写这条依赖(plan.ts:161-167)。\n- 只扫 call 的 `arguments`;**subagent 节点的 `task` 里的 `@@id@@` 既不建边也不替换**,会原样进到子代理 prompt 里。\n\n---\n\n## 2. `src/gate.ts` — 那条规则和触发条件\n\n**规则一句话:agent 不自己调工具,所有工具调用都必须放进一个计划里**(gate.ts:10-11)。拒答文案 `PLAN_REQUIRED` 原文(gate.ts:123-127):\n\n> `Do not call tools yourself — every call you make goes inside a plan. Either hand the work over as a plan with refine_plan — the criteria that decide whether it succeeded, and the nodes: the calls that run together, the tasks that need a child with no context, the tasks that need a child that inherits this conversation, and what depends on what. The plan runs in one round trip and returns every result together — or write the conclusion, which ends the turn.`\n\n**触发条件**:挂在 `ctx.tools.guard(...)` 上(gate.ts:219-235),命中后返回拒答原因(即拒绝这次调用)。判定链在 `planRefusal`(gate.ts:164-186),按顺序短路:\n\n1. `if (!appliesTo(sessionId)) return undefined` — 该会话已豁免;\n2. `if (!requirePlan) return undefined` — 全局开关(默认 `true`,index.ts:204);\n3. `if (delegationDepth > 0) return undefined` — **被委派的子代理豁免**:子代理是执行者不是规划者(gate.ts:176-181);\n4. `if (toolName === PLAN_TOOL) return undefined` — `refine_plan` 本身永远放行;\n5. `if (gate.bumpBefore(sessionId) > planPullbacks) return undefined` — 拉回预算用尽;\n6. 否则 `return PLAN_REQUIRED` → 拒绝。\n\n只有**模型自己发起的调用**受管:`isModelCall` 判据是 `execution.rootCallId === execution.callId`(gate.ts:148-150),计划内部派生的嵌套调用一律放行(gate.ts:225)。\n\n**性质是\"拉回\"而不是\"笼子\"**:前 `planPullbacks`(默认 2,index.ts:212)次拒答后放行任其行为(gate.ts:184)。另有 `agent/pre-step` 钩子:收到 user 消息就重置轮次预算(gate.ts:206-208),`step === 1` 时重置拉回计数与计划状态(gate.ts:209-212);轮次推进由 `NEXT_ROUND` 消息驱动(gate.ts:135-137,index.ts:330-338)。配置面 `PlanGateConfig { requirePlan, planPullbacks, maxRounds, appliesTo }`(gate.ts:241-249),都是读取时现取的 getter。\n\n---\n\n## 3. `src/tool.ts` — 计划怎么跑起来,子代理受什么限制\n\n**运行路径**:只注册一个工具 `refine_plan`(tool.ts:45、414-416),模型把**整张图**直接放在这次调用的参数里(`criteria` / `more` / `nodes`),没有 plan id、没有计划仓库。`parsePlanArgs` 校验(plan.ts:103-170)→ `buildWaves` 分层(plan.ts"
+  "thinkingChars": 19515,
+  "thinkingPreview": "Let me look at the files. The task is read-only review of three files in D:\\code\\vibe\\dsh-refine-loop\\src\\plan.ts, gate.ts, tool.ts.\n\nLet me use the refine_plan? Actually the instructions say the refined loop: one refine_plan call carries the whole shape of the turn. But I could also just read files directly. The rule says \"You do not call tools yourself: every call you make goes inside a plan.\" Hmm, that's the refined loop instruction. But also there's a note: \"If you have nothing left to do, write the conclusion instead\".\n\nHowever, the user asked for three independent reviews. I could use refine_plan with three subagent nodes to independently review each file, then summarize. But actually simpler: I can read the files myself. But the system prompt says refined loop. Let me consider: the refined loop guidance seems to be the operating mode. Let me use refine_plan with parallel reads (to",
+  "finalText": "三份文件已分别独立审完（只读，未改动任何文件）。过程中有个插曲值得记一笔：这个插件的 gate 在本会话里是活的——我中途直接调 `read`/`grep` 时被它以 `PLAN_REQUIRED` 挡回，改走 `refine_plan` 才拿到剩下的内容，正好现场演示了第 2 条规则。\n\n## 1. `src/plan.ts` —— 计划的数据结构 / 节点种类 / 占位符语法\n\n**数据结构**（全部是手写的 interface，没有用 schema 库）：\n\n```ts\n// plan.ts:44-58\nexport interface PlanArgs {\n  more: boolean          // 是否请求\"下一片\"\n  criteria: string[]     // 可观测的验收判据\n  nodes: PlanNode[]\n}\n// plan.ts:30-41\nexport interface PlanNode {\n  id: string             // 别的节点通过 after 引用它\n  kind: PlanNodeKind\n  calls: PlanToolCall[]  // tools 节点的调用\n  task: string           // subagent 节点的任务\n  after: string[]        // 依赖边\n}\n// plan.ts:22-27\nexport interface PlanToolCall { name: string; arguments: unknown }\n```\n\n计划是**一张小图**：无依赖的节点并行，有依赖的排在其后（`buildWaves`，plan.ts:246-298 按依赖深度分层；成环则返回 `{ error: 'the dependencies of the plan form a cycle…' }`）。\n\n**节点有几种——你问的\"三种\"前提不成立，代码里只有两种 kind**：\n\n```ts\n// plan.ts:16\nexport type PlanNodeKind = 'tools' | 'subagent'\n// plan.ts:19\nexport const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent']\n```\n\n- `kind: 'tools'`：一段\"一起跑的工具调用\"（`calls` 非空，`task` 被置空字符串，plan.ts:134-147）。\n- `kind: 'subagent'`：交给子代理的一段自然语言任务（`task` 非空，`calls` 恒为 `[]`，plan.ts:150-152）；只有这一类节点会拉起 agent。\n- 第三种容易混淆的结构是 `PlanToolCall`——它是 **tools 节点内部的一次调用**，没有 `id`/`kind`/`after`，不能被依赖引用，不是节点类型。`parsePlanArgs` 对非法 kind 一律整体拒绝（plan.ts:123），tool.ts 的 schema 也是 `enum: ['tools','subagent']`（tool.ts:453、505）。\n\n**占位符语法是 `@@nodeId@@`（双 @ 包夹），不是 `{{}}`／`${}`／`<>`**：\n\n```ts\n// plan.ts:82\nconst PLACEHOLDER = /^@@([^@]+)@@$/u        // 整个参数就是占位符 → 换成该节点的输出\n// plan.ts:91\nconst INLINE_PLACEHOLDER = /@@([^@\\n]+)@@/gu // 句子中间内联替换\n```\n\n刻意避开 `{{}}`：注释说 harness 自己要用双花括号做 prompt 变量并会拒绝渲染含它的段（plan.ts:77-80）。两个附带语义：\n- 参数里出现 `@@x@@` **自动等价于声明依赖边** `after += 'x'`，哪怕计划没写（plan.ts:161-167）——否则工具会收到字面文本。\n- 引用节点没有输出时**抛错**而非传字面量：`the argument refers to the output of \"<id>\", and that node has not produced one`（plan.ts:337/347）。注释里举的反例却写成 `{{nodeId}}`（plan.ts:323），是文档笔误。\n- 替换只作用于 `call.arguments`；`subagent` 的 `task` 不做占位符替换（它的依赖输出由 tool.ts 拼 prompt 传）。\n\n## 2. `src/gate.ts` —— 那条规则与触发条件\n\n**规则一句话**（gate.ts:10-11 文件头注释即规则原文）：\n\n> The agent does not call tools itself. Every tool call it makes goes inside a plan.\n\n模型自己不得直接调工具，所有工具调用必须包进 plan；同一句也以散文形式出现在系统提示里（index.ts 的 `REFINE_GUIDANCE`），但**强制点在代码里**。\n\n**触发机制**：`ctx.tools.guard((execution) => …)`（gate.ts:222）注册的是宿主工具运行时的 **monotonic execution guard**——在所有 `tools/pre-execute` 监听器之后、工具体之前求值，返回理由即拒绝，且 guard 没有\"允许\"结果，监听器顺序无法把拒绝翻回放行。\n\n**触发条件（命中即拦）**：模型发起的**顶层**调用（`isModelCall`：`rootCallId === callId`，gate.ts:148-150），且工具名不是 `refine_plan` 本身（gate.ts:186）。\n\n**不触发的豁免**：\n1. 无 agent 的调用（gate.ts:223）；\n2. **plan 内部的嵌套调用**（`rootCallId !== callId`，gate.ts:228）——plan 里的调用归 plan 管；\n3. 会话已 opt-out（`/dsh-refine-loop off`，gate.ts:174）；\n4. `requirePlan=false`（gate.ts:175，默认 true）；\n5. 调用的是 `refine_plan` 自己（gate.ts:186）；\n6. **拉回预算耗尽**：`bumpBefore(sessionId) > planPullbacks`（gate.ts:187，默认 2 次）——注释说这是\"拉回，不是牢笼\"（L18-20）。\n\n两个容易看错的点：**被委派的子代理同样受管**（`delegationDepth` 被显式丢弃，gate.ts:176-184，注释记录了两种做法都实测过）；**\"本轮已提交过 plan\"不构成豁免**——`hasPlanned()` 全仓无调用点。\n\n**触发后做什么**：拒绝该次调用（工具体根本不 dispatch），并把固定文案 `PLAN_REQUIRED`（gate.ts:123-127）作为 **error 类型的工具结果**回灌给模型，不改写参数、不中止会话。`agent/pre-step`（gate.ts:203-220）本身不拒绝任何东西，只重置计数（`step === 1` 重置；出现新的 user 消息重置 round 预算）。\n\n## 3. `src/tool.ts` —— 计划怎么跑起来 / 子代理受什么限制\n\n**执行流程**：\n1. 模型调 `refine_plan`（`PLAN_TOOL`，tool.ts:45），参数 `criteria` / `more` / `nodes`（tool.ts:426-487），整次调用受工具级 `timeoutMs` 约束（tool.ts:416）。\n2. `execute` → `parsePlanArgs`（tool.ts:520）严格校验，失败直接抛错；节点数上限 `maxBatchSize`（tool.ts:524-527）。\n3. `buildWaves` 把图按依赖深度分层（tool.ts:307）；**层与层串行、层内 `Promise.all` 并发**（tool.ts:316-317），**每层跑完才写入 `outputs`**（tool.ts:333-334），所以后层只会读到已完成节点的输出。\n4. `tools` 节点 → `runBatch`，参数先经 `substitutePlaceholders`（tool.ts:198）；节点 ok = 批量里没有失败项（tool.ts:210-217）。\n5. `subagent` 节点 → 通过 `runner.execute` 派发宿主的 `subagent` 工具（tool.ts:239-250），`name: node.kind`、**`description: node.id`**、`prompt: buildAgentPrompt(...)`、`run_in_background: false`，并把父 `Agent` 实例原样转"
 }

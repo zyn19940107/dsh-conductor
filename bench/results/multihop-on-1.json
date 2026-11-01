@@ -1,0 +1,41 @@
+{
+  "task": "multihop",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 88548,
+  "sessionId": "session-dcb53961-2c03-48fd-be98-d0e28e044762",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 3,
+  "toolCalls": 3,
+  "tools": [
+    "todo_write",
+    "grep",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 23882,
+    "outputTokens": 5113,
+    "cacheReadTokens": 23368,
+    "totalTokens": 52363
+  },
+  "formation": {
+    "agents": 3,
+    "input": 91225,
+    "output": 19479,
+    "cacheRead": 152016,
+    "total": 262720,
+    "steps": 11
+  },
+  "mainPrompt": 24010,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 8127,
+  "thinkingPreview": "I need to use refine_plan for the whole turn. The chain is: grep → find definition line → read ±30 lines → explain usage.\n\nLet me design the plan. The grep is deterministic. Then finding the definition line depends on the grep result. Then reading ±30 lines depends on that. Then the explanation depends on the read content.\n\nI could do this with subagent nodes that chain, or with `more: true` slices. Actually, better approach: use tool nodes for the deterministic parts where possible, but the definition line location depends on grep output.\n\nOption: Node 1 = tools (grep). Node 2 = subagent that gets grep output passed in via \"@@nodeId@@\" — but subagent tasks can't reference node outputs directly... Actually the tool argument \"@@nodeId@@\" becomes the output of that node. For subagent tasks, I can't embed that. Hmm, but subagent nodes have `after` dependencies, and the rule says \"A node may",
+  "finalText": "调查完成，三步链已跑通。结论如下。\n\n---\n\n## 第 1 步:grep `PLAN_TOOL` 的命中文件\n\n在 `D:\\code\\vibe\\dsh-refine-loop\\src` 下共 **12 处命中,分布在 4 个文件**:\n\n| 文件 | 命中行 |\n|---|---|\n| `src\\tool.ts` | 45(定义)、415 |\n| `src\\policy.ts` | 26、39 |\n| `src\\index.ts` | 34、56、98、309 |\n| `src\\gate.ts` | 28、124、136、186 |\n\n目录里另外 4 个文件(`concurrency.ts`、`batch.ts`、`repair.ts`、`plan.ts`)**一次都没提** `PLAN_TOOL`。\n\n## 第 2 步:定义行与上下文\n\n唯一定义在 **`D:\\code\\vibe\\dsh-refine-loop\\src\\tool.ts:45`**:\n\n```ts\n44: /** The tool that runs a plan. */\n45: export const PLAN_TOOL = 'refine_plan'\n```\n\n前后 30 行读到的是文件头 + 导入区 + 紧邻的类型定义:\n\n- 文件头(1–16 行)说明插件的核心模型:agent 先画出 plan(哪些是并行 tool call、哪些需要无上下文子代理、哪些依赖前一步),插件把 plan 跑完,**一次性把全部结果交回**;\"chain 与 plan 的差别\" 就在这。\n- 18–42 行是导入:`dsh-tools` 的 `defineTool`/`ToolRunContext`,本地 `./batch.js`(renderBatch/runBatch)、`./concurrency.js`(mayRunTogether)、`./plan.js`(buildWaves/parsePlanArgs/substitutePlaceholders/AGENT_NODE_KINDS)。\n- 47 行往下是 `PlanNodeResult`、`PlanOutput` 两个输出类型。\n\n所以:**它是一个字符串字面量常量,值 `'refine_plan'`,类型是字面量类型 `'refine_plan'`(不是宽化的 `string`)**,作用是「跑 plan 的那个工具的名字」——也就是模型在工具表里看到、并在 tool call 里写出来的那个名字。\n\n## 第 3 步:谁在用、分别干什么\n\n单一真相源:全仓只有这一处定义,三处消费方都用 ESM 具名导入从 `'./tool.js'`拿,**没有 require、没有 namespace import、没有再导出、没有影子定义**。\n\n### `src/tool.ts` —— 源头 + 工具注册\n`applyPlanTool`(382 行)里:\n```ts\n414:   ctx.tools.register(defineTool({\n415:     name: PLAN_TOOL,\n```\n它是**注册键**。下游所有东西(guard 的 `execution.name`、prompt 探针、deny 列表)都以这个字符串为准。\n\n### `src/policy.ts` —— 每会话的「关掉」开关\n```ts\n38: export const POLICY_TOOLS: readonly string[] = [\n39:   PLAN_TOOL,\n40: ]\n```\n在 `turnOff()` 里被消费:`agent.ctx.tools.restrict({ deny: [...POLICY_TOOLS] })` —— 会话 opt out 时把 `refine_plan` 从该 agent scope 的工具表里摘掉。这是它的**权限门**作用。\n\n### `src/index.ts` —— 插件装配 + 系统提示词\n三处不同角色:\n- `34`:与注册器一起导入 `import { applyPlanTool, PLAN_TOOL } from './tool.js'`\n- `56` / `98`:插值进 `REFINE_GUIDANCE` 和 `CHILD_GUIDANCE` 两段 system prompt——**告诉模型这个名字该叫什么**\n- `309`:当作**工具表探针**:\n  ```ts\n  309:       if (ctx.tools.get(PLAN_TOOL, scope) === undefined) return ''\n  ```\n  注释写得很直白:opt out 的会话工具表里没有 plan 工具,**工具的离开就是让引导语离开 system prompt 的机制**——和 `policy.ts` 的 deny 形成闭环。\n\n### `src/gate.ts` —— 强制规则\n- `124` / `136`:插值进 `PLAN_REQUIRED` 和 `NEXT_ROUND` 两条给模型看的消息\n- `186`:**豁免判定**,是整条规则的关键:\n  ```ts\n  185:   // The plan is how the work is handed over.\n  186:   if (toolName === PLAN_TOOL) return undefined\n  187:   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined\n  188:   return PLAN_REQUIRED\n  ```\n  从 `ctx.tools.guard((execution) => ...)`(222 行)拿 `execution.name` 来比。比对相等 ⇒ 这是「交活」,放行;不相等 ⇒ 模型自己调了工具 ⇒ 拉回并让它改用 plan。\n\n> 顺带一个现场证据:本次会话开头我直接调 `read`/`grep` 时被拒,返回的正是 `PLAN_REQUIRED` 那段文本,里面嵌的就是 `PLAN_TOOL` 在124 行的插值。\n\n### 数据流总览\n```\ntool.ts:45  export const PLAN_TOOL = 'refine_plan'\n   ├─► index.ts:314 applyPlanTool → tool.ts:414 register({ name: PLAN_TOOL })\n   │      ⇒ 模型工具表里出现 \"refine_plan\",模型就按这个名字发起 tool call\n   ├─► gate.ts:222 guard → gate.ts:186 toolName === PLAN_TOOL ⇒ 豁免\n   │      ⇒ 名字对得上 = 交活;对不上 = 私自调工具 ⇒ 拉回\n   ├─► policy.ts:39 POLICY_TOOLS → policy.ts:72 restrict({ deny: ['refine_plan'] })\n   │      ⇒ opt out 会话里工具消失 → index.ts:309 探针命中 undefined → prompt 段落渲染成空\n   └─► index.ts:56/98 + gate.ts:124/136 ⇒ 以散文形式把工具名说给模型听\n```\n\n**这个常量决定了四件可观测的事**:agent 能调哪个工具、guard拿什么字符串去比、opt out 摘掉什么、模型被要求写什么。\n\n---\n\n### 一个值得注意的漂移风险`PLAN_TOOL` 是 `'refine_plan'` 的唯一真相源,但字面量在 6 处被绕过常量重写了一遍,改名后会留下不一致:\n\n- `tool.ts:522` — `throw new Error('refine_plan needs criteria and a non-empty list of nodes, …')`\n- `policy.ts:117` — `'The refined loop is off for this conversation: refine_plan is gone …'`\n- `index.ts:13` / `index.ts:61` — 模块文档与引导语正文\n- `plan.ts:2` — 模块文档\n- `verify\\gate.spec.ts:39` — 测试断言 `planRefusal('refine_plan', …)`,传的是**裸字符串**而非 `PLAN_TOOL`;今天值相同所以照样过,改名后会静默失效\n\n另:`ctx.tools.get(name, scope)` 与 `ctx.tools.restrict({ deny })` 的内部语义在 `@deepseek-ai/dsh-tools` / cordis 包里,不在本次调查目录内,未读——上面关于它们行为的描述是从调用点和本仓注释推断的。\n\n全程只读:仅使用 grep / read,未创建、修改或删除任何文件。"
+}

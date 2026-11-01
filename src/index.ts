@@ -77,6 +77,8 @@ export const REFINE_GUIDANCE = [
   + 'the path is spelled out.',
   '- The plan runs in one round trip and every result comes back together. A result may be too long to '
   + 'fit and be left out of what you see — the rest is in the spill file, and the next plan can read it.',
+  '- Use the search tools rather than shell recursion: `glob` and `grep` know what to skip, while a recursive '
+  + 'directory listing of a large repository can take minutes inside a plan that cannot change course.',
   '- A child starts with nothing: it does not see this conversation, and it cannot see what you already '
   + 'found. Put that into its task — the exact files, the line numbers your grep already returned, the shape '
   + 'of answer you want back. A child told to survey a directory discovers everything from scratch and reads '
@@ -89,18 +91,21 @@ export const REFINE_GUIDANCE = [
 /**
  * The refined loop, as a delegated child should see it.
  *
- * A child's turn is one plan too — that is what batches its calls and keeps its
- * context from being re-sent step after step — but the plan should be small: the
- * parent already decided what the child is for.
+ * A child is the ordinary call → think → call chain: it looks at a result, then
+ * decides. It may batch calls in a plan when it already knows them, but it is
+ * not required to — being able to change course is what makes a child useful.
  */
 export const CHILD_GUIDANCE = [
   'Refined loop, as a delegated child:',
-  `- Hand your calls over in one ${PLAN_TOOL} call. It runs them together and returns every result at once, `
-  + 'which is what keeps your own context from being sent again on every step.',
-  '- Keep the plan small: this task is one thing the parent already decided. Do not survey anything wider '
-  + 'than the task says.',
-  '- Put what you need into the calls themselves — exact paths, exact patterns. A plan is written before '
-  + 'anything runs, so a guess becomes an empty result.',
+  '- You may call tools directly. That is the normal way to work here: run a call, look at the result, then '
+  + 'decide the next one.',
+  '- Use the search tools rather than shell recursion. `glob` and `grep` know what to skip; a recursive '
+  + 'directory listing of a large repository can take minutes.',
+  '- Read what the task points at, and read it in slices: what you pull into a result is re-sent on every '
+  + 'later step, so dumping whole files in is the fastest way to make yourself slow.',
+  `- ${PLAN_TOOL} is available when you already know every call you need: it runs them in one round trip and `
+  + 'returns every result together. It is optional.',
+  '- Do your own task and no more. It is one thing the parent already decided, not a survey.',
   '- Your plan may not start another agent — you are already the delegated child.',
 ].join(String.fromCharCode(10))
 

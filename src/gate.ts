@@ -173,15 +173,18 @@ export function planRefusal(
   // A conversation that opted out is left alone.
   if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
-  // A child is a turn too, and a turn is one plan.
+  // A delegated child is an agent: it looks at a result, then decides the next
+  // call. That is the whole point of handing work to one — a child that must
+  // write its calls before anything runs cannot notice that a command is slow,
+  // that a grep returned nothing, or that the files are not where it guessed.
+  // Measured: a child forced to plan one call, watched a recursive directory
+  // scan take 290 of its 300 seconds, and could not change course.
   //
-  // Both ways were measured. Leaving a child free to take one step per call is
-  // cheaper for a small task (chain: 73s → 46s) and catastrophic for a large
-  // one: a child given a real survey walked 14 steps and cost 1.2M tokens, and a
-  // review's children walked 75 steps between them and cost 4.1M — every step
-  // re-sends the history the earlier steps left behind. A plan batches the
-  // child's calls, which is exactly what bounds that.
-  void delegationDepth
+  // It may still hand over a plan when it already knows every call; it is not
+  // required to. What keeps this cheap is the parent's task being narrow —
+  // measured: a child given a whole survey instead of one question walked 14
+  // steps and cost 1.2M tokens, and the fix for that is the task, not the gate.
+  if (delegationDepth > 0) return undefined
   // The plan is how the work is handed over.
   if (toolName === PLAN_TOOL) return undefined
   if (gate.bumpBefore(sessionId) > planPullbacks) return undefined

@@ -1,0 +1,46 @@
+{
+  "task": "multihop",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 19680,
+  "sessionId": "session-b3b73604-3273-43a4-b23d-c136611ac3a1",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 6,
+  "toolCalls": 8,
+  "tools": [
+    "grep",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 16772,
+    "outputTokens": 1815,
+    "cacheReadTokens": 60437,
+    "totalTokens": 79024
+  },
+  "formation": {
+    "agents": 1,
+    "input": 16772,
+    "output": 1815,
+    "cacheRead": 60437,
+    "total": 79024,
+    "steps": 6
+  },
+  "mainPrompt": 16958,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 899,
+  "thinkingPreview": "Step 1 done: 4 files matched: tool.ts, policy.ts, index.ts, gate.ts.\n\nStep 2: find where it's defined — tool.ts line 45: `export const PLAN_TOOL = 'refine_plan'`. Read ±30 lines.\nNow step 3: explain where the constant is used and what for. Let me read the relevant contexts in each file: tool.ts:415, policy.ts:26/39, index.ts:34/56/98/309, gate.ts:28/124/136/186.\n\nLet me read those.\nI have all the info. Let me write the final answer.\n\nNote: I should also confirm there isn't a \"batch tool\" mentioned — POLICY_TOOLS doc says \"The batch tool is the plugin's whole surface\" but the array only contains PLAN_TOOL. Fine.\n\nLet me summarize.\n\nAlso I might check whether `ctx.tools.get(PLAN_TOOL, scope)` at index.ts:309 — used to decide whether to include guidance in system prompt.\n\nLet me also verify the tool.ts:45 line context: \"The tool that runs a plan.\" Yes.\n\nFinal answer — chain of three steps.",
+  "finalText": "## 调查结果\n\n### 步骤 1 — grep `PLAN_TOOL`\n\n在 `D:\\code\\vibe\\dsh-refine-loop\\src` 下共 **12 处命中，分布在 4 个文件**：\n\n| 文件 | 命中行 |\n|---|---|\n| `src/tool.ts` | 45（定义）、415 |\n| `src/policy.ts` | 26（import）、39 |\n| `src/index.ts` | 34（import）、56、98、309 |\n| `src/gate.ts` | 28（import）、124、136、186 |\n\n### 步骤 2 — 定义处及其上下文\n\n定义在 `src/tool.ts:45`：\n\n```ts\n/** The tool that runs a plan. */\nexport const PLAN_TOOL = 'refine_plan'\n```\n\n前后 30 行说明：它是**字符串常量而非对象** —— 值就是工具注册名 `'refine_plan'`。紧邻的上下文定义了围绕它的数据结构：`PlanNodeResult`（每个节点的结果：id/kind/ok/output/error）、`PlanOutput`（模型看到的结果：criteria / waves / schedule / nodes），以及从 `./batch.js` 导入的 `runBatch`/`renderBatch`、从 `./plan.js` 导入的 `buildWaves`/`dependenciesOf`/`parsePlanArgs`。也就是说，`PLAN_TOOL` 是这一整套\"计划\"机制的**唯一对外锚点**：工具以它注册，策略按它禁用，闸门按它放行，提示词按它措辞。\n\n### 步骤 3 — 各文件用它做什么\n\n**`src/tool.ts` — 注册工具本体**\n- `:415` `ctx.tools.register(defineTool({ name: PLAN_TOOL, ... }))`：把工具以 `refine_plan` 这个名字注册进工具表。参数 schema 是 `criteria`（可验证的判据）+ `nodes`（`tools` 批次 / `subagent` 子代理两类节点）+ `after` 依赖 + `more`（是否还要下一片）。\n\n**`src/policy.ts` — 退订开关要\"拿走\"的工具**\n- `:38-40` `POLICY_TOOLS = [PLAN_TOOL]`：这个列表就是会话执行 `dsh-refine-loop` 关闭时，通过 `agent.ctx.tools.restrict({ deny: [...POLICY_TOOLS] })`（`:72`）从该会话作用域里限制掉的工具名。工具不在表里了，模型既看不到它、依赖它的引导语也随之失效。\n\n**`src/index.ts` — 系统提示词与引导语**\n- `:56` `REFINE_GUIDANCE` 开头：`` `- ${PLAN_TOOL}: one call that carries the whole shape of the turn...` `` —— 告诉主模型\"一轮 = 一个 plan，所有调用都包在 plan 里\"。\n- `:98` `CHILD_GUIDANCE`：`` `- Hand your calls over in one ${PLAN_TOOL} call.` `` —— 给被委托的子代理的版本（子代理的一轮同样是一个 plan）。\n- `:309` `if (ctx.tools.get(PLAN_TOOL, scope) === undefined) return ''`：系统提示词段的**条件开关**——用工具表里是否还存在 `refine_plan` 来决定要不要输出这段引导。这与 `policy.ts` 的 restrict 机制配套：工具一被拿走，引导语自动消失。\n\n**`src/gate.ts` — 闸门放行\"唯一的合法入口\"**\n- `:186` `if (toolName === PLAN_TOOL) return undefined`：在 `planRefusal()` 里，模型自己直接调用别的工具会被驳回并收到 `PLAN_REQUIRED`；只有 `refine_plan` 本身永远放行（`return undefined` 表示无拒绝理由）。这是\"禁止裸调工具\"的豁免口。\n- `:124` `PLAN_REQUIRED`：驳回时给模型的话，`` `the work over as a plan with ${PLAN_TOOL}` `` —— 教模型改用 plan 工具重交。\n- `:136` `NEXT_ROUND`：一轮 plan 跑完后的续轮提示，`` `another plan with ${PLAN_TOOL} for what is left` `` —— 让循环继续而不是让 turn 结束。\n\n---\n\n**一句话总结**：`PLAN_TOOL` = `'refine_plan'`，是插件唯一的工具入口名。`tool.ts` 用它注册工具，`policy.ts` 用它在退订时从会话里 deny 掉该工具，`index.ts` 用它拼装主/子代理的系统引导语并用它判断\"工具还在不在表里\"，`gate.ts` 用它作为唯一豁免的工具名 —— 裸调工具被驳回，唯独它放行。全程只读，未修改任何文件。"
+}
