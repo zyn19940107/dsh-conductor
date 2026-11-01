@@ -1,0 +1,42 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 98611,
+  "sessionId": "session-4d22989e-f241-4073-bc66-951ca88dcc60",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 4,
+  "toolCalls": 4,
+  "tools": [
+    "glob",
+    "read",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 32699,
+    "outputTokens": 8781,
+    "cacheReadTokens": 54013,
+    "totalTokens": 95493
+  },
+  "formation": {
+    "agents": 4,
+    "input": 109232,
+    "output": 23604,
+    "cacheRead": 99069,
+    "total": 231905,
+    "steps": 8
+  },
+  "mainPrompt": 32888,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 16048,
+  "thinkingPreview": "The user wants me to review three files independently in D:\\code\\vibe\\dsh-refine-loop: src/plan.ts, src/gate.ts, src/tool.ts. Read-only. Let me read the files.\n\nLet me start by exploring the directory.\n\nThis is a read-only analysis task. I should read the files directly. Let me check the directory structure first, then read the three files in parallel.\n\nThe refined loop guidance mentions using refine_plan. But this is a simple read-and-report task. I could just do it directly. The task involves three independent reviews — I could use subagents, but reading three files myself is cheap and I can quote precisely. Actually, the system prompt says \"Start independent subagent delegations together in one assistant message and continue useful work while they run.\" But also \"Use the workflow tool ONLY when the user explicitly asks\". For plain subagents, the guidance is optional. Let me just read ",
+  "finalText": "## 一、`src/plan.ts` —— 计划的数据结构、节点种类、占位符语法\n\n**数据结构（扁平单对象，不嵌套）**\n\n| 类型 | 位置 | 字段 |\n|---|---|---|\n| `PlanArgs` | L44-49 | `criteria: string[]`（可观测的验收判据）、`nodes: PlanNode[]` |\n| `PlanNode` | L30-41 | `id: string`、`kind: PlanNodeKind`、`calls: PlanToolCall[]`、`task: string`、`after: string[]` |\n| `PlanToolCall` | L22-27 | `name: string`（要调的工具）、`arguments: unknown` |\n| `PlanWaves` | L57-59 | `{ waves: PlanNode[][] }` \\| `{ error: string }` |\n\n图不靠嵌套，靠 `after: string[]` 里的节点 id 引用形成 DAG；`buildWaves()`（L189）把它切成分层并发波，失败时给出可执行的句子式原因（重名 L192、自依赖 L197、依赖了不存在的节点 L199、依赖成环 L231）。`parsePlanArgs()`（L85）是入口，任何不合法的形状都返回 `undefined`（工具侧转成报错）。\n\n**节点的三种 kind（逐字）**\n\n```ts\nexport type PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'   // L16\nexport const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent', 'subagent_fork']  // L19\n```\n\n- `'tools'`：必须有非空 `calls`（L117），每个 call 必须有非空 `name`；解析后 `task`填 `''`（L127）。\n- `'subagent'`：无上下文的子任务，只给 `task`；`'subagent_fork'`：继承当前对话的子任务；两者都必须有非空 `task`（L132），解析后 `calls` 填 `[]`（L133）。\n- `AGENT_NODE_KINDS` 标出\"会启动 agent\"的两种 kind。\n\n**占位符语法**\n\n- 确切写法：`@@nodeId@@`，正则为 `const PLACEHOLDER = /^@@([^@]+)@@$/u`（L73）。\n- **整个参数必须正好是占位符**（`^…$` 锚定），夹在长字符串里不替换（注释 L62-66：节点输出可能很长，宁可让调用方整份传入）。\n- 刻意不用 `{{…}}`——harness 自己保留了双花括号做 prompt 变量（注释 L68-71）。\n- 收集用 `collectPlaceholders()`（L159，递归遍历 string/array/object），替换用 `substitutePlaceholders()`（L273），替换成被引用节点的输出文本；解析不到就抛错（`the argument refers to the output of \"${id}\", and that node has not produced one`），不会把字面量传给工具。\n- 附带语义：**占位符本身就是依赖边**——`parsePlanArgs` 会把引用的 id 追加进 `node.after`（L142-148）。\n- 小瑕疵：`src/plan.ts:266` 的注释仍写着 `{{nodeId}}`，与实际语法 `@@nodeId@@` 不一致。\n\n## 二、`src/gate.ts` —— 两条规则及触发条件\n\n先澄清机制：**gate.ts 里没有正则、没有 `rules` 数组、也不是两个独立的 gate 类型**。实际是\"一个 guard 判定函数 + 两条拒绝原因常量\"：`planRefusal(...)`（L152）返回 `string | undefined`，由 `ctx.tools.guard`（L206-223）拦截该次 tool call 并把提示注入回模型。两条规则为 `PLAN_REQUIRED` 与 `PLAN_DONE`。\n\n**规则一 `PLAN_REQUIRED`（L112-116）** —— 还没交计划就不许调工具\n- 触发条件：`requirePlan()` 为真 **且** `delegationDepth === 0`（L164）**且** 该 session 尚未 `markPlanned`（`gate.planCallId(sessionId) === undefined`，L165-166）**且** 当前调用不是计划本身（`toolName === PLAN_TOOL` 时直接放行，L168）。\n- 失败后果：guard 返回这段文案，**拦截本次工具调用**并让模型先交出一个计划。\n- 放弃机制：`gate.bumpBefore()` 计数，超过 `planPullbacks` 后返回 `undefined` 放行——是\"pullback, not a cage\"，不是笼子。\n\n**规则二 `PLAN_DONE`（L121-124）** —— 交了计划之后不许再调工具\n- 触发条件：计划已交付（`planCall !== undefined`）**且** 当前调用不是那次计划调用本身（`callId === planCall` 时放行，L173）。\n- 失败后果：同样拦截并注入\"不要再调工具，把每个节点的结论写出来\"的提示。\n- 放弃机制：`gate.bumpAfter()` 计数，超过 `conclusionPullbacks` 后放行。\n\n**两条规则共享的豁免条件**（不是规则本身）：`!requirePlan`（L162）、`delegationDepth > 0`（被派出的子代理，第四问里的子代理因此不受\"一轮一计划\"约束）、`!isModelCall(execution)`（L212；判据是 `execution.rootCallId === execution.callId`，L135-137，即计划内部的嵌套调用不算模型自身的调用）。状态由 `PlanGate`（L33-107）按 session 维护 `planned` / `before` / `after` 三个 map，`markPlanned` 只记录**第一个**计划（后来的属于\"想继续干活\"），`reset` 在 `agent/pre-step` 且 `decision.kind === 'enter' && payload.step === 1` 时按 session触发（L200-202）。\n\n## 三、`src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**运行机制**\n- 工具：`PLAN_TOOL = 'refine_plan'`（L42），由 `applyPlanTool()` 用 `ctx.tools.register(defineTool({ name: PLAN_TOOL, … }))` 注册（L394-395），整体预算 `timeoutMs: options.timeoutMs()`（L396）。\n- 计划来源：**模型在一次工具调用参数里生成的 JSON**，不是文件。parameters 要求 `criteria: string[]` 与 `nodes[]`，节点字段 `id` / `kind`（enum `['tools','subagent','subagent_fork']`）/ `calls[{name,arguments}]` / `task` / `after`（L404-460）。\n- 入口校验（L491-500）：`parsePlanArgs` 失败 → 抛 `refine_plan needs criteria and a non-empty list of nodes, each with an id and a kind`；节点数超 `maxBatchSize()` → 抛 `This plan has N nodes and the limit is M.`；随后 `options.onPlanStarted?.(agent.session.id, exec.callId)`（L502）——这正是 gate 得知\"本轮已交付计划\"的通道。\n- 调度：`runPlan()`（L290）先 `buildWaves`（失败抛 `the plan does not hold together: ${built.error}`），然后**按 wave 推进，同层 `Promise.all` 并行、层间串行等待**（L310-324）；`schedule` 记为 `'concurrent' | 'mixed' | 'serial'`（L331-334）。tools 节点内先用 `substitutePlaceholders(call.arguments, outputs)`（L192-195）替换 `@@nodeId@@` 再 `runBatch`。\n- 传值：agent 节点由 `buildAgent"
+}
