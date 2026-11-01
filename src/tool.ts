@@ -362,8 +362,7 @@ export function renderPlan(output: PlanOutput): string {
     }
   }
   lines.push('')
-  lines.push('Every result is above. Decide what is next: another plan for what is left, or the '
-    + 'conclusion that ends the turn.')
+  lines.push('Every result is above. The turn is over.')
   return lines.join('\n')
 }
 

@@ -209,8 +209,7 @@ console.log('runPlan')
 
   const text = renderPlan(output)
   check('the render names every node', text.includes('read') && text.includes('judge') && text.includes('fresh'))
-  check('the render says the agent decides what is next',
-    text.includes('Every result is above. Decide what is next'))
+  check('the render says the turn is over', text.includes('Every result is above. The turn is over.'))
 }
 
 console.log('a plan may not start an agent from inside a child')

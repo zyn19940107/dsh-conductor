@@ -54,8 +54,9 @@ export const REFINE_GUIDANCE = [
   '- You do not call tools yourself: every call you make goes inside a plan. Draw the shape of the '
   + 'work in your reasoning first — which items are independent, which need a child with no context, which '
   + 'need a child that inherits this conversation, and what depends on what — then hand that shape over in '
-  + 'one refine_plan call. The plan runs, its results come back together, and then you decide: another plan '
-  + 'for what is left, or the conclusion. Writing the conclusion ends the turn.',
+  + 'one refine_plan call. The plan runs, its results come back together, and the turn is over: what the '
+  + 'plan produced is what this turn produced. If you have nothing left to do, write the conclusion instead — '
+  + 'that ends the turn too.',
   '- A node is one of three kinds. "tools": calls that run together. "subagent": a self-contained task for '
   + 'a child that starts with no context — use it when the task needs nothing from this conversation, such '
   + 'as researching a topic, auditing a file, or doing a scoped piece of work. "subagent_fork": a task for '
@@ -254,6 +255,7 @@ export function apply(ctx: Context, config: Config): void {
     ),
     maxAgentDepth: () => config.maxAgentDepth.get(),
     agentNodeTimeoutMs: () => config.agentNodeTimeoutMs.get(),
+    onPlanStarted: (sessionId, callId) => planGate.markPlanned(sessionId, callId),
   })
 
 

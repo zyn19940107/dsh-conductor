@@ -34,6 +34,7 @@ import { PLAN_TOOL } from './tool.js'
  */
 export class PlanGate {
   private readonly before = new Map<string, number>()
+  private readonly planned = new Map<string, ToolCallId>()
 
   /**
    * Count one pullback for a tool the agent called itself.
@@ -48,12 +49,35 @@ export class PlanGate {
   }
 
   /**
-   * Forget one conversation's pullbacks.
+   * Record the plan the turn handed over.
+   *
+   * @param sessionId - the session the plan belongs to.
+   * @param callId - the call the plan was handed over with.
+   */
+  markPlanned(sessionId: string, callId: ToolCallId): void {
+    if (!this.planned.has(sessionId)) {
+      this.planned.set(sessionId, callId)
+    }
+  }
+
+  /**
+   * Whether the turn has handed over a plan.
+   *
+   * @param sessionId - the session the turn belongs to.
+   * @returns true when a plan has run in this turn.
+   */
+  hasPlanned(sessionId: string): boolean {
+    return this.planned.has(sessionId)
+  }
+
+  /**
+   * Forget one conversation's pullbacks and its plan.
    *
    * @param sessionId - the session the turn belongs to.
    */
   reset(sessionId: string): void {
     this.before.delete(sessionId)
+    this.planned.delete(sessionId)
   }
 }
 
@@ -121,8 +145,17 @@ export function applyPlanGate(
 ): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
-    if (decision.kind === 'enter' && payload.step === 1) {
-      gate.reset(payload.agent.session.id)
+    if (decision.kind !== 'enter') return decision
+    const sessionId = payload.agent.session.id
+    if (payload.step === 1) {
+      gate.reset(sessionId)
+      return decision
+    }
+    // The plan has run: the turn is over. What it produced is what the turn
+    // produced. Coming back to draw another plan is the chain this plugin is
+    // here to replace.
+    if (gate.hasPlanned(sessionId)) {
+      return { kind: 'reject' }
     }
     return decision
   })
