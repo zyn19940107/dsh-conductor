@@ -209,8 +209,16 @@ export function applyPolicyMessage(ctx: Context, policy: SessionPolicy): void {
     if (mode === 'off') policy.turnOff(payload.agent)
     else policy.turnOn(sessionId)
     const messages = [...decision.messages]
+    // The command is the first line; whatever the person wrote after it is
+    // their task, and it stays in the conversation.
+    const text = messageText(message)
+    const newline = text.indexOf('\n')
+    const rest = newline === -1 ? '' : text.slice(newline + 1).trim()
     messages[index] = createUserMessage({
-      content: [{ type: 'text', text: policyConfirmation(mode) }],
+      content: [{
+        type: 'text',
+        text: rest === '' ? policyConfirmation(mode) : `${policyConfirmation(mode)}\n\n${rest}`,
+      }],
       source: { kind: 'system-prompt' },
     })
     return { kind: 'enter', messages }

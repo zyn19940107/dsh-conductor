@@ -266,6 +266,7 @@ export function apply(ctx: Context, config: Config): void {
     requirePlan: () => config.requirePlan.get(),
     planPullbacks: () => config.planPullbacks.get(),
     conclusionPullbacks: () => config.conclusionPullbacks.get(),
+    appliesTo: (sessionId: string) => policy.appliesTo(sessionId),
   })
 
   applyPolicyCommand(ctx, policy)

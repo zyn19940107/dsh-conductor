@@ -143,6 +143,7 @@ export function isModelCall(execution: { readonly callId: ToolCallId, readonly r
  * @param callId - the call being made.
  * @param sessionId - the session the call belongs to.
  * @param gate - the state the plan state is kept in.
+ * @param appliesTo - whether the rules apply to this conversation.
  * @param requirePlan - whether a turn has to be one plan.
  * @param planPullbacks - how many times the turn may be pulled back before it handed over its plan.
  * @param conclusionPullbacks - how many times the turn may be pulled back after it handed over its plan.
@@ -153,10 +154,13 @@ export function planRefusal(
   callId: ToolCallId,
   sessionId: string,
   gate: PlanGate,
+  appliesTo: (sessionId: string) => boolean,
   requirePlan: boolean,
   planPullbacks: number,
   conclusionPullbacks: number,
 ): string | undefined {
+  // A conversation that opted out is left alone.
+  if (!appliesTo(sessionId)) return undefined
   if (!requirePlan) return undefined
   const planCall = gate.planCallId(sessionId)
   if (planCall === undefined) {
@@ -211,6 +215,7 @@ export function applyPlanGate(
       execution.callId,
       agent.session.id,
       gate,
+      config.appliesTo,
       config.requirePlan(),
       config.planPullbacks(),
       config.conclusionPullbacks(),
@@ -228,4 +233,6 @@ export interface PlanGateConfig {
   planPullbacks: () => number
   /** How many times the turn may be pulled back after it handed over its plan. */
   conclusionPullbacks: () => number
+  /** Whether the rules apply to this conversation. */
+  appliesTo: (sessionId: string) => boolean
 }
