@@ -142,7 +142,6 @@ export function isModelCall(execution: { readonly callId: ToolCallId, readonly r
  * @param toolName - the tool being called.
  * @param callId - the call being made.
  * @param sessionId - the session the call belongs to.
- * @param delegationDepth - how deep the calling agent is.
  * @param gate - the state the plan state is kept in.
  * @param requirePlan - whether a turn has to be one plan.
  * @param planPullbacks - how many times the turn may be pulled back before it handed over its plan.
@@ -153,15 +152,12 @@ export function planRefusal(
   toolName: string,
   callId: ToolCallId,
   sessionId: string,
-  delegationDepth: number,
   gate: PlanGate,
   requirePlan: boolean,
   planPullbacks: number,
   conclusionPullbacks: number,
 ): string | undefined {
   if (!requirePlan) return undefined
-  // A child agent was handed work that was already planned.
-  if (delegationDepth > 0) return undefined
   const planCall = gate.planCallId(sessionId)
   if (planCall === undefined) {
     // The turn has not handed over its plan yet: the plan is the first call.
@@ -214,7 +210,6 @@ export function applyPlanGate(
       execution.name,
       execution.callId,
       agent.session.id,
-      agent.session.header.delegationDepth ?? 0,
       gate,
       config.requirePlan(),
       config.planPullbacks(),

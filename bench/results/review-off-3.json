@@ -3,37 +3,36 @@
   "condition": "off",
   "index": 3,
   "exitCode": 0,
-  "wallMs": 48254,
-  "sessionId": "session-f5abbdf8-8f99-4f08-9b73-534015f80be3",
+  "wallMs": 42304,
+  "sessionId": "session-06919f1a-5c3a-40a3-8e14-12e81d4a726b",
   "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
-  "steps": 6,
-  "toolCalls": 9,
+  "steps": 5,
+  "toolCalls": 8,
   "tools": [
-    "pwsh",
+    "glob",
     "read",
     "read",
     "read",
-    "read",
-    "read",
-    "read",
+    "glob",
+    "glob",
     "read",
     "read"
   ],
   "usage": {
-    "inputTokens": 45114,
-    "outputTokens": 6095,
-    "cacheReadTokens": 186657,
-    "totalTokens": 237866
+    "inputTokens": 22416,
+    "outputTokens": 5219,
+    "cacheReadTokens": 87145,
+    "totalTokens": 114780
   },
   "formation": {
     "agents": 1,
-    "input": 45114,
-    "output": 6095,
-    "cacheRead": 186657,
-    "total": 237866,
-    "steps": 6
+    "input": 22416,
+    "output": 5219,
+    "cacheRead": 87145,
+    "total": 114780,
+    "steps": 5
   },
-  "mainPrompt": 55224,
+  "mainPrompt": 32531,
   "correctness": {
     "passed": 4,
     "total": 4,
@@ -41,7 +40,7 @@
   },
   "planned": false,
   "planAgentNodes": 0,
-  "thinkingChars": 14631,
-  "thinkingPreview": "The user wants me to review three parts of a DSH plugin project at D:\\code\\vibe\\dsh-refine-loop, read-only. Let me explore the files.\n\nLet me start by listing the directory and reading the files.\n\nThe task is read-only review — no skill needed for modification. The dsh-plugin-sandbox skill is for modifying/debugging plugins. This is a pure read/review task. I'll just read the files.\n\nLet me do parallel reads.\nNow let's read gate.ts and tool.ts. Also maybe index.ts for context.\nNow, I should also check the config defaults (index.ts, policy.ts) to give accurate answers about e.g. pullback counts, maxAgentDepth, timeouts. Let me read index.ts and policy.ts quickly.\n\nAlso batch.ts and concurrency.ts for context on how tools nodes are run.\n\nLet me read index.ts and policy.ts.\nI now have a good picture. Let me note a subtle point in plan.ts: the placeholder syntax is `@@nodeId@@` — the whole a",
-  "finalText": "只读审查完成,未改动任何文件。下面是三部分结论。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**数据结构**(`PlanArgs`,plan.ts:44):\n\n```\nPlanArgs = { criteria: string[]; nodes: PlanNode[] }\nPlanNode = { id: string; kind: PlanNodeKind; calls: PlanToolCall[]; task: string; after: string[] }\nPlanToolCall = { name: string; arguments: unknown }\n```\n\n- `criteria` 是\"可观测的判据\"——决定这次计划算不算成功的标准,必填且至少一条。\n- `after` 是节点依赖,指向别的节点的 `id`;`buildWaves`(plan.ts:189)按依赖深度把节点分层成 **waves**:无依赖的进第一层,依赖第一层的进第二层,同一层并行。\n\n**节点的三种 kind**(plan.ts:16):\n\n| kind | 含义 |\n|---|---|\n| `tools` | 一组并行跑的普通工具调用(`calls` 必填且非空) |\n| `subagent` | 交给一个**不继承本对话上下文**的子代理(`task` 必填) |\n| `subagent_fork` | 交给一个**继承本对话上下文**的子代理(`task` 必填) |\n\n**占位符语法**:`@@nodeId@@`(plan.ts:73 的正则 `/^@@([^@]+)@@$/u`)。\n\n关键约束有三条:\n1. **整个参数必须正好是占位符**。嵌在更长字符串里的 `@@x@@` 不会被替换、也不会被识别(`collectPlaceholders` 只对完整字符串做全匹配)。\n2. **选 `@@` 而不是 `{{ }}` 是因为 harness 保留双花括号做 prompt 变量**,提示里出现 `{{` 会让 harness拒绝渲染整段。\n3. **占位符会自动变成依赖边**:某节点的 call 参数里引用了 `@@scan@@`,`parsePlanArgs`(plan.ts:142)就自动把 `scan` 塞进它的 `after`,哪怕计划里没写——否则会用字面量去调工具。\n\n替换不到目标节点时 `substitutePlaceholders` 直接抛错,而不是把字面量传给工具。解析层还拒掉:无 criteria / 无节点 / id 重复 / kind 非法 / tools 节点没 calls / agent 节点没 task;`buildWaves` 再拒掉:自依赖、依赖了不存在的节点、有环。\n\n## 2. `src/gate.ts` —— 这条规则是什么\n\n**规则:一个 turn 就是一个 plan**——turn 的第一个工具调用必须是 `refine_plan`,计划跑完之后 turn 就结束,剩下的只允许写结论。\n\n实现方式是 `ctx.tools.guard`(gate.ts:206)拦截每次工具调用,由 `planRefusal`(gate.ts:152)决定放行还是拒绝,拒绝时返回一段话当作工具结果喂回模型:\n\n- **计划之前**:除 `refine_plan` 外的任何调用 → 返回 `PLAN_REQUIRED`(要求模型先交计划)。\n- **计划之后**:除\"交计划的那次调用本身\"外的任何调用 → 返回 `PLAN_DONE`(要求模型写结论,别再动手)。\n- **\"计划已经交出去了\"的状态**由 `tool.ts` 的 `onPlanStarted` 回调写入(`markPlanned`,只记第一份计划);**新 turn 开头**由 `agent/pre-step`(`step === 1` 且 `decision.kind === 'enter'`)调 `reset` 清空。\n\n**触发条件(全部满足才拦)**:\n\n1. `requirePlan` 为 true(默认 true;关掉就完全不拦);\n2. `delegationDepth === 0`——**子代理不受这条规则管**;\n3. 是**模型自己发起的调用**(`rootCallId === callId`)——**计划内部发出的嵌套调用豁免**,那是计划自己的事;\n4. 还没有超过**拉回次数**上限:计划前默认 `planPullbacks = 2`(被拒 2 次后第 3 次放行),计划后默认 `conclusionPullbacks = 10`。\n\n所以设计意图是\"**拉回,不是笼子**\":连拒几次就放行,宁可规则被忽略也不要把模型困死。\n\n## 3. `src/tool.ts` —— 计划怎么被跑起来\n\n注册为工具 `refine_plan`,参数 schema 就是上面那两个字段。`execute` 顺序:\n\n1. `parsePlanArgs` 校验,不合格直接抛 `refine_plan needs criteria and a non-empty list of nodes...`;\n2. 节点数超过 `maxBatchSize`(默认 **8**)→ 抛错让模型拆分计划;\n3. `onPlanStarted` 通知 gate\"本 turn 已交计划\";\n4. `runPlan`(tool.ts:290)开跑。\n\n**运行机制**:`buildWaves` 分层 → **逐层 `Promise.all` 并行**,每层跑完把各节点的 output 写进 `outputs` map,下一层才能看到;最终输出 `{criteria, waves, schedule, nodes[]}`,`schedule` 按\"多层全并行 / 全串行 / 混合\"记为 `concurrent|serial|mixed`,节点结果按计划里写的顺序排,渲染成一段文本交给模型,末尾固定一句 \"Write the conclusion of every node above in this reply.\"\n\n- **`tools` 节点**:先 `substitutePlaceholders` 替换参数,再走 `runBatch`——batch 内部**还会再切一层并发波次**:工具自己声明可并行的并行跑,声明独占的串行跑;插件的 override 把 `glob`/`grep` 和只读的 `ops_bash` 判为可并行(shell 要过\"单条命令 + 白名单 + 无元字符\"的只读判定)。所有调用都经 `ctx.tools.execute`,带新的 callId、继承 plan 的 rootCallId 和同一个 agent,所以宿主自己的其它 guard/策略照样生效。\n- **`subagent` / `subagent_fork` 节点**:以 `name = node.kind` 去调 harness 自己的 `subagent` / `subagent_fork` 工具,参数是 `{description: node.id, prompt: <task + 依赖节点输出>, run_in_background: false}`。\n\n**派出去的子代理受到的限制**:\n\n1. **深度上限 `maxAgentDepth`(默认 1)**:节点的 `depth = session.header.delegationDepth`,若 `depth >= maxAgentDepth` 就**根本不起子代理**,该节点直接判失败,报 \"already a delegated child … may not start another agent. Keep the work in the nodes that call tools.\"。即:顶层对话可以为子代理做计划,子代理自己的计划里只准有 tools 节点。\n2. **单节点预算 `agentNodeTimeoutMs`(默认 300000ms)**:超时就 abort 该调用、节点记为失败(\"ran out of its Xms budget\"),**计划继续跑其余节点**,不会拖垮已成功的部分。\n3. **整份计划的预算 `maxBatchTimeoutMs`(默认 600000ms)** 挂在工具调用本身。\n4. **必须同步等待**(`run_in_background: false`),计划要等子代理回来。\n5. **上下文边界**:`subagent` 只拿到 task;`subagent_fork` 继承本对话;此外依赖节点的输出以 \"Output of `<id>`:\" 的形式拼在 prompt 后面。注意 task 字段**不做占位符替换**,只有工具调用的 arguments 会替换。\n6. **计划的调用不受 gate 规则约束**(嵌套在 plan 的 rootCallId 下)。\n\n---\n\n## 三条结论汇总\n\n这个插件把\"一个 turn 一条链\"改成\"一个 turn 一个 plan\":**`plan.ts`** 定义了计划的形状——`{criteria, nodes[]}`,节点分 `tools`(并行调用)、`subagent`(无上下文子代理)、`subagent_fork`(继承上下文子代理)三种,依赖用 `after` 声明、跨节点传值"
+  "thinkingChars": 9249,
+  "thinkingPreview": "Now let me read gate.ts and tool.ts.\nLet me also check batch.ts and concurrency.ts briefly to fully understand what limits apply to subagents (the question asks \"派出去的子代理受到什么限制?\"). The tool.ts itself contains the depth check and timeout. But maybe there's more context about maxAgentDepth, agentNodeTimeoutMs config in config.ts. Let me look at the src directory.\n\nAlso, note the question asks for three parts each reviewed independently, plus a summary. Let me check the src folder listing.\n\nAlso there's an interesting subtlety in tool.ts: `renderPlan` — fine.\n\nLet me check config.ts to see the defaults for maxAgentDepth and agentNodeTimeoutMs, and the README maybe.\n\nAlso note: the delegation depth check — `agent?.session.header.delegationDepth ?? 0` — if agent undefined, depth is 0.\n\nLet me list src files.\nLet me read index.ts and policy.ts to understand config defaults (maxAgentDepth, agent",
+  "finalText": "三个文件都读完了（另参考了 `index.ts` 的默认配置和 `batch.ts`/`concurrency.ts` 的调用路径）。以下按部分给结论，最后汇总。**全程只读，未修改任何文件。**\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**结论：计划是一张带依赖边的小图（不是线性清单），节点有三种，占位符语法是 `@@nodeId@@`（整个参数必须正好等于它）。**\n\n**数据结构**（`plan.ts:44-49`、`:30-41`、`:22-27`）：\n\n```\nPlanArgs = { criteria: string[], nodes: PlanNode[] }\nPlanNode = { id: string, kind: PlanNodeKind, calls: PlanToolCall[], task: string, after: string[] }\nPlanToolCall = { name: string, arguments: unknown }\n```\n\n- `criteria`：**可观测的验收标准**（字符串数组），不是给人看的标题，是\"这次做成了没有\"的判据。\n- `after`：本节点依赖的节点 id 数组；`buildWaves`（`plan.ts:189`）按依赖深度把节点分层，同层并行、逐层等待。\n- `PlanWaves = { waves: PlanNode[][] } | { error: string }`：分层失败时返回的是**一句人话原因**（重复 id / 自依赖 / 依赖了不存在的节点 / 有环），不是布尔。\n\n**三种节点**（`plan.ts:16`）：`PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'`\n- `tools`：一串并列的工具调用（`calls` 必填非空）\n- `subagent`：交给**无上下文**的子代理（只知道自己拿到的 task）\n- `subagent_fork`：交给**继承当前会话**的子代理\n- `AGENT_NODE_KINDS = ['subagent', 'subagent_fork']` 标记哪些会起代理。\n\n**占位符语法**（`plan.ts:73`）：`const PLACEHOLDER = /^@@([^@]+)@@$/u`\n- 正则**整体锚定**：`\"@@node1@@\"` 才会被替换；嵌在更长字符串里（如 `\"见 @@node1@@\"`）**原样保留**——因为节点输出可能很长，拼接比整段传入更坏。\n- 占位符可以嵌在参数数组/对象的任意深度（`collectPlaceholders` 递归遍历）。\n- 故意不用 `{{ }}`：harness 把双花括号留给自己的 prompt 变量，遇到就拒绝渲染整段（`plan.ts:68-71`）。\n- 隐式依赖：调用参数里的 `@@id@@` **自动补一条依赖边**（`plan.ts:142-148`），否则占位符会拿到未产出的字面文本。\n- 解析不出对应节点的输出时**抛错**而不是塞字面量（`substitutePlaceholders:280`）。\n\n⚠️ **一处文档不一致**：注释 `plan.ts:266` 仍写\"`{{nodeId}}`\"，实际实现是 `@@nodeId@@`。只是注释陈旧，行为没错。\n\n---\n\n## 2. `src/gate.ts` —— 那条规则\n\n**结论：规则是\"一轮 = 一个计划\"——turn 的第一个工具调用必须是 `refine_plan`，计划跑完后这一轮就结束（只准写结论）；触发条件是 `requirePlan` 开启且调用来自模型本身，且只对**模型直接发起**的调用生效。**\n\n**规则内容**（`gate.ts:112`、`:121`）：\n- 计划之前抢跑 →拒绝并回 `PLAN_REQUIRED`：让模型先把整轮形状交出来（criteria + nodes）。\n- 计划之后还想再调工具 → 拒绝并回 `PLAN_DONE`：计划结果已经摆在面前，本轮只剩\"写结论\"，没解决的事留给下一轮。\n- 核心意图：把\"链\"（每步一次模型往返、每步重读全部历史）换成\"一次画形状 + 一次跑 + 一次写结论\"。\n\n**触发条件**（`planRefusal:151`、`applyPlanGate:190`）：\n1. `requirePlan()` 为真（默认 true，`index.ts:160`）——否则整条规则不生效。\n2. **只管模型自己发起的调用**：`isModelCall` 要求 `rootCallId === callId`（`gate.ts:135`）。计划内部发出的调用嵌套在计划自己的 callId 下，属于\"计划自己的事\"，不受这条规则管。\n3. 状态按 **session** 记：`agent/pre-step` 里当 `decision.kind === 'enter' && payload.step === 1` 时 `reset`（新一轮开始清空\"是否已交计划 + 两次拉回计数\"）。\n4. 判定分两段：\n   - 还没交计划：放行 `refine_plan` 本身；其他工具计数 +1，`> planPullbacks`（默认 2）就**不再拦**。\n   - 已交计划：放行那个交计划的 call（`callId === planCall`）；其他调用计数 +1，`> conclusionPullbacks`（默认 10）才放行。\n\n**关键设计取向：这是\"拉回（pullback）\"而不是\"笼子\"**——被拒几次后规则就放手不管了（`gate.ts:16-18`、`:165`、`:171`）。源码注释明说：\"规则困住模型比模型无视规则更糟\"。\n另外 `markPlanned` **只记第一次**（`gate.ts:47`）：后续再交计划会被当成\"还想继续干活\"，按 `PLAN_DONE` 拒绝（同样受 10 次拉回额度约束）。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来的\n\n**结论：`refine_plan` 是一个注册进工具表的自定义工具，把整张图按依赖深度分层，**层内并行、层间串行**跑完，一次性把所有结果收回一个工具结果里；派出去的子代理受**委托深度上限、单节点超时、前台执行、只拿到 task + 依赖节点输出**四重限制。**\n\n**怎么跑**（`runPlan:290`）：\n1. `execute` 先 `parsePlanArgs` 校验（缺 criteria / 节点为空 / 节点没 id / kind 非法 / tools 节点没有 calls / agent 节点没有 task → 抛错，`:492-495`）。\n2. 节点数上限检查 `maxBatchSize`（默认 8），超了直接报错并要求拆分（`:496-500`）。\n3. `buildWaves` 分层 → **逐层 `Promise.all`**（`:310-324`），一层全部 settle 后才进下一层。\n4. `tools` 节点 → `substitutePlaceholders` 替换占位符 → 交给 `runBatch`（`batch.ts`），batch 内部再按\"工具自己声明的并发独占性\"切小波次，独占的串行跑；`glob`/`grep` 和只读 shell 由插件的 override强制放行并发。\n5. `agent` 节点 → 通过注册表 `execute` 调用名为 `subagent` / `subagent_fork` 的工具（`tool.ts:236-238`），子代理的对话由 harness 实现\"无上下文 / 继承会话\"的差别。\n6. 所有节点结果汇总成 `PlanOutput { criteria, waves, schedule: 'concurrent'|'mixed'|'serial', nodes[] }`，`renderPlan` 渲染成模型读的一段文本，末尾一句\"Write the conclusion of every node above in this reply.\"。\n\n**子代理受到的限制**（`runNode:177`）：\n1. **委托深度上限**（`:215-225`）：读 `agent.session.header.delegationDepth`，`>= maxAgentDepth`（默认 1）就**拒绝起这个代理**，该节点标记 `ok:false`，错误文案说明\"已经是被委派的子会话，plan 里不能再起代理，请把工作留在调工具的节点里\"，**其余节点照常跑**。\n2. **单节点预算**（`runWithDeadline:119`）：每个 agent 节点一个独立 `AbortController` + `agentNodeTimeoutMs`（默认 300000ms = 5 分钟）。超时 → `controller.abort()` 掐掉子代理，节点记为失败，计划继续——目的是不让一个不回来的孩子拖垮已经成功的节点的结果。计划整体的 abort signal 也会级联到子节点。\n3. **前台执行**：`run_in_background: false`（`:241`）——子代理在计划里同步等，不会留下后台任务。\n4. **上下文边界**（"
 }
