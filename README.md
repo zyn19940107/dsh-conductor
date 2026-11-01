@@ -39,45 +39,45 @@ Agent loop 是个链。每一轮都是一次完整的模型往返：
 
 | 指标 | 关掉插件 | 开着插件 | 变化 |
 |---|---:|---:|---:|
-| 总耗时 | 47s | 54s | +13% |
-| 总 token（整个编队） | 226,540 | 73,492 | **−68%** |
-| ├ input | 40,645 | 25,346 | −38% |
-| ├ cacheRead | 180,796 | 49,920 | **−72%** |
-| └ output | 5,099 | 7,630 | +50% |
-| 主 agent 的 context | 40,860 | 28,233 | **−31%** |
+| 总耗时 | 71s | **48s** | **−32%** |
+| 总 token（整个编队） | 138,512 | **73,561** | **−47%** |
+| ├ input | 17,286 | 22,134 | +28% |
+| ├ cacheRead | 117,248 | 45,086 | **−62%** |
+| └ output | 5,946 | 6,485 | +9% |
+| 主 agent 的 context | 32,251 | 33,401 | +4% |
 | 编队人数 | 1 人 | 1 人 | 0% |
-| **主 agent 的往返步数** | 10 | **3** | **−70%** |
-| **编队总步数** | 10 | **3** | **−70%** |
+| **主 agent 的往返步数** | 7 | **3** | **−57%** |
+| **编队总步数** | 7 | **3** | **−57%** |
 | 正确性（命中判据） | 6/6 | 6/6 | 持平 |
 
 ### chain
 
 | 指标 | 关掉插件 | 开着插件 | 变化 |
 |---|---:|---:|---:|
-| 总耗时 | 24s | 63s | +166% |
-| 总 token（整个编队） | 111,146 | 126,014 | +13% |
-| ├ input | 15,879 | 42,469 | +167% |
-| ├ cacheRead | 94,085 | 75,215 | −20% |
-| └ output | 1,896 | 9,765 | +415% |
-| 主 agent 的 context | 25,983 | 22,115 | −15% |
-| 编队人数 | 1 人 | 2 人 | +100% |
-| **主 agent 的往返步数** | 6 | **4** | **−33%** |
-| **编队总步数** | 6 | 7 | +17% |
+| 总耗时 | 31s | 110s | +257% |
+| 总 token（整个编队） | 91,761 | 211,942 | +131% |
+| ├ input | 14,972 | 69,183 | +362% |
+| ├ cacheRead | 74,496 | 127,427 | +71% |
+| └ output | 2,293 | 13,895 | +506% |
+| 主 agent 的 context | 24,420 | 23,200 | −5% |
+| 编队人数 | 1 人 | 3 人 | +200% |
+| **主 agent 的往返步数** | 5 | **3** | **−40%** |
+| 编队总步数 | 5 | 10 | +100% |
 | 正确性（命中判据） | 4/4 | 4/4 | 持平 |
 
 ### review
 
 | 指标 | 关掉插件 | 开着插件 | 变化 |
 |---|---:|---:|---:|
-| 总耗时 | 66s | 191s | +190% |
-| 总 token（整个编队） | 459,925 | 745,699 | +62% |
-| ├ input | 52,225 | 155,415 | +198% |
-| ├ cacheRead | 398,720 | 583,294 | +46% |
-| └ output | 8,980 | 54,498 | +507% |
-| 主 agent 的 context | 62,338 | 27,837 | **−55%** |
+| 总耗时 | 71s | 127s | +79% |
+| 总 token（整个编队） | 187,875 | 466,050 | +148% |
+| ├ input | 28,624 | 115,161 | +302% |
+| ├ cacheRead | 151,552 | 305,160 | +101% |
+| └ output | 7,699 | 29,633 | +285% |
+| 主 agent 的 context | 42,345 | **33,169** | **−22%** |
 | 编队人数 | 1 人 | 4 人 | +300% |
-| **主 agent 的往返步数** | 12 | **4** | **−67%** |
-| 编队总步数 | 12 | 20 | +67% |
+| **主 agent 的往返步数** | 6 | **4** | **−33%** |
+| 编队总步数 | 6 | 16 | +167% |
 | 正确性（命中判据） | 4/4 | 4/4 | 持平 |
 
 **这些数是怎么来的**
@@ -100,56 +100,53 @@ Agent loop 是个链。每一轮都是一次完整的模型往返：
 | | 关掉插件 | 开着插件 |
 |---|---|---|
 | 主 agent 的这一轮 | 一件事一件事做，N 步 | **3 步**：交图 → 跑图 → 写结论 |
-| 整个编队的中位步数 | 6 步 | **3 步** |
+| 整个编队的中位步数 | 5 步 | **3 步** |
+| 主 agent 的 context 中位数 | 24,420 | **23,200** |
 | 派生出编队的运行 | 1 / 9 | **6 / 9** |
-| 正确性 | 42 / 42 | **41 / 42** |
+| 正确性 | 42 / 42 | **42 / 42** |
 
-**看得见的效果是步数**：主 agent 从 10/6/12 步变成 3/4/4 步，整个编队的中位步数从 6 变成 3。
-survey 那组整队 token 降了 68% —— 五件互不依赖的查找画成一张图，6 个调用一次跑完，
-省下来的正是「每一步都为前面的历史付钱」那部分。
+**看得见的效果是步数：主 agent 从 7/5/6 步变成 3/3/4 步，整个编队的中位步数从 5 变成 3。**
+每一轮都是一张图 —— ①接收上下文、形成并行的流程图 ②执行流程图。
 
-**整队 token 在 chain / review 两组还是上升**（+13% / +62%），因为模型**更常把活派出去**
-（6/9 次都有编队）：子代理要从零读一遍，父会话要等它回来。
-**主 agent 的 context 是另一回事** —— review 那组降了 55%（62.3k → 27.8k）：
-它不用自己背着所有细节，只拿结论。
+**上下文没有变大（+4% / −5% / −22%）** —— 图的结果一次性回来，
+主 agent 不用每一步都背着越来越长的历史重读一遍。
 
-**唯一没拿满分的那次（`chain on 3`，3/4）恰恰是设计在起作用。** 那一轮图里的 `glob` 返回
-`No files found`，模型没有编，而是这么写的：
+**token 和耗时看图里放了什么：**
 
-> **第二步 —— 未定（数据缺口）** …… 这一步还没有拿到「哪些文件引用了 `PlanNode`」的清单，所以第三步也还不能落笔。
-> **第三步 —— 未定** 角色说明必须建立在第二步的文件清单上，不能凭空写。
-> **### 下一轮要接手的事** 下一轮的计划应当是一次性把剩下两步做完：1. 用 `grep`（pattern `PlanNode`，path `…\src`）拿到引用文件清单 + 行号 + 代码片段 …
+- **survey（图里全是工具调用）**：耗时 −32%、token −47%。一次往返换掉七次。
+- **chain / review（图里放了代理节点）**：整队 token +131% / +148%，耗时 +257% / +79% ——
+  子代理要从零读一遍，父会话要等它回来。
 
-**它说清了缺什么、为什么不能编，还把下一轮的计划写好了。** 判据扣的那一分是「它没在本轮把活全干完」——
-而这正是这条规则现在要的：**剩下的事情，等到下一轮再说。**
+**所以这个插件不做「让每一轮更省」。它做的是把这一轮怎么切、先做哪件、哪件值得派出去，
+交回给模型在动手前决定 —— 省不省，取决于模型决定切多大。**
 
 ### 每一次运行
 
 一次运行就是一次抽样，模型的行为方差很大 —— 所以把每一次都列出来：
 
 ```
-survey  off 1: 41.8s agents=1 tokens=226540 mainCtx=40860 correct=6/6 plan=n/0
-survey  off 2: 63.9s agents=1 tokens=730869 mainCtx=57632 correct=6/6 plan=n/0
-survey  off 3: 47.3s agents=1 tokens=197495 mainCtx=28432 correct=6/6 plan=n/0
-survey  on  1: 43.5s agents=1 tokens= 61087 mainCtx=22689 correct=6/6 plan=y/0
-survey  on  2:202.1s agents=2 tokens=201121 mainCtx=36029 correct=6/6 plan=y/1
-survey  on  3: 53.6s agents=1 tokens= 73492 mainCtx=28233 correct=6/6 plan=y/0
-chain   off 1: 21.2s agents=1 tokens=111146 mainCtx=27502 correct=4/4 plan=n/0
-chain   off 2: 23.7s agents=1 tokens=110977 mainCtx=25096 correct=4/4 plan=n/0
-chain   off 3: 33.6s agents=1 tokens=129524 mainCtx=25983 correct=4/4 plan=n/0
-chain   on  1:143.0s agents=3 tokens=290179 mainCtx=25758 correct=4/4 plan=y/2
-chain   on  2: 63.0s agents=2 tokens=126014 mainCtx=20977 correct=4/4 plan=y/1
-chain   on  3: 37.2s agents=1 tokens= 91998 mainCtx=22115 correct=3/4 plan=y/0
-review  off 1:269.2s agents=4 tokens=7466723 mainCtx=95266 correct=4/4 plan=n/0
-review  off 2: 65.6s agents=1 tokens=459925 mainCtx=62338 correct=4/4 plan=n/0
-review  off 3: 42.3s agents=1 tokens=114780 mainCtx=32531 correct=4/4 plan=n/0
-review  on  1:190.6s agents=4 tokens=1089999 mainCtx=29429 correct=4/4 plan=y/3
-review  on  2:250.5s agents=5 tokens=529696 mainCtx=27837 correct=4/4 plan=y/4
-review  on  3:153.8s agents=4 tokens=745699 mainCtx=21198 correct=4/4 plan=y/3
+survey  off 1: 71.3s agents=1 tokens=296001 mainCtx=39021 correct=6/6 plan=n/0
+survey  off 2: 48.0s agents=1 tokens=138512 mainCtx=28537 correct=6/6 plan=n/0
+survey  off 3: 82.0s agents=1 tokens=134126 mainCtx=32251 correct=6/6 plan=n/0
+survey  on  1: 48.2s agents=1 tokens= 98045 mainCtx=33401 correct=6/6 plan=y/0
+survey  on  2: 48.0s agents=1 tokens= 64059 mainCtx=24325 correct=6/6 plan=y/0
+survey  on  3: 64.7s agents=1 tokens= 73561 mainCtx=33793 correct=6/6 plan=y/0
+chain   off 1: 59.7s agents=1 tokens= 78142 mainCtx=19377 correct=4/4 plan=n/0
+chain   off 2: 24.9s agents=1 tokens= 91761 mainCtx=24420 correct=4/4 plan=n/0
+chain   off 3: 30.8s agents=1 tokens=161221 mainCtx=26599 correct=4/4 plan=n/0
+chain   on  1: 90.3s agents=3 tokens=211942 mainCtx=26579 correct=4/4 plan=y/2
+chain   on  2:110.1s agents=3 tokens=156207 mainCtx=23200 correct=4/4 plan=y/2
+chain   on  3:114.5s agents=3 tokens=234615 mainCtx=21969 correct=4/4 plan=y/2
+review  off 1:272.6s agents=4 tokens=5233281 mainCtx=85729 correct=4/4 plan=n/0
+review  off 2: 59.8s agents=1 tokens=125279 mainCtx=36942 correct=4/4 plan=n/0
+review  off 3: 71.1s agents=1 tokens=187875 mainCtx=42345 correct=4/4 plan=n/0
+review  on  1:133.4s agents=5 tokens=491432 mainCtx=31190 correct=4/4 plan=y/4
+review  on  2: 96.5s agents=2 tokens=168668 mainCtx=37530 correct=4/4 plan=y/1
+review  on  3:127.3s agents=4 tokens=466050 mainCtx=33169 correct=4/4 plan=y/3
 ```
 
 `plan` = 第一个工具调用是不是 `refine_plan`；`plan=y/3` = 是，而且计划里有 3 个代理节点。
-最贵的一次是 `review off 1`（关着插件，模型自己派了 4 个 agent，746 万 token）——
+**十八次运行，正确性全部拿满。** 最贵的一次是 `review off 1`（关着插件，模型自己派了 4 个 agent，523 万 token）——
 **插件开着的时候没有一次比这更贵。**
 
 **开着插件时主会话长什么样**（`review on 1` 的真实轨迹）：
@@ -162,7 +159,7 @@ review  on  3:153.8s agents=4 tokens=745699 mainCtx=21198 correct=4/4 plan=y/3
 步4  (写结论)                        ← 这一轮结束
 ```
 
-**主会话只有 4 步，一张图。** 步数账里那 20 步是子代理自己走的。
+**主会话只有 4 步，一张图。** 步数账里那 16 步是子代理自己走的。
 
 复现：`pnpm bench`；原始记录在 `bench/results/`，任务和判据在 `bench/task.mjs`，
 会话树的读法在 `bench/sessions.mjs`。

@@ -3,42 +3,40 @@
   "condition": "on",
   "index": 1,
   "exitCode": 0,
-  "wallMs": 70017,
-  "sessionId": "session-a4fd3db1-8779-4f46-b176-5bc1c541c199",
+  "wallMs": 133364,
+  "sessionId": "session-88297845-f3de-4f98-9fc3-48cf89ae37a3",
   "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
   "steps": 4,
-  "toolCalls": 6,
+  "toolCalls": 4,
   "tools": [
     "glob",
-    "glob",
+    "read",
     "refine_plan",
-    "read",
-    "read",
-    "read"
+    "grep"
   ],
   "usage": {
-    "inputTokens": 32344,
-    "outputTokens": 9837,
-    "cacheReadTokens": 54572,
-    "totalTokens": 96753
+    "inputTokens": 19922,
+    "outputTokens": 9920,
+    "cacheReadTokens": 64935,
+    "totalTokens": 94777
   },
   "formation": {
-    "agents": 1,
-    "input": 32344,
-    "output": 9837,
-    "cacheRead": 54572,
-    "total": 96753,
-    "steps": 4
+    "agents": 5,
+    "input": 138085,
+    "output": 48187,
+    "cacheRead": 305160,
+    "total": 491432,
+    "steps": 21
   },
-  "mainPrompt": 32559,
+  "mainPrompt": 31190,
   "correctness": {
     "passed": 4,
     "total": 4,
     "missing": []
   },
   "planned": true,
-  "planAgentNodes": 0,
-  "thinkingChars": 15279,
-  "thinkingPreview": "I need to use refine_plan. Let me draw the plan.\n\nThe task: independently review three parts of D:\\code\\vibe\\dsh-refine-loop:\n1. src/plan.ts — plan data structure, three kinds of nodes, placeholder syntax in call args\n2. src/gate.ts — the plugin's rule, trigger conditions\n3. src/tool.ts — how the plan is executed, what restrictions subagents dispatched have\n\nThen summarize into one paragraph.\n\nRead-only. No file modification.\n\nPlan shape: three independent read tasks (each is a \"tools\" node reading a file, or a subagent). Since these are independent, I can make them three parallel tools nodes each doing glob+read, or use subagents. Actually the files are independent — reading them directly in parallel tools nodes is the simplest. But \"independently review\" suggests separate reviews. I could do three parallel tools nodes with glob + read. But glob errors might occur if paths differ. Let m",
-  "finalText": "三份源码已核过一遍（`tool.ts` 拿到了26–523 行全文；`plan.ts` / `gate.ts` 的原文在批量结果里被截断，结论由工具 schema、导入符号和 README 的真实运行轨迹交叉确认，下面会标出哪些是直接引文、哪些是推断）。\n\n---\n\n## 1) `src/plan.ts` —— 计划的数据结构\n\n**顶层结构**：`PlanArgs = { criteria: string[]; nodes: PlanNode[] }`\n\n- `criteria`（必填，字符串数组）——\"决定这次计划是否成功的可观测判据，每一条都是能拿来对着结果核的东西\"。\n- `nodes`（必填，节点数组）——每个节点 `PlanNode`：\n\n| 字段 | 类型 | 含义 |\n|---|---|---|\n| `id` | string（必填） | 节点名，其他节点在 `after` 里引用它 |\n| `kind` | enum（必填） | 三选一，见下 |\n| `calls` | `{name, arguments}[]` | **仅** `tools` 节点用 |\n| `task` | string | **仅** `subagent` / `subagent_fork` 节点用 |\n| `after` | string[] | 本节点依赖的节点 id；它们的输出会摆在本节点前面 |\n\n**三种节点**（`kind` 的 enum，`tool.ts` 427 行原文）：\n\n1. `tools` —— 一批\"跑在一起\"的工具调用（node 内部是一个 batch）。\n2. `subagent` —— 交给一个**从零开始、没有上下文**的孩子的自包含任务。\n3. `subagent_fork` —— 交给一个**继承当前对话**的孩子的任务。\n\nREADME 把选型判据压缩成一句：\"**这个孩子需不需要知道我们刚才说了什么**\"——不需要 → `subagent`，要用 → `subagent_fork`。\n\n**调用参数里的占位符语法：`@@nodeId@@`**\n\n`tool.ts` 441–442 行原文：\n\n> `'The arguments to call it with. An argument that is exactly \"@@nodeId@@\" becomes the output of that node.'`\n\n即：某个 call 的**参数值整体恰好等于 `@@<节点id>@@`** 时，它会被替换成该节点的输出文本；替换由 `substitutePlaceholders(call.arguments, outputs)` 完成（`tool.ts` 194 行）。\n\n**`plan.ts` 导出的东西**（`tool.ts` 30–39 行导入）：`AGENT_NODE_KINDS`（会启动代理的节点种类）、`buildWaves`（由 `after` 依赖分层）、`dependenciesOf`、`parsePlanArgs`（校验参数）、`substitutePlaceholders`，以及类型 `PlanArgs` / `PlanNode` / `PlanNodeKind`。\n\n---\n\n## 2) `src/gate.ts` —— 这条插件规则\n\n**规则：一轮 = 一张图。** 这一轮的第一个工具调用必须是 `refine_plan`（\"交图\"），而且**一轮只能交一张图**；图一旦跑完，剩下的事全部留到下一轮（README 原话：\"**剩下的事情，等到下一轮再说**\"）。\n\n**触发条件**——从 README 里 `review on 1` 的真实主会话轨迹看得很清楚：\n\n```\n步1  glob **/*         ← 被拒:这一轮的第一个调用必须是图\n     read src/plan.ts  ← 被拒:同一句\n步2  refine_plan       ← 图跑完\n步3  refine_plan       ← 被拒:这一轮已经交过图了\n步4  (写结论)\n```\n\n所以有两条拦截：\n\n- **触发条件 A**：某轮里出现了工具调用，但该轮**还没有交过图** → 拒。放行条件是\"本轮第一个调用就是 `refine_plan`\"。\n- **触发条件 B**：某轮里**已经交过图**之后又出现 `refine_plan` → 拒（\"这一轮已经交过图了\"）。\n\n**它靠什么知道\"这轮交过图了\"**：`tool.ts` 392–393行的钩子注释写得很直白——\n\n> `/** Told when a plan starts running, so a rule can know the turn handed its plan over. */`\n> `onPlanStarted?: (sessionId: string, callId: ToolCallId) => void`\n\n`refine_plan` 的 `execute` 里在跑图之前调用 `options.onPlanStarted?.(agent.session.id, exec.callId)`（504 行），把\"该 session 已经交图\"这件事通知给 gate；gate 据此拦截同轮的后续调用。\n\n> 需要标注：本轮没读到 `gate.ts` 的源码原文，**规则文本与两个触发条件来自 README 的运行轨迹 + `onPlanStarted` 钩子**；`gate.ts` 具体用什么 API 实现拦截（抛错 / 返回 ToolCallError / 发消息回主会话）我没有直接证据。\n\n---\n\n## 3) `src/tool.ts` —— 计划怎么被跑起来、子代理受什么限制\n\n**入口与机制**\n\n- 工具名 `PLAN_TOOL = 'refine_plan'`（42 行），通过 `ctx.tools.register(defineTool({...}))` 注册（`applyPlanTool`，396 行）。\n- 模型调用 `refine_plan` → `execute(args, exec)`：\n  1. `parsePlanArgs(args)` 校验，失败抛 `'refine_plan needs criteria and a non-empty list of nodes, each with an id and a kind'`；\n  2. 节点数上限 `options.maxBatchSize()`，超了抛 `\"This plan has N nodes and the limit is L. Split it, or narrow it to the nodes that belong together.\"`；\n  3. `onPlanStarted?.(agent.session.id, exec.callId)` —— 通知 gate；\n  4. `runPlan(...)`。\n- `runPlan`：`buildWaves(plan.nodes)` 按 `after` 依赖分层（不成立就抛 `the plan does not hold together: ...`），**逐层 `Promise.all` 跑**——同层节点同时开跑，后一层等前一层；每层的结果写进 `outputs`（供占位符和依赖提示词使用）。最终 `schedule` 由层形状判定：全层多节点 = `concurrent`，全层单节点 = `serial`，混合 = `mixed`。\n- `tools` 节点：`calls` 先过 `substitutePlaceholders`，再作为一个 batch 一起跑（`runBatch`）；节点 ok = 没有任何一个 call 失败。\n- `subagent` / `subagent_fork` 节点：**不是插件自己实现代理**，而是用 `runner.execute({ name: node.kind, arguments: { description: node.id, prompt, run_in_background: false }, agent, signal })` 去调 harness 原生的 `subagent` / `subagent_fork` 工具。`prompt` 由 `buildAgentPrompt` 拼：无依赖时就是 `node.task` 原文；有依赖时追加 `--- What the nodes this task depends on produced:` 和每条 `Output of <depId>:\\n<输出>`。\n- 结果回到模型：`renderPlan` 渲染成 \"Plan finished — N node(s) in M layer(s), shaped …\"，逐节点 `<id> (<kind>) — ok|failed`，输出按 `|` 缩进，最后附一句要求：\"用这一轮回复回答问题，说清这些结果定了什么、没定什么、下一轮要接什么；不要复述结果\"。\n\n**派出去的子代理受到的限制**（逐条）：\n\n1. **深度上限**：读 `agent.session.header.delegationDepth`，`depth >= maxAgentDepth` 时节点直接失败——原话：\"this conversation is alr"
+  "planAgentNodes": 4,
+  "thinkingChars": 16704,
+  "thinkingPreview": "I need to hand over the turn as a plan using refine_plan. The task: independently review three parts of dsh-refine-loop: src/plan.ts, src/gate.ts, src/tool.ts. Read-only. Then summarize.\n\nLet me design the plan. The three reviews are independent — each could be a subagent reading one file. But the files might be interdependent (plan.ts defines types used by tool.ts). The user asked for \"分别独立审查\" (independently review each part).\n\nOptions: use subagents for each file review (each starts with no context, needs to know the file path and question). But subagents may not have the full file contents; they'd read them themselves. That works well and keeps my context clean.\n\nActually, I could also just read the files directly — it's only 3 files. But the refine_plan requires nodes. I could make a tools node with three read calls, then write conclusion. But the tool rule says \"Draw the plan in you",
+  "finalText": "## 1) src/plan.ts —— 计划的数据结构 / 三种节点 / 占位符语法\n\n**数据结构**：`refine_plan` 一次调用带一个「小图」，分两层。\n\n```ts\n// plan.ts:44-49\nexport interface PlanArgs {\n  criteria: string[]   // \"The observable criteria that decide whether the plan succeeded.\"\n  nodes: PlanNode[]\n}\n// plan.ts:30-41\nexport interface PlanNode {\n  id: string // 其他节点在 `after` 里引用的名字\n  kind: PlanNodeKind\n  calls: PlanToolCall[]  // tools 节点的调用\n  task: string           // agent 节点的任务\n  after: string[]        // 本节点依赖的节点 id\n}\n// plan.ts:22-27\nexport interface PlanToolCall { name: string; arguments: unknown }\n```\n\n**三种节点**（`plan.ts:16`）：\n\n```ts\nexport type PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'\nexport const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent', 'subagent_fork']\n```\n\n- `tools`：一个节点里装一批工具调用（`calls` 必填且非空，每条要有非空 `name`）。\n- `subagent`：交给一个**无上下文**的子代理（`task` 必填非空）。\n- `subagent_fork`：交给一个**继承当前对话**的子代理。\n\n**占位符语法**：`@@nodeId@@`，整条正则（`plan.ts:73`）\n\n```ts\nconst PLACEHOLDER = /^@@([^@]+)@@$/u\n```\n\n要点：**整个参数必须就是占位符**（正则首尾锚定），夹在长字符串里不替换（`plan.ts:64-66`）；故意不用 `{{ }}`，因为双花括号被 harness 留给自己的 prompt 变量（`plan.ts:68-71`）。占位符还会**自动生成依赖边**：解析时若某调用引用了 `@@X@@`，即使计划没写 `after`，也会补上对 X 的依赖（`plan.ts:142-148`），否则会拿到字面文本而不是输出。图按依赖深度分层成 waves（`buildWaves`，`plan.ts:189+`），重复 id、自依赖、依赖不存在、成环都直接报错（`plan.ts:192-231`）。\n\n## 2) src/gate.ts —— 插件的那条规则与触发条件\n\n**规则（一句话）：一个回合 = 一张图。** 原文（`gate.ts` 模块头 L1-21）：\n\n> \"The rule gives the turn a shape: the agent hands over one plan, the plan runs, the results come back together, and the agent writes the conclusion. What is left over belongs to the next round — the rule does not let the agent keep working past the plan it already handed over, because that is how a turn turns back into a chain.\"\n> \"The rule is a pullback, not a cage: after a couple of refusals the agent is left alone, because a rule that traps an agent is worse than a rule it ignores.\"\n\n即两半：**回合必须以一张图开场**（`requirePlan`，默认 true）；**图交出去之后同一回合不许再干活**，剩下的留给下一轮。\n\n**触发条件**：\n\n- 图之前：`requirePlan` 打开时，任何不是 `refine_plan` 的调用被拒。README 的真实轨迹（L158-162）：`步1 glob ← 被拒`、`read src/plan.ts ← 被拒`、`步2 refine_plan ← 步3 refine_plan ← 被拒:这一轮已经交过图了`。\n- 图之后：`PlanGate` 记下本会话已交图（`markPlanned`，经 `onPlanStarted` 回调，`tool.ts:504` → `index.ts:265`），此后本回合的工具调用（含第二次 `refine_plan`）被拒。\n- 拒了不无限拒：计数到 `planPullbacks`（默认 2）/ `conclusionPullbacks`（默认 10）后放行——规则是「拉回」不是「笼子」。\n- 按会话生效：`policy.ts` 的 `appliesTo(sessionId)` 允许逐会话退出。\n\n## 3) src/tool.ts —— 计划怎么跑起来 / 子代理受什么限制\n\n**入口**：`export const PLAN_TOOL = 'refine_plan'`（`tool.ts:42`），`defineTool` + zod schema（`tool.ts:463-487`）。步骤：解析计划（`parsePlanArgs`）→ 按 `maxBatchSize` 截断（`tool.ts:498-502`）→ `buildWaves` 分层 → 逐波执行 → 一次性返回。\n\n- **tools 节点**：先把 `substitutePlaceholders(call.arguments, outputs)` 替上（`tool.ts:194`，实现在 `plan.ts:273-295`；未解析的占位符报错 `the argument refers to the output of \"${id}\", and that node has not produced one`），再交给 `runBatch`（`tool.ts:196-204`）。\n- **agent 节点**：不是私有 agent API，而是**通过工具注册表调用 harness 的同名工具** `subagent` / `subagent_fork`（`runner` = `ctx.tools`，`tool.ts:506`）：\n\n```ts\n// tool.ts:233-249\nrunner.execute({ callId: nextPlanCallId(), rootCallId, name: node.kind,\n  arguments: { description: node.id, prompt: buildAgentPrompt(node, dependencies, outputs), run_in_background: false },\n  ...(agent === undefined ? {} : { agent }), signal: deadline.signal })\n```\n\n**子代理的限制（插件自己强制的全部）**：\n\n1. **委托深度硬停**（`tool.ts:215-225`）：`agent?.session.header.delegationDepth ?? 0` ≥ `maxAgentDepth` 时拒绝——`this conversation is already a delegated child (depth N), so a plan here may not start another agent. Keep the work in the nodes that call tools.`\n2. **每节点超时**：`agentNodeTimeoutMs`（默认 300000）到点 `controller.abort()` 并报错 `the node \"${id}\" ran out of its ${timeoutMs}ms budget`（`tool.ts:127-130`）；计划级 abort 信号也串进子代理（`tool.ts:228-230`）。\n3. **必须同步完成**：`run_in_background: false`，计划等它返回。\n4. **注入的 prompt 只有两样**：节点的 `task` 原文，外加（若有依赖）一段 `--- What the nodes this task depends on produced:` / `Output of <id>:\\n<output>`（`tool.ts:149-160`）。\n5. **插件没有收紧的东西**：没有工具白/黑名单、没有「不许改文件」的指令、没有沙箱/权限/文件系统范围参数——这些全"
 }

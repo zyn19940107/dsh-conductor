@@ -1,0 +1,42 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 3,
+  "exitCode": 0,
+  "wallMs": 127282,
+  "sessionId": "session-44f5a251-87fe-462a-bffc-b457e8562f7a",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 4,
+  "toolCalls": 4,
+  "tools": [
+    "glob",
+    "read",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 21873,
+    "outputTokens": 9204,
+    "cacheReadTokens": 65288,
+    "totalTokens": 96365
+  },
+  "formation": {
+    "agents": 4,
+    "input": 115161,
+    "output": 29633,
+    "cacheRead": 321256,
+    "total": 466050,
+    "steps": 16
+  },
+  "mainPrompt": 33169,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 15930,
+  "thinkingPreview": "I need to make a plan first with refine_plan.\n\nThe task: review three files independently, each gives a conclusion, then summarize. Read-only.\n\nLet me design the plan:\n- Node A: read the repo structure + package.json/README (tools node, independent)\n- Node B: review src/plan.ts (subagent, self-contained) — needs to know file path. It can read the file itself.\n- Node C: review src/gate.ts (subagent, self-contained)\n- Node D: review src/tool.ts (subagent, self-contained)\n- Node E: summary — this is written by me in the conclusion.\n\nActually, the three reviews are independent, so they can run in parallel. Then the summary I write myself.\n\nShould I use subagents or read directly? The task says \"分别独立审查\" (review each independently). Using subagents keeps context clean. But the criteria mention observable checks. Let me use subagents for each of the three files — each is a self-contained task n",
+  "finalText": "三份审查已各自独立完成。下面是结论。\n\n---\n\n## 1. `src/plan.ts` — 计划的数据结构\n\n**数据形状**（295 行文件，导出 4 个类型 + 5 个函数）：\n\n```ts\n// plan.ts:43-49\nexport interface PlanArgs {\n  criteria: string[]\n  nodes: PlanNode[]\n}\n// plan.ts:29-41\nexport interface PlanNode {\n  id: string          // 节点名，其他节点在 after 里引用它\n  kind: PlanNodeKind  // 判别字段\n  calls: PlanToolCall[]  // tools 节点的调用\n  task: string           // agent 节点的任务\n  after: string[]        // 本节点依赖哪些节点 —— 边就在这里\n}\n// plan.ts:21-27\nexport interface PlanToolCall { name: string; arguments: unknown }\n```\n\n没有独立的 `edges` 数组：图的边由每个节点的 `after: string[]` 表达，`buildWaves`（plan.ts:189）把它折成分层。`parsePlanArgs` 还会把「占位符引用的节点」自动补进 `after`（plan.ts:142-148），即**占位符本身隐含一条依赖边**。\n\n**三种节点** —— 判别字段是 `kind`，类型 `PlanNodeKind`（plan.ts:16）：\n\n| kind | 含义 | 校验 |\n|---|---|---|\n| `'tools'` | 跑一批工具调用（`calls`） | `calls` 非空（plan.ts:117），`task` 置 `''`（plan.ts:127） |\n| `'subagent'` | 起一个**不继承本对话上下文**的子代理 | `task` 非空（plan.ts:131） |\n| `'subagent_fork'` | 起一个**继承本对话上下文**的子代理 | 同上 |\n\n`AGENT_NODE_KINDS = ['subagent','subagent_fork']`（plan.ts:19）标出「会起代理」的两种。两种 agent节点的 `calls` 为 `[]`。两者的语义差异在 plan.ts 里只有名字、没有说明，实际派发在 `src/tool.ts`。\n\n**占位符语法：整个参数值写成 `@@节点名@@`**（双 `@` 包住）。\n\n```ts\n// plan.ts:73\nconst PLACEHOLDER = /^@@([^@]+)@@$/u\n```\n\n锚定 `^…$`，所以**参数必须整个就是占位符**，嵌在长字符串里会被原样保留（plan.ts:63-66）。运行时由 `collectPlaceholders`（159）收集依赖、`substitutePlaceholders`（273）替换为该节点的输出；引用节点若没产出则抛错（plan.ts:280）。特意**不用 `{{…}}`**——harness 的提示词渲染器保留双花括号，会把整段渲染炸掉（README「已知边界」）。\n\n---\n\n## 2. `src/gate.ts` — 那条规则\n\n**一句话规则：同一个 turn 里，模型的第一次工具调用必须是计划工具；计划交出去之后，本 turn 内不再允许任何模型发起的工具调用（turn 以写结论结束）——而且它是「有次数上限的拽回」，不是硬笼子。**\n\n**触发点**：`ctx.tools.guard((execution) => …)`（gate.ts:206），检查的是**工具调用执行**，不是用户消息、不是文件内容、也不是工具参数。参与判断的字段只有 `execution.name` / `callId` / `agent.session.id` / `rootCallId`。\n\n命中需要同时满足：\n\n1. `execution.agent !== undefined`（gate.ts:208）\n2. `isModelCall(execution)`：即 `execution.rootCallId === execution.callId`（gate.ts:135-137）——**计划自己派出去的嵌套调用被豁免**\n3. `config.appliesTo(sessionId)`（gate.ts:163）\n4. `config.requirePlan()` 为真（gate.ts:164）\n\n之后分两支：\n\n- **还没交计划**：`toolName === PLAN_TOOL` → 放行；否则 `bumpBefore` 加一，计数 **>** `planPullbacks` 才放行，否则返回 `PLAN_REQUIRED`（gate.ts:112-116）把调用**拒绝**掉。\n- **计划已交**：`callId === gate.planCallId(sessionId)`（就是那次计划调用本身）→ 放行；否则 `bumpAfter` 加一，计数 **>** `conclusionPullbacks` 才放行，否则返回 `PLAN_DONE`（gate.ts:121-124）——「Do not call any tool again in this turn」。\n\n匹配是**精确字符串相等**（`===`），没有正则、没有关键词表、不过滤只读工具——第一阶段所有非计划工具一律被拒。turn 边界靠 `agent/pre-step` 钩子重置：`decision.kind === 'enter' && payload.step === 1` 时 `gate.reset(sessionId)`（gate.ts:198-204），计数器因此是「每 turn 每 session」的。\n\n**注意两个易踩的点**：①「计划工具豁免」只在「还没交计划」那支存在，第二次再交计划会吃到 `PLAN_DONE`（gate.ts:124 明说 \"Do not hand over another plan in this turn\"）；② 门只认「计划工具的副作用」`markPlanned`，不看计划参数本身。\n\n---\n\n## 3. `src/tool.ts` — 计划怎么跑起来 / 子代理受什么限制\n\n**执行链路**（按 `src/tool.ts` + `src/plan.ts` 的行号）：\n\n1. 模型调用计划工具 `refine_plan`，schema 见 tool.ts:427/479（`kind` 枚举、节点数组、`criteria`）。\n2. `parsePlanArgs`（plan.ts:85）校验节点/边，并补占位符隐含边；未知依赖（plan.ts:198-200）和环（plan.ts:231）都会被拒。\n3. `buildWaves`（plan.ts:189）按 `after` 算出拓扑层（`depth` map → `layers` → `waves[depth]`）。\n4. 按层推进，**同层并发**；`tools` 节点执行其 `calls`，`subagent`/`subagent_fork` 节点各自派一个子代理执行 `task`（tool.ts:429-431、:449 区分两者）。\n5. 每个节点的输出文本收进一张 map → `substitutePlaceholders` 用它解析 `@@id@@` → 渲染成「模型读到的结果文本」（tool.ts:345 \"Render the plan output as the text the model reads\"）。\n6. 批次整体受 `maxBatchTimeoutMs` 约束（tool.ts:385、:398），结束后整份结果作为该次工具调用的返回值。\n\n**子代理受到的限制**（逐条给代码位置）：\n\n| 限制 | 实现 | 位置 |\n|---|---|---|\n| **递归深度** | `maxAgentDepth` vs `agent?.session.header.delegationDepth ?? 0`，`depth >= maxAgentDepth` 直接报错 `this conversation is already a delegated child (depth N), so a plan here may not start another agent.` | tool.ts:215-222；默认值 `DEFAULT_MAX_AGENT_DEPTH = 1`，index.ts:208 |\n| **单节点墙钟预算** | `agentNodeTimeoutMs`，超时 `reject(new Error('the node \"X\" ran out of its Nms budget'))`，**只判该节点失败，其余节点结果照常返回** | tool.ts:121、:129-130、:189、:246、:514 |\n| **整批预算** | `maxBatchTimeoutMs` | tool.ts:385、:398 |\n| **节点数上限** | `maxBatchSize` | "
+}
