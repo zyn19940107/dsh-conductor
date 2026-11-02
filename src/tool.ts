@@ -415,9 +415,10 @@ export function applyPlanTool(
   ctx.tools.register(defineTool({
     name: PLAN_TOOL,
     timeoutMs: options.timeoutMs(),
-    description: 'Run one plan of work and return every result together. This is where the work happens: '
-      + 'a turn hands its shape over here — the observable criteria that decide whether it succeeded, and the '
-      + 'nodes it is made of. A node is one of three kinds: "tools" (a batch of calls that run together), '
+    description: 'Run one plan and return every result together. A plan may be empty: it then returns at '
+      + 'once, and the round can end with the conclusion. A turn hands its shape over here — the observable '
+      + 'criteria that decide whether it succeeded, and the nodes it is made of. A node is one of three kinds: '
+      + '"tools" (a batch of calls that run together), '
       + '"subagent" (a child agent with its own context), "subagent_fork" (a child agent that inherits this '
       + 'conversation). A node may name the nodes it depends on in "after": the ones that depend on nothing '
       + 'run together and the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes '

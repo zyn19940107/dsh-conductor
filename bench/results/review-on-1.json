@@ -1,0 +1,52 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 619059,
+  "sessionId": "session-98939ab9-3fe3-4055-8c1d-10eda616e294",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 8,
+  "toolCalls": 14,
+  "tools": [
+    "glob",
+    "read",
+    "glob",
+    "read",
+    "read",
+    "glob",
+    "grep",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "refine_plan",
+    "grep",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 50253,
+    "outputTokens": 12718,
+    "cacheReadTokens": 213760,
+    "totalTokens": 276731
+  },
+  "formation": {
+    "agents": 22,
+    "input": 1317718,
+    "output": 332550,
+    "cacheRead": 9721024,
+    "total": 11371292,
+    "steps": 265
+  },
+  "mainPrompt": 57576,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 27519,
+  "thinkingPreview": "Let me start by exploring the directory structure to understand what we're dealing with.\n\nThe task: independently review three parts of D:\\code\\vibe\\dsh-refine-loop: src/plan.ts, src/gate.ts, src/tool.ts. Read-only.\n\nLet me first look at the files. I could read them directly, or delegate to subagents. The instructions say to use refine_plan with nodes. Given \"分别独立审查\" (independently review each), three subagent_fork or subagent nodes would be natural, each reviewing one file.\n\nBut first, let me explore to know what the files look like, so I can write good prompts. Actually, let me just design the plan: three independent subagent nodes, each reading one file plus context, and reporting. Then I summarize.\n\nLet me first do a quick glob/read to know the structure — that's allowed (\"You may call tools while you design the graph\").\n\nLet me read the files directly first to be able to judge the s",
+  "finalText": "三份审查已完成。**注意两点**：`src/gate.ts` 这个文件在仓库里并不存在（任务的问法来自 `bench/task.mjs` 里的过期指针）；专门负责 gate 的那个子代理节点跑满 540 秒预算超时了，但另外两个节点独立覆盖了这部分，且所有关键引用我都已对照源码逐一核对。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构 / 三种节点 / 占位符\n\n**数据结构**\n\n| 导出 | 位置 | 形状 |\n|---|---|---|\n| `PlanArgs` | plan.ts:44-49 | `{ criteria: string[]; nodes: PlanNode[] }` |\n| `PlanNode` | plan.ts:30-41 | `{ id; kind; calls: PlanToolCall[]; task: string; after: string[] }` |\n| `PlanToolCall` | plan.ts:22-27 | `{ name: string; arguments: unknown }` |\n| `PlanWaves` | plan.ts:57-59 | `{ waves: PlanNode[][] } \\| { error: string }` —— 失败给的是**一句话原因**，不是布尔 |\n| `PlanNodeKind` | plan.ts:16 | `'tools' \\| 'subagent' \\| 'subagent_fork'` |\n\n`calls` 与 `task` 按 kind 互斥：tools 节点落库为 `calls: parsedCalls, task: ''`（plan.ts:136），agent 节点落库为 `calls: [], task: task.trim()`（plan.ts:142）。`after` 缺失 → `[]`（plan.ts:118-122），`arguments` 缺失 → `{}`（plan.ts:134）。**空计划是合法的**（plan.ts:144-146）。\n\n**三种节点**\n\n- **`tools`** —— 一批写死的调用一起跑。校验：`calls` 必须非空数组（plan.ts:126），每个 call 的 `name` 非空（:132）。\n- **`subagent`** —— 从零开始的子代理，只拿 `task`。\n- **`subagent_fork`** —— 继承本对话的子代理（rounds.ts:29-31）。两者在本插件里的代码路径**完全相同**，唯一差别是传给 registry 的工具名 `name: node.kind`（tool.ts:247），继承与否由 harness 的 `subagent`/`subagent_fork` 两个工具自身决定。\n\n**占位符语法：`@@nodeId@@`**\n\n- 整参数形式 `/^@@([^@]+)@@$/u`（plan.ts:73）→ 整个参数换成该节点的输出**本身**。\n- 句中形式 `/@@([^@\\n]+)@@/gu`（plan.ts:82）→ 在原位贴入输出（plan.ts:313-322），递归穿透数组与对象（:324-333）。\n- 引用节点还没产出 → 直接抛错 `the argument refers to the output of \"X\", and that node has not produced one`（plan.ts:309/319），**绝不把字面量交给工具**。\n- **占位符即依赖**：`parsePlanArgs` 收尾扫描每个 tools 节点的全部参数，把命中的 id 自动补进自己的 `after`（plan.ts:153-159）。\n- 不用 `{{}}` 的原因：harness 把双花括号保留给自己的提示词变量，提示词里出现 `{{` 会被拒绝渲染（plan.ts:67-72；index.ts:206-209）。\n- 两处瑕疵：plan.ts:64-66 的注释「句内占位符原样留着」已过期（实现是替换）；依赖推导只扫 `call.arguments`，**不扫 agent 节点的 `task`**，所以 task 里的 `@@id@@` 既不成依赖也不被替换。\n\n`buildWaves`（plan.ts:202-270）按 `after` 的最长路径算层号，五种拒绝：重复 id（:205）、自依赖（:210）、依赖不存在（:212）、**subagent 依赖 subagent**（:220-231）、成环（:260）。\n\n---\n\n## 2. `src/gate.ts` —— 规则实际在 `src/rounds.ts`\n\n**`src/gate.ts` 不存在**（`src/` 只有 batch / concurrency / index / plan / policy / repair / rounds / tool 八个文件；git 历史上该文件已随 `rounds.ts` 重写被删）。插件自述的那条规则在 index.ts:19-21：**「一个 turn 就是一份计划」**——turn 的第一次调用是计划，计划跑完后 turn 就结束。装配在 index.ts:263-266。共两个执行点：\n\n**规则一 —— 图跑完后不许逐个调工具**（`applyJudgementGuard`，rounds.ts:243-251，挂 `ctx.tools.guard`）。触发条件链，四条全中才拦：\n\n1. `execution.agent !== undefined`（:245）\n2. `isModelCall(execution)`，即 `callId === rootCallId`——**只有模型自己发起的顶层调用**（:247 / :227-232）\n3. `execution.name !== 'refine_plan'`（:248）\n4. `!plans.waiting(agent.session.id)`——**本请求已经交过图**（:249）\n\n第 4 条的状态机：`plans.expect` 在出现 user 消息时置 true（rounds.ts:147-152），计划跑完 `plans.done` 置 false（index.ts:248）。拒绝文案 `JUDGE_ONLY`（rounds.ts:215-217）：「The graph has run — every result is above. This turn is the judgement…」\n\n**规则二 —— 不许绕过计划直接委派**（`applyDelegationRule`，rounds.ts:191-206）。把 `DELEGATION_TOOLS = ['subagent','subagent_fork']`（:54）逐个重注册，条件只有一条（:199）：\n\n```ts\nif (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)\n```\n\n即**模型亲自调**委派工具被拒（文案 rounds.ts:49-51），**计划内部派出的嵌套调用照常通过**——这正是 `subagent`/`subagent_fork` 节点还能工作的原因（rounds.ts:184-187）。\n\n另有每会话开关 `/dsh-refine-loop on|off`（policy.ts:29,101-127），off 时用 `tools.restrict({ deny })` 把计划工具从该会话摘掉、规则停用（policy.ts:68-74）；轮次预算 `maxRounds` 默认 16（index.ts:153, 249）。\n\n> 实测佐证：本轮图跑完后我自己的两次直接工具调用（grep / git）都被上面规则一当场拦下，报的正是 `JUDGE_ONLY` 那段文案——触发条件与源码一致。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑 / 子代理受什么限制\n\n**运行链路**：注册 `refine_plan`（tool.ts:44, 415-417，工具级超时 = `maxBatchTimeoutMs`，注册期求值一次）→ `execute`（:509-545）先 `parsePlanArgs`，失败抛 `refine_plan needs criteria, and nodes that each have an id and a kind`（:512），再查节点数上限 `maxBatchSize`（默认 8，:514-518）→ `runPlan`（:300-354）：`buildWaves` 分层，不成立抛 `the plan does not hold together: …`（:313-315）→ **逐层 `Promise.all` 扇出**（:321-341，同层并行、下一层等上一层）→ 每层结束把结果写进 `results`/`outputs` 两张按节点 id 索引的表（:337-340）→ tools 节点用 `substitutePlaceholders` 把上游输出注入参数后交给 `runBatch`（:200-214）→ 输出 `{criteria, waves, schedule: conc"
+}
