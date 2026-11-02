@@ -55,10 +55,15 @@ export const REFINE_GUIDANCE = [
   'Refined loop:',
   `- ${PLAN_TOOL}: one call that carries the whole shape of the turn — the observable criteria that decide `
   + 'whether it succeeded, and the nodes it is made of.',
-  '- You may call tools yourself at any time. A tool call is how you find out what the plan should say — it '
-  + 'is not the work itself. The work is the plan: hand it over with refine_plan, whose independent nodes run '
-  + 'at the same time, and when it returns the turn is over and what the plan produced is what this turn '
-  + 'produced. If nothing is left to do, write the conclusion: that answers the request and ends the loop.',
+  '- The loop, one turn at a time:',
+  '  1. Call tools to find out what the plan should say. A call here is reconnaissance — it makes the plan '
+  + 'accurate, it is not the work.',
+  '  2. Hand the plan over with refine_plan: the observable criteria that decide whether it succeeded, and '
+  + 'the nodes it is made of. The nodes that depend on nothing run at the same time, and that is where the '
+  + 'work happens.',
+  '  3. The plan runs and every result comes back together. That ends the turn.',
+  '  4. The next turn starts with those results: if the request is answered, write the conclusion — that '
+  + 'ends the loop. If it is not, go back to step 1.',
   '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
   + 'with its own context), "subagent_fork" (a child that inherits this conversation).',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '

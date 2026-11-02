@@ -1,0 +1,55 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 71193,
+  "sessionId": "session-508e4ce8-5eb8-45ef-b981-6eaf7ca08b11",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 8,
+  "toolCalls": 17,
+  "tools": [
+    "pwsh",
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "pwsh",
+    "grep",
+    "read",
+    "pwsh",
+    "grep",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 44041,
+    "outputTokens": 5224,
+    "cacheReadTokens": 221585,
+    "totalTokens": 270850
+  },
+  "formation": {
+    "agents": 1,
+    "input": 44041,
+    "output": 5224,
+    "cacheRead": 221585,
+    "total": 270850,
+    "steps": 8
+  },
+  "mainPrompt": 44230,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 12165,
+  "thinkingPreview": "The user asks about a path D:\\code\\vibe\\dsh-refine-loop\\verify (the path seems garbled with escape characters: \"D:codeibedsh-refine-looperify\" = D:\\code\\vibe\\dsh-refine-loop\\verify).\n\nLet me explore the directory. Read-only.\n\nLet me use glob and pwsh to list files.\n\nI should be careful: the task is read-only. Let's list files.\n\nLet me plan: use pwsh to list files under D:\\code\\vibe\\dsh-refine-loop\\verify and src, with line counts.\n\nLet's do it.\nThe src directory has 8 modules: batch.ts, concurrency.ts, index.ts, plan.ts, policy.ts, repair.ts, rounds.ts, tool.ts. Verify dir has 6 spec files: batch.spec.ts, concurrency.spec.ts, plan.spec.ts, refine.spec.ts, repair.spec.ts, rounds.spec.ts.\n\nSo likely policy.ts, tool.ts, index.ts have no spec (index.ts may be covered by refine.spec.ts).\n\nNow I need to read the spec files to determine which entry functions they actually test. Let's read all 6",
+  "finalText": "已读完相关文件，**未修改任何文件**（全部只读操作）。\n\n## 1. `verify` 下每个 `.spec.ts` 实际测的入口函数\n\n| spec 文件 | 实际调用的入口函数 | 来源模块 |\n|---|---|---|\n| `refine.spec.ts` | `parseBatchArgs()`、`renderBatch()`；`parsePolicyCommand()` | `batch.ts`、`policy.ts` |\n| `batch.spec.ts` | `runBatch()`（唯一入口，用假 `BatchRunner` 驱动） | `batch.ts` |\n| `plan.spec.ts` | `parsePlanArgs()`、`buildWaves()`、`substitutePlaceholders()`；`runPlan()`、`renderPlan()` | `plan.ts`、`tool.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand()`、`mayRunTogether()`、`buildOverrides()`；外加 `runBatch()` 验证独占调用顺序 | `concurrency.ts`、`batch.ts` |\n| `repair.spec.ts` | `runBatch()`（带 repair 回调）；`parseRepair()` | `batch.ts`、`repair.ts` |\n| `rounds.spec.ts` | `new Rounds()` 的 `used()`/`bump()`/`reset()`，以及常量 `NEXT_ROUND` | `rounds.ts` |\n\n两点值得注意：\n\n- `refine.spec.ts` 的注释写着测「plan、chain detector、per-conversation switch」，但实际只测了参数解析和结果渲染 —— 没碰 `runBatch`，也没碰 `SessionPolicy` / `applyPolicyCommand` / `applyPolicyMessage`。\n- `repair.spec.ts` 里的 repair 回调是 spec 自己 stub 的，`src/repair.ts` 的 `askForRepair()` / `repairSystem()` / `describeFailure()` 一次都没被调用；`repair.spec.ts` 只覆盖了 `parseRepair()`。\n\n**额外发现**：`verify/run-specs.mjs` 第 21 行的 specs 列表只有 5 个 —— `refine / batch / concurrency / plan / rounds`，**`repair.spec.ts` 不在其中，从未被 runner 执行**。\n\n## 2. `src` 下 8 个模块与 spec 的对应关系\n\n| 模块 | 覆盖它的 spec |\n|---|---|\n| `batch.ts` | `batch.spec.ts`、`refine.spec.ts`、`concurrency.spec.ts`、`repair.spec.ts` |\n| `concurrency.ts` | `concurrency.spec.ts` |\n| `plan.ts` | `plan.spec.ts` |\n| `policy.ts` | `refine.spec.ts`（仅 `parsePolicyCommand`） |\n| `repair.ts` | `repair.spec.ts`（仅 `parseRepair`，且该 spec 未被运行） |\n| `rounds.ts` | `rounds.spec.ts` |\n| `tool.ts` | `plan.spec.ts`（仅 `runPlan`/`renderPlan`，`applyPlanTool` 未测） |\n| **`index.ts`** | **无任何 spec 引用** |\n\n结论：\n\n- **完全没有 spec 的模块：`src/index.ts` 一个** —— 插件真正的入口 `apply()`、`REFINE_GUIDANCE`、`Config` schema 和全部 `DEFAULT_*` 常量都没有任何测试。\n- 严格按「有没有自己的同名 spec 文件」算，`policy.ts`、`tool.ts`、`repair.ts` 也没有独立 spec，只被别的 spec 顺带测了一小部分（且 `repair.ts` 那部分还没被 runner 跑）。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`：562 行物理行**（其中 542 行非空；`Measure-Object -Line` 口径下为 542）。\n\n全量排名：\n\n| 模块 | 物理行 | 非空行 |\n|---|---|---|\n| `tool.ts` | **562** | 542 |\n| `batch.ts` | 353 | 332 |\n| `plan.ts` | 333 | 312 |\n| `index.ts` | 302 | 275 |\n| `policy.ts` | 241 | 228 |\n| `concurrency.ts` | 234 | 224 |\n| `repair.ts` | 172 | 162 |\n| `rounds.ts` | 83 | 76 |\n\n`tool.ts` 之所以最大，是因为它同时装着计划执行引擎和工具注册（`runPlan`、`renderPlan`、`applyPlanTool` 及其内部的 `runNode`、`buildAgentPrompt`、`runWithDeadline`），一个文件承担了注册 + 执行两层职责。"
+}

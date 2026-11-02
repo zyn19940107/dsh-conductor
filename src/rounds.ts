@@ -18,9 +18,9 @@ import type { Context } from '@deepseek-ai/cordis'
  * plan for what is left, or write the conclusion, which answers the request and
  * ends the loop.
  */
-export const NEXT_ROUND = 'The plan has run — every result is above. This is the next round: hand over another plan '
-  + 'with refine_plan for what is left, or write the conclusion. Writing the conclusion answers the request and '
-  + 'ends the loop.'
+export const NEXT_ROUND = 'The plan has run — every result is above. Step 4: is the request answered? If it is, '
+  + 'write the conclusion — that answers it and ends the loop. If it is not, go back to step 1 and hand over the '
+  + 'next plan with refine_plan.'
 
 /**
  * The rounds each conversation has spent.
