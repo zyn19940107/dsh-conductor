@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyDelegationRule, applyRounds, applyTurnDoctrine, NEXT_ROUND, Rounds } from './rounds.js'
+import { applyDelegationRule, applyRounds, applyTurnDoctrine, NEXT_ROUND, Plans, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -226,6 +226,7 @@ export function apply(ctx: Context, config: Config): void {
   const policy = new SessionPolicy()
   // Whether a conversation has opened its turn with a plan.
   const rounds = new Rounds()
+  const plans = new Plans()
 
   ctx.systemPrompt.section({
     name: 'refine-loop:policy',
@@ -257,6 +258,7 @@ export function apply(ctx: Context, config: Config): void {
     // turn, and the pending message is what makes the harness open the next.
     onPlanFinished: (agent: Agent) => {
       const sessionId = agent.session.id
+      plans.done(sessionId)
       if (rounds.bump(sessionId) > config.maxRounds.get()) return false
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: NEXT_ROUND }],
@@ -271,8 +273,8 @@ export function apply(ctx: Context, config: Config): void {
   // The doctrine is registered before the rounds hook: a pre-step hook's next()
   // runs the hooks registered after it, and the doctrine has to be the last
   // message the model reads before it speaks.
-  applyTurnDoctrine(ctx)
-  applyRounds(ctx, rounds)
+  applyTurnDoctrine(ctx, plans)
+  applyRounds(ctx, rounds, plans)
   applyDelegationRule(ctx)
 
   applyPolicyCommand(ctx, policy)

@@ -18,11 +18,17 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
  *
  * It says both halves of the rule in one place: hand over the graph, or answer.
  */
-export const GRAPH_OR_CONCLUSION = 'Every turn hands its work over as a graph, or answers with the conclusion. '
-  + 'It answers only if the plan results above already answer the request; a turn with no plan results above has '
-  + 'nothing to answer from. Otherwise the graph is the work of this turn: what the pieces of work are, which of '
-  + 'can run at the same time, what each node is made of, and what observable criteria decide it succeeded. Call '
-  + 'tools only to answer questions the graph needs answered, then hand it over with refine_plan.'
+export const DRAW_THE_GRAPH = 'This turn is the graph. Start there: what the pieces of work are, which of '
+  + 'them can run at the same time, what each node is made of, and what observable criteria decide it succeeded. '
+  + 'Call tools only to answer questions the graph needs answered, then hand it over with refine_plan.'
+
+/**
+ * What the model is told at the head of a turn that follows a plan.
+ */
+export const AFTER_PLAN = 'The plan results above are what you have. Judge them: if they answer the request, '
+  + 'write the conclusion — that ends the loop. If they do not, this turn is the next graph: what is still '
+  + 'missing, which of those pieces can run at the same time, and what each node is made of. Hand it over with '
+  + 'refine_plan.'
 
 /**
  * What the model is told when a plan has run and another round is open.
@@ -87,6 +93,45 @@ export class Rounds {
 }
 
 /**
+ * Whether a request has handed over a plan yet.
+ *
+ * The turn before the first plan is the graph; the turns after it judge what the
+ * plan produced. The flag lives as long as the request does.
+ */
+export class Plans {
+  /** Requests that have not produced a plan yet. */
+  readonly #waiting = new Set<string>()
+
+  /**
+   * Start expecting a plan.
+   *
+   * @param sessionId - the conversation.
+   */
+  expect(sessionId: string): void {
+    this.#waiting.add(sessionId)
+  }
+
+  /**
+   * Note that a plan has run.
+   *
+   * @param sessionId - the conversation.
+   */
+  done(sessionId: string): void {
+    this.#waiting.delete(sessionId)
+  }
+
+  /**
+   * Whether a request still has to hand over its first plan.
+   *
+   * @param sessionId - the conversation.
+   * @returns true when no plan has run for the current request.
+   */
+  waiting(sessionId: string): boolean {
+    return this.#waiting.has(sessionId)
+  }
+}
+
+/**
  * Reset the round budget whenever the person speaks.
  *
  * A new request gets its own budget; the rounds of the request before it are not
@@ -95,12 +140,15 @@ export class Rounds {
  * @param ctx - the plugin context supplying the agent runtime.
  * @param rounds - the counters.
  */
-export function applyRounds(ctx: Context, rounds: Rounds): void {
+export function applyRounds(ctx: Context, rounds: Rounds, plans: Plans): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter') return decision
     if (payload.messages.some(message => message.source?.kind === 'user')) {
       rounds.reset(payload.agent.session.id)
+      // A new request expects its own plan: the plan the request before it handed
+      // over is not this request's plan.
+      plans.expect(payload.agent.session.id)
     }
     return decision
   })
@@ -114,15 +162,16 @@ export function applyRounds(ctx: Context, rounds: Rounds): void {
  *
  * @param ctx - the plugin context supplying the agent runtime.
  */
-export function applyTurnDoctrine(ctx: Context): void {
+export function applyTurnDoctrine(ctx: Context, plans: Plans): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter') return decision
     if (payload.step !== 1) return decision
+    const text = plans.waiting(payload.agent.session.id) ? DRAW_THE_GRAPH : AFTER_PLAN
     return {
       ...decision,
       messages: [...decision.messages, createUserMessage({
-        content: [{ type: 'text', text: GRAPH_OR_CONCLUSION }],
+        content: [{ type: 'text', text }],
         source: { kind: 'system-prompt' },
       })],
     }
