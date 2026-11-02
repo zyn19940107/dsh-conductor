@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
+import { applyRule, applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -175,6 +175,10 @@ export interface Config {
   concurrentShell: Volatile<boolean>
   /** The shell tool the read-only rule applies to. */
   shellTool: Volatile<string>
+  /** How many calls a turn may make itself before it has to hand over a plan. */
+  reconCalls: Volatile<number>
+  /** How many refusals a turn gets before the rule lets it alone. */
+  planPullbacks: Volatile<number>
   /** How many rounds one request may run before the loop stops on its own. */
   maxRounds: Volatile<number>
   /** How many times a turn may be pulled back after it handed over its plan. */
@@ -256,6 +260,10 @@ export function apply(ctx: Context, config: Config): void {
 
 
   applyRounds(ctx, rounds)
+  applyRule(ctx, {
+    reconCalls: () => config.reconCalls.get(),
+    planPullbacks: () => config.planPullbacks.get(),
+  })
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
