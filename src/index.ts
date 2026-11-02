@@ -229,13 +229,16 @@ export function apply(ctx: Context, config: Config): void {
   const plans = new Plans()
 
   ctx.systemPrompt.section({
-    name: 'tool:refine-loop',
-    order: ctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT'),
+    name: 'refine-loop:policy',
+    // The policy slot, not a tool slot. This section says what a turn in this
+    // session is, so it belongs with the policies at the head of the prompt.
+    // Registered among the tool sections it was read as documentation for one
+    // tool, and it sat next to the harness's own advice to delegate directly —
+    // which the model followed instead.
+    order: ctx.systemPrompt.getSectionOrder('PLAN_POLICY'),
     // A conversation that opted out has no plan tool in its tool table, and
     // this guidance is written in terms of it — so the tool leaving is what
     // takes the guidance out of the system prompt.
-    // A delegated child is the harness's own agent: its prompt, its rules. The
-    // plugin adds nothing to it.
     text: ({ scope }) => ctx.tools.get(PLAN_TOOL, scope) === undefined ? '' : REFINE_GUIDANCE,
   })
 
