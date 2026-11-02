@@ -151,10 +151,16 @@ async function runWithDeadline<T>(
  */
 function buildAgentPrompt(
   node: PlanNode,
+  criteria: readonly string[],
   dependencies: readonly PlanNode[],
   outputs: ReadonlyMap<string, string>,
 ): string {
-  if (dependencies.length === 0) return node.task
+  const judged = criteria.length === 0
+    ? ''
+    : `What this plan is judged on:
+${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
+` + String.fromCharCode(10) + String.fromCharCode(10)
+  if (dependencies.length === 0) return `${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}`.trim()
   const sections = dependencies.map((dependency) => {
     const output = outputs.get(dependency.id) ?? ''
     return `Output of ${dependency.id}:\n${output}`
@@ -242,7 +248,7 @@ async function runNode(
           name: node.kind,
           arguments: {
             description: node.id,
-            prompt: buildAgentPrompt(node, dependencies, outputs),
+            prompt: buildAgentPrompt(node, criteria, dependencies, outputs),
             run_in_background: false,
           },
           ...(agent === undefined ? {} : { agent }),

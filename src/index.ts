@@ -69,6 +69,16 @@ export const REFINE_GUIDANCE = [
   + 'looking at what came back, such as searching, tracing, or auditing something you cannot name in advance.',
   '- A child starts with nothing. It must be able to state its whole task in the plan: do not reach for the '
   + 'conversation when writing it, because it will not have it.',
+  '- Write an agent node\'s task as a question it has to answer, not as a chore it has to carry out. "Which '
+  + 'specs under verify actually test an entry point their name does not match, and what does each really '
+  + 'test?" is a task; "read these six files and describe each one" is you doing its job for it. You do not '
+  + 'know the answer when you write the question — that is exactly why the child exists. Do not list the '
+  + 'files, the steps, or the output format: the child finds the files, decides how much to read, and '
+  + 'answers the question it was given.',
+  '- Design subagents as branches that stand alone. Assume each child works only from its own task and '
+  + 'never needs another child\'s output — so give agent nodes no dependency on each other, which is what '
+  + 'lets them run at the same time. Work that needs what another branch produced is a tools node in the '
+  + 'next layer, or work for the next round; it is not a second child waiting on a first.',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',

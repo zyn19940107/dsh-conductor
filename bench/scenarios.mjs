@@ -116,3 +116,84 @@ export const MULTIHOP = {
     { what: '定义在第 45 行', needles: ['45'] },
   ]),
 }
+/**
+ * Six specs against eight modules, then a judgement about what is untested.
+ *
+ * Reading all fourteen files is ~3,600 lines. A plain agent carries every one of
+ * them in its own context; a plan can hand the files out and keep only the
+ * conclusions. This is the shape the plugin claims to be for.
+ */
+export const COVERAGE = {
+  text: [
+    '回答下面三个问题,只读不改:',
+    '',
+    '1. D:\code\vibe\dsh-refine-loop\verify 下每个 .spec.ts 实际测的入口函数是什么?',
+    '2. D:\code\vibe\dsh-refine-loop\src 下 8 个模块里,哪些没有对应的 spec?',
+    '3. 这些模块里行数最多的是哪一个?多少行?',
+    '',
+    '只读不改。不要修改任何文件。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'tool.ts'] },
+    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts'] },
+    { what: 'concurrency.spec 测的入口', needles: ['isreadonlycommand'] },
+    { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
+    { what: '行数最多的模块(632 行)', needles: ['632'] },
+  ]),
+}
+
+/**
+ * One sentence per file, fourteen files, nothing skipped.
+ *
+ * Embarrassingly parallel: the answer for one file does not inform any other.
+ */
+export const SWEEP = {
+  text: [
+    '给下面 14 个文件各写一句话,说明它负责什么,一个都不要漏:',
+    '',
+    'src 下:batch.ts、concurrency.ts、gate.ts、index.ts、plan.ts、policy.ts、repair.ts、tool.ts',
+    'verify 下:batch.spec.ts、concurrency.spec.ts、gate.spec.ts、plan.spec.ts、refine.spec.ts、repair.spec.ts',
+    '',
+    '都在 D:\code\vibe\dsh-refine-loop 下。只读不改。',
+  ].join('\n'),
+  judge: judgeBy([
+    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'tool.ts'] },
+    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts'] },
+    { what: 'repair.ts 的职责(失败后修一次)', needles: ['修'] },
+    { what: 'concurrency.ts 的职责(并发判定)', needles: ['并发'] },
+    { what: 'plan.ts 的职责(图的节点)', needles: ['节点'] },
+  ]),
+}
+
+/**
+ * Four large source files, one summary each, then how they relate.
+ *
+ * Together they are ~17,700 lines: reading all of them puts well over 100k
+ * tokens into one agent's context, and every later step pays for all of it
+ * again. A plan can give one file to one child and keep the main context small.
+ * This is the shape where the plugin should win on time as well as tokens: the
+ * plain agent's own steps get slower as its context grows.
+ */
+export const BIGREAD = {
+  text: [
+    '读 D:\code\vibe\deepseek-harness 下这四个大文件,每个写 3 条要点(它是什么、主要导出什么、关键结构),',
+    '最后用一段话说明它们之间的关系:',
+    '',
+    '1. packages\extensions\tool-cordis\src\api-catalog.ts',
+    '2. packages\extensions\cordis-client-runner\src\client\slot-catalog.ts',
+    '3. packages\typert\generator\src\analyzer.ts',
+    '4. packages\core\tools\src\index.ts',
+    '',
+    '只读不改。不要修改任何文件。',
+  ].join('\n'),
+  judge: judgeBy([
+    {
+      what: '四个文件都被读到',
+      needles: ['api-catalog.ts', 'slot-catalog.ts', 'analyzer.ts', 'core\tools\src\index.ts'],
+    },
+    { what: 'api-catalog 的主要导出', needles: ['serviceapientry'] },
+    { what: 'slot-catalog 的主要导出', needles: ['clientslotentry'] },
+    { what: 'analyzer 的主要类型', needles: ['workspaceanalyzeroptions'] },
+    { what: 'tools/index 的主要导出', needles: ['tooldefinition'] },
+  ]),
+}
