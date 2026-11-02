@@ -12,7 +12,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const DIR = 'bench/results'
-const TASKS = ['humeval', 'humeval-hard', 'quixbugs']
+const TASKS = ['humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody']
 
 /**
  * The median of a list of numbers.
@@ -108,7 +108,15 @@ for (const task of TASKS) {
   const onCorrect = pick(task, 'on', record => record.correctness.passed)
   const offTotal = pick(task, 'off', record => record.correctness.total)
   const onTotal = pick(task, 'on', record => record.correctness.total)
-  console.log(`| 正确性(通过的判据) | ${offCorrect}/${offTotal} | ${onCorrect}/${onTotal} | — |`)
+  const scaled = task.startsWith('lhtb-')
+  console.log(`| ${scaled ? '通过的档(加权分见下)' : '正确性(通过的判据)'} `
+    + `| ${offCorrect}/${offTotal} | ${onCorrect}/${onTotal} | — |`)
+  const offScore = pick(task, 'off', record => record.correctness.score ?? Number.NaN)
+  const onScore = pick(task, 'on', record => record.correctness.score ?? Number.NaN)
+  if (Number.isFinite(offScore) || Number.isFinite(onScore)) {
+    console.log(`| 连续分(原始 band 值) | ${Number.isFinite(offScore) ? offScore.toFixed(2) : '—'} `
+      + `| ${Number.isFinite(onScore) ? onScore.toFixed(2) : '—'} | ${delta(offScore, onScore)} |`)
+  }
   const planned = on.filter(record => record.planned).length
   console.log(`| 其中真的交了图的运行 | — | ${planned}/${on.length} | — |`)
   console.log('')

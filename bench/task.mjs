@@ -14,6 +14,8 @@
 
 import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, GREENSPECS, MULTIHOP, PANEL, SWEEP } from './scenarios.mjs'
 import { PUBLIC_TASKS } from './pubeval.mjs'
+import { LHTB_TASKS } from './lhtb.mjs'
+import { LHTB_NBODY_TASKS } from './lhtb-nbody.mjs'
 
 /**
  * The scenario tasks that say where the plugin helps and where it does not.
@@ -102,7 +104,7 @@ export const REVIEW = {
 /**
  * Every task, keyed by the name the runner takes.
  */
-export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS, ...PUBLIC_TASKS }
+export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

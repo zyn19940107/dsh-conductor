@@ -1,0 +1,52 @@
+{
+  "task": "lhtb-2048",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 387018,
+  "timedOut": false,
+  "sessionId": "session-a3bf46e4-5c1e-4462-80be-7d45e8773137",
+  "stderr": "",
+  "steps": 7,
+  "toolCalls": 8,
+  "tools": [
+    "pwsh",
+    "read",
+    "read",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 65957,
+    "outputTokens": 52104,
+    "cacheReadTokens": 290816,
+    "totalTokens": 408877
+  },
+  "formation": {
+    "agents": 1,
+    "input": 65957,
+    "output": 52104,
+    "cacheRead": 290816,
+    "total": 408877,
+    "steps": 7
+  },
+  "mainPrompt": 76320,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 400 步"
+    ],
+    "score": 4.7852,
+    "moves": 400
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 35541,
+  "thinkingPreview": "Let me start by exploring the workspace to understand the setup.\n\nThe task: play 2048, maximize the largest tile. 15 minute time budget, 400 move budget. Moves must be logged in moves.log.\n\nBest approach: write a solver program that uses the engine directly (game2048_engine.py) to search with expectimax, then output the move sequence to moves.log. But careful: the scoring replays the moves on a fresh engine with the same seed — so the RNG sequence must be deterministic given the moves. The engine likely uses a seeded RNG that spawns tiles randomly after each move.\n\nSo I can simulate: import the engine, run a search, and produce the move sequence. The replay should reproduce exactly since the engine is deterministic given seed and moves.\n\nLet me look at the files first.\n\nPlan:\n1. Read g2048.py, game2048_engine.py.\n2. Write a solver script (separate file, e.g. solve.py) that imports the en",
+  "finalText": "# 完成报告\n\n## 策略\n\n1. **发现引擎是完全确定性的**:splitmix64 只有一条全局随机流,而\"只有在棋盘真的变化时才生成新 tile\",所以第 k 次生成消耗的是这条流里固定的第 2k / 2k+1 个抽样 —— 也就是说,任何**候选走法之后**会出现哪个 tile、在哪个格子,是可以精确预测的。\n2. **于是把 2048 从带随机的博弈变成确定性规划问题**:不做 expectimax 平均,而是直接对**真实的未来棋盘**做 beam search(每步宽 16、深 24,每个根走法独立开一条 beam),叶节点用经典 2048 启发式打分(空格数、相邻平滑度、蛇形单调性、最大 tile 靠角、相邻可合并对、log2(最大 tile))。\n3. **走法零浪费**:只走会真正改变棋盘的方向(否则白耗步数且不生成 tile);自写的 `solve2048.py` 模拟器先用 3000 个随机棋盘 + 60 步真实序列对 `game2048_engine` 做了滑行/生成/开局三重一致性断言,`selftest OK` 后才开始落子,每一手都同步写入 `moves.log` 与 `state.pkl`。\n\n## 结果:已到达该种子 400 步内的**理论上限**\n\n| 项目 | 值 |\n|---|---|\n| 最大 tile | **512** |\n| band | **4**(64=1, 128=2, 256=3, 512=4) |\n| 连续分 value | **4.785**(= 4 + (914−512)/512) |\n| score | 6208 |\n\n**为什么 512 就是上限**:一次有效走法只生成一个 tile,400 步 + 开局 2 个 tile = 402 次生成;这些生成值由固定随机流决定,总和恒为 **914**(已用引擎自身的 PRNG 流算出)。合并不改变总和,棋盘总和恒为 914;而 tile 是 2 的幂且单个 tile ≤ 总和 → 最大可能 tile = **512**。所以 band 4 / value 4.785 是本种子在 400 步预算下的数学最优值,已达顶,重来(哪怕允许 RESET)也不可能更高。\n\n## 总步数\n\n**400 步**(moves.log 恰好 400 行,每行一个 `U/D/L/R` 字母,无 RESET、无非法字符;`bad_lines=0`,`longest=1`)。\n评分器式重放校验:`log_letters=400 replay_max_tile=512 replay_band=4 replay_value=4.785`,且 `live_board_matches_log=True`(日志重放出的棋盘与 `state.pkl` 完全一致,分数无法伪造)。\n\n## 最后一次 status 完整输出\n\n```\nscore=6208  max_tile=512  band=4  best_band=4  moves=400  empty=3  game_over=False\nboard (4x4, .=empty, row 0 = top):\n    4    32     4     4\n    8    64    16   512\n    2   256     2     2\n    .     .     .     8\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\n附注:工作区里新增了两个文件 —— `solve2048.py`(我的出招程序,含 selftest / play / verify 三个子命令)和 `state.pkl`、`moves.log`(由 CLI 自身写入)。`g2048.py` 与 `game2048_engine.py` 未被改动,`D:\\code\\vibe\\dsh-refine-loop` 仓库内没有任何文件被触碰。"
+}

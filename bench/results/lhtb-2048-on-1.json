@@ -1,0 +1,63 @@
+{
+  "task": "lhtb-2048",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 293207,
+  "timedOut": false,
+  "sessionId": "session-815ce88d-f112-4e5f-9409-c69330d10d53",
+  "stderr": "",
+  "steps": 17,
+  "toolCalls": 19,
+  "tools": [
+    "pwsh",
+    "read",
+    "read",
+    "pwsh",
+    "write",
+    "pwsh",
+    "write",
+    "pwsh",
+    "edit",
+    "edit",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "write",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 49678,
+    "outputTokens": 28704,
+    "cacheReadTokens": 548608,
+    "totalTokens": 626990
+  },
+  "formation": {
+    "agents": 1,
+    "input": 49678,
+    "output": 28704,
+    "cacheRead": 548608,
+    "total": 626990,
+    "steps": 17
+  },
+  "mainPrompt": 47432,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 400 步"
+    ],
+    "score": 4.7852,
+    "moves": 400
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 36458,
+  "thinkingPreview": "Let me read the engine.\nKey insight: the engine is fully deterministic given seed and move sequence. The scorer replays the move log in a fresh engine. The move budget is 400 steps and time budget 15 minutes.\n\nImportant: `best_band_of` reads back the move log to compute the best band. The judge replays the move log — so moves that don't change the board don't advance the PRNG (moves that don't move don't spawn). But note: `game.move` in the CLI increments `self.moves` only when the board changed. So a blocked move doesn't count as a step in terms of `game.moves`. But the task says \"步数预算 400 步(一次 move 走几个字母就算几步)\" — each letter counts as a step. So I have 400 letters total in the log.\n\nKey strategy: I can write my own solver offline (a search-based solver) that plans moves against the deterministic engine, then write the move sequence to moves.log. But the rules say the log must be exactly",
+  "finalText": "Done — and the result is provably optimal for this seed.\n\n## Strategy\n\nThe engine turned out to be **fully deterministic**: every move that changes the board spawns exactly one tile and consumes exactly 2 splitmix64 draws, so the PRNG state after *N* spawns is a pure function of *N* — the **value** sequence of every spawned tile (mostly 2s, ~10% 4s) is fixed before I play, and only the spawn *cell* depends on my moves. So there are no chance nodes at all: the game is a plain deterministic tree over my own 4 choices. I wrote an offline planner (`plan2048.py`) that mirrors the engine's slide/spawn bit-exactly (verified against the pristine `slide_board`/`_spawn`), then searches that exact tree with a receding-horizon **beam search** (depth 20, width 96) scored by a goal-directed heuristic: `log2(max tile)` dominant, plus empty cells, snake-weighted log mass from the bottom-left anchor corner, smoothness, available merges and monotonicity. The winning line keeps the 512 anchored bottom-left with a monotone staircase (256/64/32/4 above it) and every one of the 400 moves is effective (zero blocked slides), so material keeps flowing in and the big tile never dies.\n\n**Why 512 is the ceiling, not a limit of my effort:** the seed hands out exactly **914 total material** in 402 spawns, and merges conserve mass — a 1024 tile would need 1024 material, so band 5 is mathematically unreachable in 400 steps. My run reaches band 4 (512) at move 233 and keeps it alive to move 400, where `board_sum = 914` gives the max possible continuous value **4.7852 = band 4 + 0.7852 fraction**.\n\n## Result\n\n- **Total steps: 400** (exactly the budget; `moves.log` = 400 lines, one valid `U/D/L/R` each, no `RESET`, 0 blocked moves, engine files untouched)\n- Peak value under fresh-engine replay of `moves.log`: **4.7852** (max tile **512**, band **4**, score 6208)\n\n## Final `status` output\n\n```\nscore=6208  max_tile=512  band=4  best_band=4  moves=400  empty=3  game_over=False\nboard (4x4, .=empty, row 0 = top):\n     2     2     .     .\n     4     8     2     .\n   256    64    32     4\n   512    16     8     4\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\nHelper files left in the workspace (engine untouched): `plan2048.py` (planner), `replay_check.py` (judge-path verifier), `analysis_materials.py`, `seq_20_96.txt`."
+}

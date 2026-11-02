@@ -80,6 +80,7 @@ async function run() {
   args.push('-')
 
   const started = Date.now()
+  let timedOut = false
   const child = spawn(EXE, args, {
     cwd: CWD,
     env: {
@@ -92,6 +93,19 @@ async function run() {
   })
   child.stdin.end(task.text)
 
+  // The task's own budget. Upstream, the long-horizon tasks are scored by the
+  // peak the agent reached before its deadline was cut off; here the child is
+  // killed at the deadline and whatever it left on disk is what the judge
+  // reads. The same rule for both conditions.
+  const budget = task.timeoutMs ?? 0
+  if (budget > 0) {
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, budget)
+    timer.unref?.()
+  }
+
   let stdout = ''
   let stderr = ''
   child.stdout.on('data', chunk => { stdout += String(chunk) })
@@ -100,6 +114,9 @@ async function run() {
     child.on('close', code => resolveExit(code ?? -1))
   })
   const wallMs = Date.now() - started
+  if (timedOut) {
+    console.error(`the ${taskName} ${condition} run hit its ${String(budget)}ms budget and was cut off`)
+  }
 
   const events = []
   let finalText = ''
@@ -127,10 +144,10 @@ async function run() {
     console.error('--- stderr ---')
     console.error(stderr.slice(0, 2000))
   }
-  return { events, finalText, wallMs, exitCode, stderr, sessionId }
+  return { events, finalText, wallMs, exitCode, stderr, sessionId, timedOut }
 }
 
-const { events, finalText, wallMs, exitCode, stderr, sessionId } = await run()
+const { events, finalText, wallMs, exitCode, stderr, sessionId, timedOut } = await run()
 
 /**
  * The provider's accounting for one step, from the projection stream.
@@ -181,6 +198,7 @@ const record = {
   profile: condition === 'off' ? PROFILE_OFF : PROFILE_ON,
   exitCode,
   wallMs,
+  timedOut,
   sessionId,
   stderr: stderr.slice(0, 1200),
   steps: steps.length,
@@ -205,6 +223,10 @@ const record = {
     passed: verdict.passed,
     total: verdict.total,
     missing: verdict.missing,
+    // A continuous score, when the judge has one: the 2048 task is scored by
+    // the band it reached, and the raw value is the finer signal.
+    ...(verdict.score === undefined ? {} : { score: verdict.score }),
+    ...(verdict.moves === undefined ? {} : { moves: verdict.moves }),
   },
   planned: tools.includes('refine_plan'),
   planAgentNodes: planCalls,
