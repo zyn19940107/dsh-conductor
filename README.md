@@ -204,6 +204,123 @@ flowchart LR
 
 ---
 
+## 公开评测集上的 A/B（HumanEval / QuixBugs）
+
+上面那些场景是手工设计的：题目按插件的形状挑，判据是「答案里有没有这几个字」。
+这一节把两件事都换成真的 —— **题目来自公开评测集，判据是跑出来的**。
+
+### 两个沙盒
+
+| profile | bundles | 用途 |
+|---|---|---|
+| `bench-off` | `dsh-base` + `dsh-headless` | 不带插件 |
+| `bench-on` | 同上 + `@zyn19940107/dsh-refine-loop` | 带插件 |
+
+两个 profile 只差一个 bundle —— 这是「带插件 / 不带插件」唯一可测的差别。
+`bench-on` 里的插件是**没被改过的原版**，只配了部署参数：`enabled: true`、
+`shellTool: pwsh`（基准 profile 里实际的 shell 工具叫 `pwsh`；插件默认写的是 dsh-ops 的
+`ops_bash`，不改这一项的话它的只读-shell 规则是空的，每次 shell 调用都独占）。
+
+```sh
+node bench/setup-profiles.mjs                  # 建这两个沙盒
+node bench/probe-judge.mjs humeval quixbugs    # 先证明判据是对的
+node bench/compare.mjs 3 humeval quixbugs      # 跑 A/B（顺序跑，不并行）
+node bench/pubeval-table.mjs                   # 出表
+```
+
+### 样例从哪来
+
+| 评测集 | 出处 | 取的题 | 判据 |
+|---|---|---|---|
+| HumanEval | [openai/human-eval](https://github.com/openai/human-eval) | 5 道原题（prompt 与 test 都是数据集原文） | 跑数据集自己的 `check()` |
+| QuixBugs | [jkoppel/QuixBugs](https://github.com/jkoppel/QuixBugs)（MIT） | 4 个程序里的 bug | 跑数据集自己的用例 + 3 条留出用例 |
+
+题面和用例**逐字** vendored 在 `bench/data/`（带 sha256），判据脚本从 vendored 副本读，
+不从工作区读 —— 改测试不算通过；工作区里的 `check.py` 被指纹记录，改了就判失败。
+QuixBugs 的用例本来就是公开的、agent 看得见，所以判据里另外加了 **3 条留出用例**
+（留出用例先跟数据集自己的正确程序对过才拿来用），专治「按可见用例硬编码」。
+
+判据本身要先证明是对的：`bench/probe-judge.mjs` 拿一份正确答案、一份错误答案、
+一份被改过的判据各跑一遍 —— 正确 5/5、错误 0/5、改判据被抓，三项都过才开始跑模型。
+
+### 结果
+
+#### humeval（5 道互不依赖的实现题）
+
+| 指标 | 关掉插件 | 开着插件 | 变化 |
+|---|---:|---:|---:|
+| 总耗时(秒) | 164s | 69s | **-58%** |
+| 整个编队的 token | 216k | 79k | **-63%** |
+| ├ input | 30k | 23k | -22% |
+| ├ cacheRead | 186k | 40k | **-79%** |
+| └ output | 16k | 14k | -9% |
+| 主 agent 的 context（最后一次请求的 prompt） | 30k | 30k | +0% |
+| 主 agent 的往返步数 | 10 | 4 | **-60%** |
+| 编队步数 | 10 | 4 | -60% |
+| 编队人数 | 1 人 | 1 人 | 0% |
+| 正确性（通过的判据） | 5/5 | 5/5 | — |
+
+```
+ off 1: 81.5s agents=1 tokens=195626 mainCtx=29551 correct=5/5 plan=n
+ off 2: 164.1s agents=1 tokens=527582 mainCtx=36090 correct=5/5 plan=n
+ off 3: 327.3s agents=1 tokens=215842 mainCtx=26838 correct=5/5 plan=n
+ on  1: 111.6s agents=1 tokens=82987 mainCtx=29646 correct=5/5 plan=y
+ on  2: 69.0s agents=1 tokens=79084 mainCtx=35233 correct=5/5 plan=y
+ on  3: 48.9s agents=1 tokens=73660 mainCtx=24651 correct=5/5 plan=y
+```
+
+#### quixbugs（4 个要跑用例才定位的 bug）
+
+| 指标 | 关掉插件 | 开着插件 | 变化 |
+|---|---:|---:|---:|
+| 总耗时(秒) | 91s | 299s | **+229%** |
+| 整个编队的 token | 198k | 191k | -4% |
+| ├ input | 15k | 15k | -2% |
+| ├ cacheRead | 164k | 153k | -6% |
+| └ output | 7014 | 23k | **+225%** |
+| 主 agent 的 context（最后一次请求的 prompt） | 24k | 46k | **+87%** |
+| 主 agent 的往返步数 | 10 | 7 | -30% |
+| 编队步数 | 10 | 7 | -30% |
+| 编队人数 | 1 人 | 1 人 | 0% |
+| 正确性（通过的判据） | 4/4 | 4/4 | — |
+
+```
+ off 1: 90.7s agents=1 tokens=198165 mainCtx=24494 correct=4/4 plan=n
+ off 2: 97.9s agents=1 tokens=243519 mainCtx=24566 correct=4/4 plan=n
+ off 3: 47.7s agents=1 tokens=179778 mainCtx=21517 correct=4/4 plan=n
+ on  1: 298.5s agents=1 tokens=271461 mainCtx=45690 correct=4/4 plan=y
+ on  2: 311.6s agents=1 tokens=190861 mainCtx=46604 correct=4/4 plan=y
+ on  3: 166.8s agents=1 tokens=132783 mainCtx=34359 correct=4/4 plan=y
+```
+
+### 读数
+
+**能事先列全的活，插件省；要跑一遍才知道下一步的活，插件亏。**
+
+- **`humeval`（5 道互不依赖的实现题）**：开着插件**耗时 -58%、总 token -63%、
+  缓存输入 -79%、往返步数 -60%**，正确性两边都 5/5。省下来的是缓存输入 —— 少走几步，
+  每一步就不用把变长的历史重发一遍；思考量中位数也从 22.6k 字符降到 8.6k。
+  主 agent 的 context 没变（30k → 30k）：五个实现的结果最后还是要回到主上下文里，
+  这一步省不掉。
+- **`quixbugs`（4 个要跑用例才定位的 bug）**：开着插件**耗时 +229%、输出 token +225%、
+  主 context +87%**，总 token 只降 4%，正确性两边都 4/4。原因是形状：修 bug 的下一步
+  取决于上一步跑出来的输出，所以每一轮都要重新画一张图 —— 开插件的 3 次里
+  `refine_plan` 调了 5/2/2 次，思考量中位数从 11.7k 字符涨到 14.2k。
+  插件「一轮一图」的纪律在这种形状上，把省下的又花回去了。
+
+**编队人数两个场景都是 1**：模型自己选的节点全是 `tools` 节点，一次也没派子代理。
+插件给的「派发」能力在这两个任务上没被用上，所以这里的「编队」测的是**要不要分叉**，
+不是分叉之后省了多少。
+
+**正确性两次都没变**：12 次运行（2 场景 × 2 臂 × 3 次）全对。插件改的是代价，
+不是能不能做成。
+
+> **单次抽样，方差很大。** `humeval` 关掉插件那三次是 81.5s / 164.1s / 327.3s ——
+> 看趋势，不要看小数。每场的原始记录在 `bench/results/`，表是 `bench/pubeval-table.mjs`
+> 生成的，不是手打的。
+
+---
+
 ## 改设置
 
 ```yaml

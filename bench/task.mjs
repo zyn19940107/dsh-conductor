@@ -13,6 +13,7 @@
  */
 
 import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, GREENSPECS, MULTIHOP, PANEL, SWEEP } from './scenarios.mjs'
+import { PUBLIC_TASKS } from './pubeval.mjs'
 
 /**
  * The scenario tasks that say where the plugin helps and where it does not.
@@ -101,7 +102,7 @@ export const REVIEW = {
 /**
  * Every task, keyed by the name the runner takes.
  */
-export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS }
+export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS, ...PUBLIC_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

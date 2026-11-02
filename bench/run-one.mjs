@@ -33,6 +33,14 @@ const SANDBOX_HOME = process.env.DSH_SANDBOX_HOME ?? 'D:/code/vibe/dsh-sandbox/h
 const CWD = process.env.DSH_BENCH_CWD ?? 'D:/code/vibe'
 const SESSIONS_ROOT = resolve(SANDBOX_HOME, 'sessions', '--D-code-vibe--')
 
+// The two sandboxes. They differ in exactly one thing: whether the plugin's
+// bundle is part of the profile. The old overlay (`enabled: false` on the same
+// profile) is kept available through DSH_BENCH_OFF_OVERLAY=1 for reproducing
+// the numbers the README published before the split.
+const PROFILE_ON = process.env.DSH_BENCH_PROFILE_ON ?? 'bench-on'
+const PROFILE_OFF = process.env.DSH_BENCH_PROFILE_OFF ?? 'bench-off'
+const OFF_OVERLAY = process.env.DSH_BENCH_OFF_OVERLAY === '1'
+
 const taskName = process.argv[2] ?? 'survey'
 const condition = process.argv[3] ?? 'on'
 const index = process.argv[4] ?? '1'
@@ -58,12 +66,12 @@ async function run() {
     '--expose-internals',
     CLI,
     '--profile',
-    'bench',
+    condition === 'off' ? PROFILE_OFF : PROFILE_ON,
   ]
   // `--patch` has to come before `--json`: the launcher's option parser stops
   // reading options once the positional task argument starts, and a patch
   // placed after the flags is swallowed as part of the task.
-  if (condition === 'off') {
+  if (condition === 'off' && OFF_OVERLAY) {
     args.push('--patch', resolve(HERE, 'off.patch.yml'))
   }
   args.push('--json')
@@ -170,6 +178,7 @@ const record = {
   task: taskName,
   condition,
   index: Number(index),
+  profile: condition === 'off' ? PROFILE_OFF : PROFILE_ON,
   exitCode,
   wallMs,
   sessionId,
