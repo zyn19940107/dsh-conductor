@@ -210,3 +210,48 @@ export function applyMustPlan(ctx: Context, plans: Plans): void {
     }))
   })
 }
+
+/**
+ * What the model is told when it tries to delegate outside a graph.
+ *
+ * The harness ships direct delegation tools. In this plugin delegation is a node
+ * of the plan: the child runs as part of the turn's graph, under the plan's
+ * budget, and the results come back together. A direct call would bypass all of
+ * that.
+ */
+export const DELEGATE_IN_GRAPH = 'Delegation happens inside the plan: add a "subagent_fork" node to '
+  + 'refine_plan and the child runs as part of this turn\'s graph, under the plan\'s budget. A direct '
+  + 'delegation call would run outside the plan.'
+
+/**
+ * The tools the harness ships for delegating directly.
+ */
+export const DELEGATION_TOOLS = ['subagent', 'subagent_fork'] as const
+
+/**
+ * Put the harness's direct delegation tools behind the plan.
+ *
+ * Each tool keeps its name and schema, so the model still sees it and still gets
+ * a clear reason when it reaches for it. What changes is the call the model makes
+ * itself: it is refused, and the reason points at the plan. The calls a plan
+ * makes are nested under the plan's own call and go through untouched — that is
+ * how a node of kind "subagent" or "subagent_fork" still works.
+ *
+ * @param ctx - the plugin context supplying the tool registry.
+ */
+export function applyDelegationRule(ctx: Context): void {
+  ctx.on('agent/created', ({ agent }): undefined => {
+    for (const name of DELEGATION_TOOLS) {
+      const original = ctx.tools.get(name)
+      if (original === undefined) continue
+      agent.ctx.tools.register({
+        ...original,
+        execute: async (args: unknown, exec: Parameters<typeof original.execute>[1]) => {
+          if (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)
+          return await original.execute(args, exec)
+        },
+      })
+    }
+    return undefined
+  })
+}

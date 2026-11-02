@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyMustPlan, applyRounds, NEXT_ROUND, Plans, Rounds } from './rounds.js'
+import { applyDelegationRule, applyMustPlan, applyRounds, NEXT_ROUND, Plans, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -266,6 +266,7 @@ export function apply(ctx: Context, config: Config): void {
 
   applyRounds(ctx, rounds, plans)
   applyMustPlan(ctx, plans)
+  applyDelegationRule(ctx)
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
