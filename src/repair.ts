@@ -89,10 +89,10 @@ export async function askForRepair(
 const SYSTEM = [
   'You are repairing one tool call that failed inside a plan.',
   'The plan was written before anything had run, so the call was a guess.',
+  'The error is the whole truth about what went wrong — a path that is not there, an argument of the wrong',
+  'shape, or a tool name that does not exist.',
   'Reply with exactly one JSON object and nothing else:',
   '{"name": "<tool name>", "arguments": {...}}',
-  'Keep the tool name unless a different tool is clearly the right one.',
-  'Change only what made the call fail.',
 ].join('\n')
 
 /**
@@ -170,3 +170,43 @@ export async function collectText(stream: AsyncIterable<StreamChunk>): Promise<s
   }
   return text
 }
+
+/**
+ * Resolve a tool name the model wrote to a name the registry knows.
+ *
+ * A model can write a tool name it only half-remembers — a `Compat` prefix the
+ * harness never used, a random hex suffix it invented. The suffix is dropped,
+ * the prefix is dropped, and the rest is matched case- and separator-insensitively
+ * against the registry.
+ *
+ * @param known - whether the registry knows a name.
+ * @param written - the name the model wrote.
+ * @returns the registry name, or undefined when nothing matches.
+ */
+export function resolveToolName(known: (name: string) => boolean, written: string): string | undefined {
+  if (known(written)) return written
+  const stripped = written
+    .replace(/^Compat/u, '')
+    .replace(/[0-9a-f]{6,}$/iu, '')
+  const normalise = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/gu, '')
+  const wanted = normalise(stripped)
+  if (wanted === '') return undefined
+  for (const candidate of TOOL_NAME_CANDIDATES) {
+    if (normalise(candidate) === wanted && known(candidate)) return candidate
+  }
+  return undefined
+}
+
+/**
+ * The names worth trying when a written tool name is not in the registry.
+ *
+ * The plugin only sees the tools it was handed; this list is the harness's
+ * stable tool vocabulary, which is what a plan's calls are written against.
+ */
+export const TOOL_NAME_CANDIDATES = [
+  'read', 'write', 'edit', 'glob', 'grep', 'pwsh', 'bash', 'jobs', 'read_image',
+  'web_search', 'web_fetch', 'refine_plan', 'subagent', 'subagent_fork', 'workflow',
+  'create_goal', 'update_goal', 'get_goal', 'exit_plan_mode', 'todo_write',
+  'send_message', 'list_agents', 'interrupt_agent', 'job_kill', 'job_list', 'job_output',
+] as const
+

@@ -32,7 +32,7 @@ import { buildOverrides } from './concurrency.js'
 import { applyDelegationRule, applyJudgementGuard, applyRounds, applyTurnDoctrine, NEXT_ROUND, Plans, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
-import { describeFailure, parseRepair, repairSystem } from './repair.js'
+import { describeFailure, parseRepair, repairSystem, resolveToolName } from './repair.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 
@@ -304,6 +304,14 @@ async function repairFailedCall(
   error: string,
   signal: AbortSignal,
 ): Promise<{ name: string, arguments: unknown } | undefined> {
+  // A name the model invented is not a call that can be repaired by asking the
+  // model again: it wrote `CompatGrep` where the tool is `grep`, and it will
+  // write `CompatGrep` again. Resolve the name against the registry first — the
+  // call's arguments are usually already right.
+  const resolved = resolveToolName((name) => ctx.tools.get(name) !== undefined, failed.name)
+  if (resolved !== undefined && resolved !== failed.name) {
+    return { name: resolved, arguments: failed.arguments }
+  }
   const reply = await ctx.llm.stream({
     provider: config.provider,
     model: config.model,
