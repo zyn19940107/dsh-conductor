@@ -451,12 +451,10 @@ export function applyPlanTool(
             },
             kind: {
               type: 'string',
-              enum: ['tools', 'subagent'],
+              enum: ['tools', 'subagent', 'subagent_fork'],
               required: true,
-              description: '"tools" runs calls together. "subagent" hands a self-contained task to a child '
-                + 'that starts with no context — use it when the task needs nothing from this conversation. '
-                + '""'
-                + 'the task builds on what has been said here.',
+              description: '"tools" runs a batch of calls together. "subagent" is a child agent with its own '
+                + 'context. "subagent_fork" is a child agent that inherits this conversation.',
             },
             calls: {
               type: 'array',

@@ -67,8 +67,6 @@ export const REFINE_GUIDANCE = [
   + 'relative path is a guess.',
   '- The plan runs in one round trip and every result comes back together. A result may be too long to fit '
   + 'and be left out of what you see — the rest is in the spill file.',
-  '- Use the search tools rather than shell recursion: `glob` and `grep` know what to skip, while a recursive '
-  + 'directory listing of a large repository can take minutes.',
 ].join('\n')
 
 /**
