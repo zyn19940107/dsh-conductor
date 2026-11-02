@@ -509,7 +509,7 @@ export function applyPlanTool(
     async execute(args, exec: ToolRunContext) {
       const parsed = parsePlanArgs(args)
       if (parsed === undefined) {
-        throw new Error('refine_plan needs criteria and a non-empty list of nodes, each with an id and a kind')
+        throw new Error('refine_plan needs criteria, and nodes that each have an id and a kind')
       }
       const limit = options.maxBatchSize()
       if (parsed.nodes.length > limit) {
