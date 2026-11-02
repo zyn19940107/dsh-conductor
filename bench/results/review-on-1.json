@@ -1,0 +1,45 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 783103,
+  "sessionId": "session-9144a935-6a7c-49c8-9b5d-d27245181978",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 8,
+  "toolCalls": 7,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 50654,
+    "outputTokens": 12646,
+    "cacheReadTokens": 269998,
+    "totalTokens": 333298
+  },
+  "formation": {
+    "agents": 27,
+    "input": 1310441,
+    "output": 298817,
+    "cacheRead": 3654403,
+    "total": 5263661,
+    "steps": 140
+  },
+  "mainPrompt": 57245,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 18930,
+  "thinkingPreview": "The user wants a read-only review of three files in D:\\code\\vibe\\dsh-refine-loop: src/plan.ts, src/gate.ts, src/tool.ts. Each independent, then a summary paragraph.\n\nLet me design the graph: three independent nodes, each a \"subagent\" (own context) or tools? The task is to read and analyze three files. Three independent nodes — but each file might be small enough to just read directly. However the loop protocol requires a graph with nodes. I could do one tools node reading all three files in parallel, then a subagent node for analysis? Actually simplest: one tools node that reads all three files (and maybe lists dir), then... the conclusion comes after.\n\nBut the protocol says: \"A node is one of three kinds: tools, subagent, subagent_fork\". Independent nodes run together. Let me design:\n\n- node \"read-files\": tools — read plan.ts, gate.ts, tool.ts in parallel (plus glob to check path).\n- no",
+  "finalText": "三份独立审查都已完成（`src/gate.ts` 经核实并不存在），结论如下。\n\n## 1. `src/plan.ts` —— 计划的数据结构、节点种类、占位符语法\n\n- **数据结构**：`PlanArgs { criteria: string[]; nodes: PlanNode[] }`（plan.ts:44-49）；`PlanNode { id; kind: PlanNodeKind; calls: PlanToolCall[]; task: string; after: string[] }`（plan.ts:30-41）；`PlanToolCall { name; arguments: unknown }`（plan.ts:22-27）；`PlanWaves = { waves: PlanNode[][] } | { error: string }`（plan.ts:57-59）。`parsePlanArgs`（plan.ts:94-160）严格校验：`criteria` 必须是去空白后非空的字符串数组，`nodes` 非空，node 的 `id` 非空且唯一，`kind` 三选一；`tools` 节点必须有非空 `calls`（每个 call 的 `name` 非空，`arguments` 缺省为 `{}`），agent 节点必须有非空 `task`，两者互斥填充（plan.ts:136/142）。\n- **三种节点**：`PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'`（plan.ts:16）——`tools` 是一批并行工具调用，`subagent` 是零上下文子代理，`subagent_fork` 是继承本对话的子代理；`AGENT_NODE_KINDS = ['subagent','subagent_fork']`（plan.ts:19）标出\"会起代理\"的种类。硬约束：**子代理节点不得依赖另一个子代理节点**，否则整个计划被拒（plan.ts:218-229），理由是孩子是并行分支，串起来会把并行变成队列。\n- **占位符语法**：`@@nodeId@@`。两个常量：`PLACEHOLDER = /^@@([^@]+)@@$/u`（plan.ts:73，整参数占位符，整个参数被替换成该节点的完整输出）与 `INLINE_PLACEHOLDER = /@@([^@\\n]+)@@/gu`（plan.ts:82，句内占位符，就地嵌入句子）。占位符**同时是一条依赖边**：`collectPlaceholders` 扫出的 id 自动补进 `after`（plan.ts:151-157、168-188）；目标节点尚未产出时 `substitutePlaceholders` **抛错**而不是把字面量塞给工具（plan.ts:307、317）。不用双大括号是因为 harness 保留 `{{}}` 给自己的 prompt 变量，遇之会拒绝渲染整段（plan.ts:68-71）。`buildWaves` 按\"1+最深依赖层\"分层成波（plan.ts:239-266），并以重名、自依赖/未知依赖、子代理依赖子代理、成环四类理由拒绝不成立的计划。\n\n## 2. `src/gate.ts` —— 文件不存在，规则在 `src/rounds.ts`（+ `src/index.ts`）\n\n`src/gate.ts` **不存在**（glob `**/gate*.ts` 与直接 read 均无结果；src 下只有 concurrency / policy / batch / plan / tool / repair / index / rounds 八个文件）。\n\n那条规则是：**一轮就是一张图——先画图并用 `refine_plan` 交出去，图跑完才下结论，委派只能作为图里的节点**。规范文本在 `rounds.ts` 的 `ROUND_LOOP`（rounds.ts:21-28）与 `index.ts` 的 `REFINE_GUIDANCE`（index.ts:54-81）。三道触发机制要分开看：\n\n1. **回合教条**：`applyTurnDoctrine`（rounds.ts:162-175）在 `agent/pre-step` 且 `payload.step === 1` 时，把 `ROUND_LOOP` 作为最后一条消息注入。\n2. **委派规则**：`applyDelegationRule`（rounds.ts:188-203）在 `agent/created` 时包住 harness 的 `subagent` / `subagent_fork` 工具，**仅当 `exec.callId === exec.rootCallId`**（模型顶层直呼）才抛 `DELEGATE_IN_GRAPH`（rounds.ts:46-48）；计划内部的嵌套委派 `callId ≠ rootCallId`，放行——这正是图里 agent 节点仍能工作的原因。\n3. **判定守卫**：`applyJudgementGuard`（rounds.ts:240-248）命中条件是「有 agent + 顶层调用 + 工具名不是 `refine_plan` + 本请求已交过计划」，此时返回 `JUDGE_ONLY`（rounds.ts:212-214）拒绝。另有 `maxRounds`（默认 16，index.ts:166）作为阀门。\n\n## 3. `src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n- **执行链路**：工具名 `refine_plan`（tool.ts:44），`execute`（tool.ts:509-545）先 `parsePlanArgs` 校验（:510-513）→ 节点数超限报错（:514-518，默认 8，index.ts:100）→ `onPlanStarted`（:520）→ `runPlan`（:300-354）：`buildWaves` 分层（:312-315）→ **层内 `Promise.all` 并行、层间串行**（:321-322）→ `runNode` 两路分流：`tools` 节点走 `runBatch`（:200-223），agent 节点走 `runner.execute`（:243-259）→ 汇总成 `PlanOutput`（:348-353）→ `renderPlan` 渲染（:362-379）。续轮由 `onPlanFinished` → `exec.concludeTurn()`（:541-543）配合 `followup(NEXT_ROUND)`（index.ts:263-266）完成。\n- **子代理的限制**：\n  - **启动方式**：`runner.execute({ name: node.kind, arguments: { description: node.id, prompt, run_in_background: false } })`（tool.ts:244-255）——插件只是把 kind 原样转交给 harness 的 `subagent` / `subagent_fork` 工具，`subagent` 与 `subagent_fork` 的上下文差异由 harness 语义决定，插件本身不区分。\n  - **提示内容**：`buildAgentPrompt`（tool.ts:151-168）= 节点 `task` + 判据块（criteria，仅无依赖分支）+依赖节点的实际输出（\"Output of X\"）。\n  - **深度上限**：`delegationDepth >= maxAgentDepth` 时该节点直接判失败并说明原因（tool.ts:225-235），默认 `DEFAULT_MAX_AGENT_DEPTH = 3`（index.ts:115）。\n  - **单节点预算**：每个 agent 节点独立 `AbortController` + `runWithDeadline`（tool.ts:121-140、237-262），超时按\"该节点失败\"计、整图继续（:274-281），默认 `540000ms`（index.ts:124）。\n  - **计划级限额**：整图最多 8 个节点、整图预算 `900000ms`（index.ts:100/105），轮次上限 16。\n\n## 汇总\n\n`dsh-refine-loop` 用一次 `refine_plan` 调用承载整个回合的形状：`PlanArgs{criteria,nodes}` 的每个 `PlanNode` 带 `id/kind/calls/task/after`，节点三种——`tools`（一批并行调用）、`subagent`（零上下文子代理）、`subagent_fork`（继承本对话），且子代理之间不许有依赖边；调用参数用 `@@nodeId@@` 取上游产出（整参或句内皆可），这个占位符同时是一条隐式依赖边，解析不到便抛错而非塞字面量；`buildWaves` 再按依赖深度把图切成波，每波并行、逐波串行，一次性把全部结果交回。你点名的 `src/gate.ts` 并不存在——插件的那条规则实际写在 `src/rounds.ts` 与 `src/index.ts` 里，即\"一轮就是一张图，图跑完才下结论\"，并由两个守卫真正"
+}
