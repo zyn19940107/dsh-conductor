@@ -87,9 +87,9 @@ export const FANOUT = {
     '最后用一句话说明这五个文件各自负责什么。只读不改。',
   ].join('\n'),
   judge: judgeBy([
-    { what: '五个文件都被读到', needles: ['plan.ts', 'gate.ts', 'batch.ts', 'repair.ts', 'tool.ts'] },
+    { what: '五个文件都被读到', needles: ['plan.ts', 'rounds.ts', 'batch.ts', 'repair.ts', 'tool.ts'] },
     { what: '注释起始符(第一行都是块注释开头)', needles: ['/**'] },
-    { what: '五个文件各自的职责', needles: ['计划', '规则', '批'] },
+    { what: '五个文件各自的职责', needles: ['计划', '轮次', '批'] },
   ]),
 }
 
@@ -111,7 +111,7 @@ export const MULTIHOP = {
   ].join('\n'),
   judge: judgeBy([
     { what: '定义 PLAN_TOOL 的文件', needles: ['tool.ts'] },
-    { what: '其它用到它的文件', needles: ['gate.ts', 'index.ts', 'policy.ts'] },
+    { what: '其它用到它的文件', needles: ['rounds.ts', 'index.ts', 'policy.ts'] },
     { what: '它的值', needles: ['refine_plan'] },
     { what: '定义在 tool.ts 里', needles: ['tool.ts'] },
   ]),
@@ -151,8 +151,8 @@ export const SWEEP = {
   text: [
     '给下面 14 个文件各写一句话,说明它负责什么,一个都不要漏:',
     '',
-    'src 下:batch.ts、concurrency.ts、gate.ts、index.ts、plan.ts、policy.ts、repair.ts、tool.ts',
-    'verify 下:batch.spec.ts、concurrency.spec.ts、gate.spec.ts、plan.spec.ts、refine.spec.ts、repair.spec.ts',
+    'src 下:batch.ts、concurrency.ts、index.ts、plan.ts、policy.ts、repair.ts、rounds.ts、tool.ts',
+    'verify 下:batch.spec.ts、concurrency.spec.ts、plan.spec.ts、refine.spec.ts、repair.spec.ts、rounds.spec.ts',
     '',
     '都在 D:\code\vibe\dsh-refine-loop 下。只读不改。',
   ].join('\n'),
