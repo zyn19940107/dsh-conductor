@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyRule, applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
+import { applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -55,10 +55,10 @@ export const REFINE_GUIDANCE = [
   'Refined loop:',
   `- ${PLAN_TOOL}: one call that carries the whole shape of the turn — the observable criteria that decide `
   + 'whether it succeeded, and the nodes it is made of.',
-  '- You may call tools yourself at any time. A turn hands its work over as one plan, or it ends with the '
-  + 'conclusion: hand the rest over with refine_plan — its nodes run in one go, and when it returns the turn '
-  + 'is over and what the plan produced is what this turn produced. If nothing is left to do, write the '
-  + 'conclusion: that answers the request and ends the loop.',
+  '- You may call tools yourself at any time. A tool call is how you find out what the plan should say — it '
+  + 'is not the work itself. The work is the plan: hand it over with refine_plan, whose independent nodes run '
+  + 'at the same time, and when it returns the turn is over and what the plan produced is what this turn '
+  + 'produced. If nothing is left to do, write the conclusion: that answers the request and ends the loop.',
   '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
   + 'with its own context), "subagent_fork" (a child that inherits this conversation).',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
@@ -175,10 +175,6 @@ export interface Config {
   concurrentShell: Volatile<boolean>
   /** The shell tool the read-only rule applies to. */
   shellTool: Volatile<string>
-  /** How many calls a turn may make itself before it has to hand over a plan. */
-  reconCalls: Volatile<number>
-  /** How many refusals a turn gets before the rule lets it alone. */
-  planPullbacks: Volatile<number>
   /** How many rounds one request may run before the loop stops on its own. */
   maxRounds: Volatile<number>
   /** How many times a turn may be pulled back after it handed over its plan. */
@@ -260,10 +256,6 @@ export function apply(ctx: Context, config: Config): void {
 
 
   applyRounds(ctx, rounds)
-  applyRule(ctx, {
-    reconCalls: () => config.reconCalls.get(),
-    planPullbacks: () => config.planPullbacks.get(),
-  })
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
