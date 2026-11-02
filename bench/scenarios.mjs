@@ -225,3 +225,36 @@ export const COVERAGEWIDE = {
     { what: '行数最多的模块(tool.ts 562 行)', needles: ['562'] },
   ]),
 }
+
+/**
+ * Three judgements that must be independent of each other.
+ *
+ * One agent can read the same code three times, but it cannot give three
+ * genuinely independent verdicts: the second view is coloured by the first.
+ * The only way to get independence is three separate contexts, so this is the
+ * scenario that asks the plugin to delegate rather than to batch.
+ */
+export const PANEL = {
+  text: [
+    '对 D:\code\vibe\dsh-refine-loop 这个插件的「核心规则」做一次三方独立评审,只读不改:',
+    '',
+    '核心规则指:每轮必须交一张图,交完图判断能不能给结论;派发只能走图里的节点。',
+    '',
+    '请组织三份**互相独立**的评审意见(互相不知道对方结论),各自判断这条规则:',
+    '1. 对模型是否过度限制:会不会逼模型做多余的规划?',
+    '2. 是否可被绕过:模型有没有办法不交图就拿到结论?',
+    '3. 与 harness 原生能力是否冲突:和 subagent / plan 模式 / 工具并发是否打架?',
+    '',
+    '每份评审都要读相关源码并给出证据行号,最后汇总:三方在哪些点上一致、在哪些点上分歧。',
+    '',
+    '只读不改。不要修改任何文件。',
+  ].join('\n'),
+  judge: judgeBy([
+    { what: '三份独立评审都给出', needles: ['评审一', '评审二', '评审三'] },
+    { what: '第一种视角(过度限制)', needles: ['过度限制'] },
+    { what: '第二种视角(可绕过)', needles: ['绕过'] },
+    { what: '第三种视角(与原生能力冲突)', needles: ['冲突'] },
+    { what: '汇总了一致与分歧', needles: ['一致', '分歧'] },
+    { what: '引用了源码行号证据', needles: ['rounds.ts'] },
+  ]),
+}
