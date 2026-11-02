@@ -27,8 +27,7 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the gr
   + 'tools while you design the graph — use them to find out what a node should say. What is not allowed is '
   + 'using them to do the work and skip the graph: the conclusion comes only after a graph has run. When a node '
   + 'delegates, the default kind is "subagent_fork": it starts with this conversation, so the files and results '
-  + 'you already have are already in it. "subagent" starts empty and reads everything again — give it work that '
-  + 'has to be judged on its own.'
+  + 'you already have are already in it. "subagent" starts empty and reads everything again.'
 
 /**
  * What the model is told when a plan has run and another round is open.
