@@ -22,8 +22,9 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the gr
   + 'are, which of them can run at the same time, what each node is made of, what observable criteria decide it '
   + 'succeeded. (2) Hand it over with refine_plan. (3) It runs — the independent nodes together — and every '
   + 'result comes back. (4) Only then judge: if those results answer the request, write the conclusion, which '
-  + 'ends the loop; if they do not, the next round designs the next graph. Tool calls are for answering what the '
-  + 'graph needs to know; they are never the work.'
+  + 'ends the loop; if they do not, the next round designs the next graph. You may call tools while you design '
+  + 'the graph — use them to find out what a node should say. What is not allowed is using them to do the work and '
+  + 'skip the graph: the conclusion comes only after a graph has run.'
 
 /**
  * What the model is told when a plan has run and another round is open.
