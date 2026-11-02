@@ -18,17 +18,12 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
  *
  * It says both halves of the rule in one place: hand over the graph, or answer.
  */
-export const DRAW_THE_GRAPH = 'This turn is the graph. Start there: what the pieces of work are, which of '
-  + 'them can run at the same time, what each node is made of, and what observable criteria decide it succeeded. '
-  + 'Call tools only to answer questions the graph needs answered, then hand it over with refine_plan.'
-
-/**
- * What the model is told at the head of a turn that follows a plan.
- */
-export const AFTER_PLAN = 'The plan results above are what you have. Judge them: if they answer the request, '
-  + 'write the conclusion — that ends the loop. If they do not, this turn is the next graph: what is still '
-  + 'missing, which of those pieces can run at the same time, and what each node is made of. Hand it over with '
-  + 'refine_plan.'
+export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the graph: what the pieces of work '
+  + 'are, which of them can run at the same time, what each node is made of, what observable criteria decide it '
+  + 'succeeded. (2) Hand it over with refine_plan. (3) It runs — the independent nodes together — and every '
+  + 'result comes back. (4) Only then judge: if those results answer the request, write the conclusion, which '
+  + 'ends the loop; if they do not, the next round designs the next graph. Tool calls are for answering what the '
+  + 'graph needs to know; they are never the work.'
 
 /**
  * What the model is told when a plan has run and another round is open.
@@ -162,16 +157,15 @@ export function applyRounds(ctx: Context, rounds: Rounds, plans: Plans): void {
  *
  * @param ctx - the plugin context supplying the agent runtime.
  */
-export function applyTurnDoctrine(ctx: Context, plans: Plans): void {
+export function applyTurnDoctrine(ctx: Context): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter') return decision
     if (payload.step !== 1) return decision
-    const text = plans.waiting(payload.agent.session.id) ? DRAW_THE_GRAPH : AFTER_PLAN
     return {
       ...decision,
       messages: [...decision.messages, createUserMessage({
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text: ROUND_LOOP }],
         source: { kind: 'system-prompt' },
       })],
     }
