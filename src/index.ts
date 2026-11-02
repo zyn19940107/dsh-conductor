@@ -53,24 +53,11 @@ export const inject = ['tools', 'systemPrompt', 'commands', 'llm']
  */
 export const REFINE_GUIDANCE = [
   'Refined loop:',
-  `- ${PLAN_TOOL}: one call that carries the whole shape of the turn — the observable criteria that decide `
-  + 'whether it succeeded, and the nodes it is made of.',
-  '- When a turn starts, what you think about is the graph: what the pieces of work are, which of them can '
-  + 'run at the same time, what each node is made of, and what observable criteria decide the graph succeeded. '
-  + 'Drawing that graph is the work of the turn.',
-  '- A tool call exists to answer a question the graph needs answered — which file holds this, which line a '
-  + 'symbol is on, does this path exist. It is not the work; the work is the graph.',
-  '- Hand the graph over with refine_plan. The nodes that depend on nothing run at the same time, every result '
-  + 'comes back together, and that ends the turn.',
-  '- The next turn starts with those results: if the request is answered, write the conclusion — that ends the '
-  + 'loop. If it is not, draw the next graph.',
+  `- ${PLAN_TOOL}: one call that carries the whole shape of the round — the criteria that decide whether it `
+  + 'succeeded, and the nodes it is made of. How a round runs, and when the graph or the conclusion is due, is '
+  + 'said at the head of every round.',
   '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
   + 'with its own context), "subagent_fork" (a child agent that starts with this conversation).',
-  '- What you have already read is already inside a "subagent_fork": the files, the greps, the results. A '
-  + '"subagent" starts empty and reads them again itself. When a child is born after you have looked around, '
-  + '"subagent_fork" is the kind that is already holding what it needs.',
-  '- Delegation happens inside the plan: a child is a node of the graph, under the plan budget. The '
-  + 'harness direct delegation tools are not the way in from here.',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',
