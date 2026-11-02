@@ -1,0 +1,64 @@
+{
+  "task": "coveragewide",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 72676,
+  "sessionId": "session-f0846e45-89a8-4f2a-aba1-60fcd61d99d1",
+  "stderr": "",
+  "steps": 11,
+  "toolCalls": 24,
+  "tools": [
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "glob",
+    "pwsh",
+    "glob",
+    "read",
+    "grep",
+    "glob",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 55709,
+    "outputTokens": 7493,
+    "cacheReadTokens": 391040,
+    "totalTokens": 454242
+  },
+  "formation": {
+    "agents": 1,
+    "input": 55709,
+    "output": 7493,
+    "cacheRead": 391040,
+    "total": 454242,
+    "steps": 11
+  },
+  "mainPrompt": 59707,
+  "correctness": {
+    "passed": 4,
+    "total": 5,
+    "missing": [
+      "行数最多的模块(tool.ts 562 行)(缺:562)"
+    ]
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 16619,
+  "thinkingPreview": "The user wants a read-only inventory of test coverage for a plugin. The paths given have some odd characters: \"D:codeibedsh-refine-loopverify\" — that looks like \"D:\\code\\vibe\\dsh-refine-loop\\verify\" with backslashes stripped. Let me explore.\n\nLet me find the actual directory.\n\nThis is a read-only task, so no skill needed really (dsh-plugin-sandbox is for modifying plugins; here it's just reading). Let me just do it.\n\nLet me glob for the files.\nGood. Now let me read all 6 spec files and all 8 src files. Let me do them in parallel batches.\n\nAlso let me get line counts.\nNow let's read the 8 src files.\nNow the remaining src files: plan.ts, rounds.ts, batch.ts, concurrency.ts.\n\nI also need line counts for all 8 src files. Let me use pwsh to count lines (read-only).\nNow batch.ts and concurrency.ts, plus line counts.\nNow let me get line counts for all 8 src files to confirm the largest module.\n",
+  "finalText": "已完成盘点，**只读，没有修改任何文件**（全部是 read + 只读的 `Get-Content` 行数统计）。\n\n先记一个盘点时发现的硬事实：`verify/run-specs.mjs:21` 的 spec 列表只有 5 个 —— `refine / batch / concurrency / plan / rounds`，**`repair.spec.ts` 没被收录**。所以 `pnpm specs` 现在根本不会跑修复环那套测试。\n\n---\n\n## 1. 六个 spec 各测什么\n\n| spec | 行数 | 实际测的内容 | 主要调用的函数/入口 |\n|---|---|---|---|\n| `verify/batch.spec.ts` | 166 | 批量是否真并行（用时间窗重叠而非摘要判断）：并行安全的调用窗口重叠、`schedule==='concurrent'`、声明 exclusive 的工具变成屏障（`mixed` + 该项标 `serial`）、关掉 `respectConcurrencySafety` 后强制并发、失败调用被报告而不是抛出 | **`runBatch`**（`src/batch.ts`） |\n| `verify/concurrency.spec.ts` | 123 | shell 只读判定器：白名单命令、`find -exec/-delete`、`sort -o`、`tail -f`、重定向/管道/`&&`/`;`/`` ` ``/`$()`/后台作业、引号内字面量；外加 `mayRunTogether` 的覆盖规则、`buildOverrides` 的组装；末尾再用 `runBatch` 断言 exclusive 调用把前后串起来 | **`isReadOnlyCommand`**（`src/concurrency.ts`，配 `mayRunTogether` / `buildOverrides`） |\n| `verify/refine.spec.ts` | 81 | 入参解析与渲染的回归：批计划的合法/非法形态、`parsePolicyCommand` 只认首行且只认 on/off、`renderBatch` 输出里带 criteria 与失败信息且不催结论 | **`parseBatchArgs`** + **`parsePolicyCommand`** + `renderBatch`（`src/batch.ts` / `src/policy.ts`，一个 spec 混了三个入口） |\n| `verify/repair.spec.ts` | 162 | 失败调用的修复环：失败一次后问模型一次并用修复后的参数重跑（成功）、成功时**一次都不问**、模型给出不可用答案时停手并保留原始报错；另测 `parseRepair` 解析纯 JSON、带散文包裹的 JSON，拒绝垃圾与数组 | **`runBatch`（带 repair 回调）** + **`parseRepair`**（`src/repair.ts`） |\n| `verify/rounds.spec.ts` | 44 | 每个会话的轮次预算计数：`used/bump/reset` 与会话隔离；外加 `NEXT_ROUND` 文案包含几个关键短语 | **`Rounds`** 类（`src/rounds.ts`） |\n| `verify/plan.spec.ts` | 283 | 计划图三件事：`parsePlanArgs` 校验（重复 id / 未知 kind / 缺 task / 缺 calls）；`@@id@@` 占位符自动变依赖边；`buildWaves` 分层、环、缺失依赖、自依赖；`substitutePlaceholders` 替换与未解析即报错；`runPlan` 分层执行、fork 子节点拿到上游输出、`renderPlan` 文案、**已在委派子进程里拒绝再起 agent**、单节点超时被报告且计划继续 | **`parsePlanArgs` / `buildWaves` / `substitutePlaceholders`**（`src/plan.ts`）+ **`runPlan`**（`src/tool.ts`） |\n\n## 2. 八个 src 模块与 spec 的对应\n\n| 模块 | 行数 | 覆盖状况 |\n|---|---|---|\n| `src/batch.ts` | 353 | **有**（runBatch / parseBatchArgs / renderBatch），但 `contentToText` 的 value 兜底、`MAX_REPAIRS` 的多轮重试路径未测 |\n| `src/concurrency.ts` | 234 | **有**（28 条只读命令断言），但 `DEFAULT_OVERRIDES` 常量全仓无人引用（死代码） |\n| `src/plan.ts` | 335 | **有**（解析/分层/占位符），但 `buildWaves` 里\"subagent 不能依赖 subagent\"那条分支（`plan.ts:220-231`）和 `dependenciesOf` / `collectPlaceholders` 未测 |\n| `src/index.ts` | 310 | **完全没有 spec**：`apply()` 装配、Config schema、`REFINE_GUIDANCE` 的 `{{` 守卫、`onPlanFinished` 里的轮次预算（`rounds.bump > maxRounds` 时不再续轮）、`repairFailedCall` 的真实模型回路 |\n| `src/policy.ts` | 241 | **只有 `parsePolicyCommand`**（在 refine.spec.ts 里）；`SessionPolicy.turnOff/turnOn/appliesTo`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全未测 |\n| `src/repair.ts` | 173 | **只有 `parseRepair`**；`askForRepair` / `RepairModel` / `collectText` / `repairSystem` / `describeFailure` 未测 —— 且 `askForRepair`、`RepairModel`、`collectText`、本文件的 `MAX_REPAIRS` **插件自己根本没人调用**（修复环实际长在 `batch.ts:runOne` 里，`index.ts` 自己走 `ctx.llm.stream`），是重复实现 + 死代码 |\n| `src/rounds.ts` | 251 | **只有 `Rounds` 计数器和 `NEXT_ROUND` 文案**；`Plans` 类、`applyRounds`（用户说话即重置）、`applyTurnDoctrine`、`applyDelegationRule`（顶层直接委派被拒）、`applyJudgementGuard`（图跑完后禁止逐个调用）、`isModelCall`、`ROUND_LOOP`/`DELEGATE_IN_GRAPH`/`JUDGE_ONLY` 全未测 |\n| `src/tool.ts` | 554 | **只有 `runPlan` / `renderPlan`**；`applyPlanTool` 整条注册与 execute 路径（超 `maxBatchSize` 报错、`concludeTurn`、repair 路由选择）、`resultText`、`nextPlanCallId` 未测 |\n\n一句话概括：**`batch / concurrency / plan / tool` 四个\"算法层\"模块有 spec，`index / policy / rounds` 三个\"规则与装配层\"模块基本裸奔。**\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，554 行**（src 合计 2451 行，verify 合计 859 行）。\n\n## 4. 补测优先级\n\n**先补 `src/rounds.ts` 的规则层**（`applyJudgementGuard` / `applyDelegationRule` / `applyRounds` / `Plans` 类）——**理由**：这三条规则（\"一轮就是一个计划\"\"委派必须进图\"\"新请求换新预算\"）是插件存在的唯一理由却是零覆盖，目前已测的只是计数器和一个常量字符串；它们都能用一个假 `ctx`（`tools.guard` 把回调截下来）直接测，不需要真宿主。\n\n之后依次是：\n\n- **P2 `src/index.ts` 的 `apply()`**——轮次预算耗尽就停、`{{` 守卫、`repairFailedCall` 的模型回路，都是\"插件装上以后到底会不会按设计跑\"的判据。\n- **P3 `src/policy.ts` 的 `SessionPolicy` + `applyPolicyMessage`**——\"off\" 的语义是工具从工具表里真的消失，不只是提示词里少一段。\n- **P4 `src/tool.ts` 的 `applyPlanTool.exec"
+}
