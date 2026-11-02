@@ -48,6 +48,12 @@ if (task === undefined) {
  * @returns {Promise<object>} the events, the final text, the wall-clock cost, and the session id.
  */
 async function run() {
+  // A scenario may need a fresh fixture before the run (a copy of the repo with
+  // a bug planted, a scratch directory). It runs before anything else so both
+  // conditions start from the same state. The condition goes into the fixture's
+  // name so the two conditions can run in parallel without sharing it.
+  process.env.DSH_BENCH_CONDITION = condition
+  task.setup?.()
   const args = [
     '--expose-internals',
     CLI,

@@ -1,3 +1,8 @@
+import { execSync } from 'node:child_process'
+import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 /**
  * Tasks shaped to the plugin's claim, one per scenario.
  *
@@ -257,4 +262,115 @@ export const PANEL = {
     { what: '汇总了一致与分歧', needles: ['一致', '分歧'] },
     { what: '引用了源码行号证据', needles: ['rounds.ts'] },
   ]),
+}
+
+
+/**
+ * Long-horizon: a copy of this repo with three bugs planted, specs red.
+ *
+ * This is the shape the long-horizon benchmarks call the hard one — run,
+ * measure, adjust, re-run — and the loop has to hold for dozens of steps
+ * without losing the thread. The verifier is the repo's own spec runner, so
+ * the agent can check itself, and `verify/` is fingerprinted so it cannot
+ * "fix" the tests instead of the code.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url))
+const REPO = resolve(HERE, '..')
+/**
+ * The fixture directory for this run.
+ *
+ * Computed per call, not at import: the runner sets `DSH_BENCH_CONDITION` just
+ * before it asks for the fixture, so the two conditions get two directories and
+ * can run in parallel.
+ *
+ * @returns {string} the absolute workspace path.
+ */
+function workspace() {
+  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}`)
+}
+
+/**
+ * What one planted bug looks like: a needle to find and what to put there.
+ */
+const PLANTED = [
+  {
+    file: 'src/concurrency.ts',
+    find: "['>', '<', '&', ';', '|',",
+    replace: "['<', '&',",
+  },
+  {
+    file: 'src/concurrency.ts',
+    find: "  'ls', 'cat', 'head', 'tail',",
+    replace: "  'cat', 'head', 'tail',",
+  },
+]
+
+/**
+ * Build a fresh copy of the repo with the bugs planted.
+ *
+ * @returns {string} the workspace the task runs in.
+ */
+function plant() {
+  const WORKSPACE = workspace()
+  rmSync(WORKSPACE, { recursive: true, force: true })
+  mkdirSync(WORKSPACE, { recursive: true })
+  for (const name of ['src', 'verify']) cpSync(resolve(REPO, name), resolve(WORKSPACE, name), { recursive: true })
+  for (const name of ['package.json', 'tsconfig.json']) cpSync(resolve(REPO, name), resolve(WORKSPACE, name))
+  symlinkSync(resolve(REPO, 'node_modules'), resolve(WORKSPACE, 'node_modules'), 'junction')
+  for (const bug of PLANTED) {
+    const path = resolve(WORKSPACE, bug.file)
+    // The source may be checked out with CRLF; match on normalised newlines so
+    // the needle does not depend on how git wrote the file.
+    const before = readFileSync(path, 'utf8').split(String.fromCharCode(13)).join('')
+    if (!before.includes(bug.find)) throw new Error(`the bug for ${bug.file} no longer matches the source`)
+    writeFileSync(path, before.replace(bug.find, bug.replace))
+  }
+  return WORKSPACE
+}
+
+/**
+ * Fingerprint `verify/` so "fix the tests" does not count as a fix.
+ *
+ * @returns {string} the workspace-relative hashes.
+ */
+function verifyFingerprint() {
+  const out = []
+  for (const name of ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts']) {
+    out.push(readFileSync(resolve(workspace(), 'verify', name), 'utf8'))
+  }
+  return out.join('\u0000')
+}
+
+/** The pristine `verify/` the task is not allowed to change. */
+let pristineVerify = ''
+
+export const GREENSPECS = {
+  text: [
+    `长程任务:工作区 ${workspace()} 是这个插件的完整源码副本,`,
+    `它的测试当前是红的。你的任务:把它修到全绿。`,
+    '',
+    '规则:',
+    '1. 只允许改 src/ 下的文件。',
+    '2. 不允许改 verify/ 下的任何文件 —— 那是判据,改了也不算。',
+    '3. 用 `node verify/run-specs.mjs` 自己检查,一直跑到输出 all checks passed。',
+    '4. 报告:每个 bug 是什么、在哪个文件、改了哪一行、最后 runner 的完整输出。',
+    '',
+    '不要修改本仓库(D:\code\vibe\dsh-refine-loop)本身的任何文件。',
+  ].join('\n'),
+  setup() {
+    plant()
+    pristineVerify = verifyFingerprint()
+  },
+  judge() {
+    const missing = []
+    if (verifyFingerprint() !== pristineVerify) missing.push('verify/ 被改过(禁止)')
+    let passed = true
+    try {
+      execSync('node verify/run-specs.mjs', { cwd: workspace(), stdio: 'pipe' })
+    } catch {
+      passed = false
+    }
+    if (!passed) missing.push('specs 仍然不过')
+    return { passed: passed && missing.length === 0 ? 1 : 0, total: 1, missing }
+  },
 }
