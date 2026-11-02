@@ -12,9 +12,12 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { TASKS } from './task.mjs'
 import { QX_SAMPLE_PATH } from './pubeval.mjs'
+
+const HARD_SAMPLE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), 'data', 'humaneval-hard-sample.json')
 
 process.env.DSH_BENCH_CONDITION = 'probe'
 const SANDBOX_HOME = process.env.DSH_SANDBOX_HOME ?? 'D:/code/vibe/dsh-sandbox/home'
@@ -127,6 +130,19 @@ function applyReference(task, workspace) {
     writeFileSync(resolve(workspace, 'solution.py'), HUMAEVAL_SOLUTION)
     return true
   }
+  if (task === 'humeval-hard') {
+    if (!existsSync(SOLUTIONS)) {
+      console.error(`the reference programs are missing: ${SOLUTIONS}`)
+      return false
+    }
+    const reference = JSON.parse(readFileSync(SOLUTIONS, 'utf8'))['humeval-hard']
+    if (reference === undefined) {
+      console.error('the reference programs for humeval-hard are missing')
+      return false
+    }
+    writeFileSync(resolve(workspace, 'solution.py'), reference)
+    return true
+  }
   if (task === 'quixbugs') {
     if (!existsSync(SOLUTIONS)) {
       console.error(`the reference programs are missing: ${SOLUTIONS}`)
@@ -150,6 +166,14 @@ function applyReference(task, workspace) {
 function applyWrong(task, workspace) {
   if (task === 'humeval') {
     writeFileSync(resolve(workspace, 'solution.py'), WRONG_SOLUTION)
+    return
+  }
+  if (task === 'humeval-hard') {
+    const sample = JSON.parse(readFileSync(HARD_SAMPLE_PATH, 'utf8'))
+    const stubs = sample.problems
+      .map(problem => `def ${problem.entry_point}(*args):\n    return None\n`)
+      .join('\n')
+    writeFileSync(resolve(workspace, 'solution.py'), stubs)
     return
   }
   const sample = JSON.parse(readFileSync(QX_SAMPLE_PATH, 'utf8'))

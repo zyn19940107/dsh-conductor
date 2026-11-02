@@ -12,7 +12,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const DIR = 'bench/results'
-const TASKS = ['humeval', 'quixbugs']
+const TASKS = ['humeval', 'humeval-hard', 'quixbugs']
 
 /**
  * The median of a list of numbers.
@@ -109,7 +109,21 @@ for (const task of TASKS) {
   const offTotal = pick(task, 'off', record => record.correctness.total)
   const onTotal = pick(task, 'on', record => record.correctness.total)
   console.log(`| 正确性(通过的判据) | ${offCorrect}/${offTotal} | ${onCorrect}/${onTotal} | — |`)
+  const planned = on.filter(record => record.planned).length
+  console.log(`| 其中真的交了图的运行 | — | ${planned}/${on.length} | — |`)
   console.log('')
+  if (planned > 0) {
+    console.log(`只看**真的交了图**的那 ${planned} 次:`)
+    console.log('')
+    console.log('| 指标 | 关掉插件(全部) | 开着插件(交图的) |')
+    console.log('|---|---:|---:|')
+    for (const [label, get, fmt] of METRICS) {
+      const a = pick(task, 'off', get)
+      const b = median(on.filter(record => record.planned).map(get))
+      console.log(`| ${label} | ${fmt(a)} | ${fmt(b)} |`)
+    }
+    console.log('')
+  }
   for (const record of [...off, ...on]) {
     console.log(` ${record.condition.padEnd(3)} ${record.index}: ${(record.wallMs / 1000).toFixed(1)}s `
       + `agents=${record.formation.agents} tokens=${record.formation.total} `

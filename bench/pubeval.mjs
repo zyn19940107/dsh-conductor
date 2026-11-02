@@ -27,14 +27,16 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..')
 const SAMPLE_PATH = resolve(HERE, 'data', 'humaneval-sample.json')
+const HARD_SAMPLE_PATH = resolve(HERE, 'data', 'humaneval-hard-sample.json')
 
 /**
  * The vendored dataset sample.
  *
+ * @param {string} path - the sample file.
  * @returns {object} the sample.
  */
-function sample() {
-  return JSON.parse(readFileSync(SAMPLE_PATH, 'utf8'))
+function sample(path = SAMPLE_PATH) {
+  return JSON.parse(readFileSync(path, 'utf8'))
 }
 
 /**
@@ -155,9 +157,79 @@ main()
 `
 
 /**
- * The state the judge keeps between the setup and the judgement.
+ * Build a HumanEval task from a vendored sample.
+ *
+ * @param {{name: string, samplePath: string, workspaceName: string, label: string}} options - the sample and how the task names it.
+ * @returns {object} the task.
  */
-let pristine = { check: '', sample: '' }
+function makeHumanEval({ name, samplePath, workspaceName, label }) {
+  return {
+    name,
+    text: [],
+    setup() {
+      const ws = workspace(workspaceName)
+      rmSync(ws, { recursive: true, force: true })
+      mkdirSync(ws, { recursive: true })
+      const data = sample(samplePath)
+      writeFileSync(resolve(ws, 'problems.json'), `${JSON.stringify({ problems: data.problems }, null, 2)}\n`)
+      writeFileSync(resolve(ws, 'check.py'), CHECK_PY)
+      writeFileSync(resolve(ws, 'solution.py'), [
+        '# Implement the functions below here.',
+        '# Keep the signature and the docstring of each function exactly as given.',
+        '',
+      ].join('\n'))
+      this.pristine = {
+        check: fingerprint(resolve(ws, 'check.py')),
+        sample: fingerprint(samplePath),
+      }
+      this.text = [
+        `公开评测集任务(${label},原题 + 原测试):工作区 ${ws}`,
+        '',
+        `请在 solution.py 里实现下面 ${data.problems.length} 个函数。每个函数的签名和文档字符串原样保留,实现写在 def 的下一行。`,
+        '',
+        ...data.problems.flatMap((problem, index) => [
+          `--- ${index + 1}. ${problem.task_id} (函数名 ${problem.entry_point}) ---`,
+          problem.prompt.trimEnd(),
+          '',
+        ]),
+        '规则:',
+        '1. 只允许改 solution.py。',
+        '2. 不许改 check.py 和 problems.json —— 那是判据,改了不算。',
+        `3. 用 \`python check.py\` 自检,一直跑到输出 RESULT ${data.problems.length}/${data.problems.length}。`,
+        '4. 报告:每个函数一行实现思路,加上 check.py 的完整最终输出。',
+        '',
+        `不要修改本仓库(${REPO})本身的任何文件。`,
+      ].join('\n')
+    },
+    judge() {
+      const ws = workspace(workspaceName)
+      const missing = []
+      const data = sample(samplePath)
+      const total = data.problems.length
+      if (!existsSync(resolve(ws, 'solution.py'))) {
+        return { passed: 0, total, missing: ['solution.py 不存在'] }
+      }
+      if (fingerprint(resolve(ws, 'check.py')) !== this.pristine.check) missing.push('check.py 被改过(禁止)')
+      if (fingerprint(samplePath) !== this.pristine.sample) missing.push(`${samplePath} 被改过(禁止)`)
+      const runner = resolve(tmpdir(), `humeval-judge-${process.pid}.py`)
+      writeFileSync(runner, JUDGE_PY)
+      let out = ''
+      try {
+        out = execFileSync('python', [runner, ws, samplePath], { encoding: 'utf8', stdio: 'pipe' })
+      } catch (error) {
+        out = String(error.stdout ?? '')
+        missing.push('判据脚本跑不起来')
+      }
+      const match = /RESULT (\d+)\/(\d+)/.exec(out)
+      const passed = match === null ? 0 : Number(match[1])
+      if (passed < total) {
+        const failures = out.split('\n').filter(line => line.startsWith('FAIL')).slice(0, 3)
+        if (failures.length > 0) missing.push(`没过的用例:${failures.join(' | ').slice(0, 300)}`)
+      }
+      return { passed, total, missing }
+    },
+  }
+}
 
 /**
  * The HumanEval subset: five independent problems, five canonical test sets.
@@ -168,71 +240,23 @@ let pristine = { check: '', sample: '' }
  * one step, so this is the shape where the plugin's advantage is the round trip
  * and the context, not the ability.
  */
-export const HUMANEVAL = {
+export const HUMANEVAL = makeHumanEval({
   name: 'humeval',
-  text: [],
-  setup() {
-    const ws = workspace('humeval')
-    rmSync(ws, { recursive: true, force: true })
-    mkdirSync(ws, { recursive: true })
-    const data = sample()
-    writeFileSync(resolve(ws, 'problems.json'), `${JSON.stringify({ problems: data.problems }, null, 2)}\n`)
-    writeFileSync(resolve(ws, 'check.py'), CHECK_PY)
-    writeFileSync(resolve(ws, 'solution.py'), [
-      '# Implement the functions below here.',
-      '# Keep the signature and the docstring of each function exactly as given.',
-      '',
-    ].join('\n'))
-    pristine = {
-      check: fingerprint(resolve(ws, 'check.py')),
-      sample: fingerprint(SAMPLE_PATH),
-    }
-    this.text = [
-      `公开评测集任务(HumanEval 子集,原题 + 原测试):工作区 ${ws}`,
-      '',
-      '请在 solution.py 里实现下面 5 个函数。每个函数的签名和文档字符串原样保留,实现写在 def 的下一行。',
-      '',
-      ...data.problems.flatMap((problem, index) => [
-        `--- ${index + 1}. ${problem.task_id} (函数名 ${problem.entry_point}) ---`,
-        problem.prompt.trimEnd(),
-        '',
-      ]),
-      '规则:',
-      '1. 只允许改 solution.py。',
-      '2. 不许改 check.py 和 problems.json —— 那是判据,改了不算。',
-      '3. 用 `python check.py` 自检,一直跑到输出 RESULT 5/5。',
-      '4. 报告:每个函数一行实现思路,加上 check.py 的完整最终输出。',
-      '',
-      `不要修改本仓库(${REPO})本身的任何文件。`,
-    ].join('\n')
-  },
-  judge() {
-    const ws = workspace('humeval')
-    const missing = []
-    const total = sample().problems.length
-    if (!existsSync(resolve(ws, 'solution.py'))) {
-      return { passed: 0, total, missing: ['solution.py 不存在'] }
-    }
-    if (fingerprint(resolve(ws, 'check.py')) !== pristine.check) missing.push('check.py 被改过(禁止)')
-    if (fingerprint(SAMPLE_PATH) !== pristine.sample) missing.push('bench/data/humaneval-sample.json 被改过(禁止)')
-    const runner = resolve(tmpdir(), `humeval-judge-${process.pid}.py`)
-    writeFileSync(runner, JUDGE_PY)
-    let out = ''
-    try {
-      out = execFileSync('python', [runner, ws, SAMPLE_PATH], { encoding: 'utf8', stdio: 'pipe' })
-    } catch (error) {
-      out = String(error.stdout ?? '')
-      missing.push('判据脚本跑不起来')
-    }
-    const match = /RESULT (\d+)\/(\d+)/.exec(out)
-    const passed = match === null ? 0 : Number(match[1])
-    if (passed < total) {
-      const failures = out.split('\n').filter(line => line.startsWith('FAIL')).slice(0, 3)
-      if (failures.length > 0) missing.push(`没过的用例:${failures.join(' | ').slice(0, 300)}`)
-    }
-    return { passed, total, missing }
-  },
-}
+  samplePath: SAMPLE_PATH,
+  workspaceName: 'humeval',
+  label: 'HumanEval 子集',
+})
+
+/**
+ * The same shape, five harder problems: more of the prompt has to be read
+ * before the implementation can be written.
+ */
+export const HUMAEVAL_HARD = makeHumanEval({
+  name: 'humeval-hard',
+  samplePath: HARD_SAMPLE_PATH,
+  workspaceName: 'humeval-hard',
+  label: 'HumanEval 难题子集',
+})
 
 /**
  * The QuixBugs sample: the benchmark's own buggy programs and test cases.
@@ -444,4 +468,4 @@ export const QUIXBUGS = {
   },
 }
 
-export const PUBLIC_TASKS = { humeval: HUMANEVAL, quixbugs: QUIXBUGS }
+export const PUBLIC_TASKS = { humeval: HUMANEVAL, 'humeval-hard': HUMAEVAL_HARD, quixbugs: QUIXBUGS }
