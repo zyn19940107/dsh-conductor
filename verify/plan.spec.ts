@@ -80,7 +80,7 @@ console.log('parsePlanArgs')
   check('keeps the agent task', parsed?.nodes[1]?.task === 'judge it')
 
   check('refuses a plan without criteria', parsePlanArgs({ nodes: [] }) === undefined)
-  check('refuses a plan without nodes', parsePlanArgs({ criteria: ['x'], nodes: [] }) === undefined)
+  check('accepts a plan with no nodes', parsePlanArgs({ criteria: ['x'], nodes: [] })?.nodes.length === 0)
   check('refuses a duplicate id', parsePlanArgs({
     criteria: ['x'],
     nodes: [

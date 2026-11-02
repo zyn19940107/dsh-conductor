@@ -141,7 +141,8 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     if (typeof task !== 'string' || task.trim() === '') return undefined
     parsedNodes.push({ id: nodeId, kind, calls: [], task: task.trim(), after })
   }
-  if (parsedNodes.length === 0) return undefined
+  // A plan with no nodes is valid: a turn that already has what it needs hands
+  // over an empty plan and goes straight to the conclusion.
 
   // A placeholder in a call's arguments is a dependency. The call cannot run
   // before the node it names has produced its output, so the edge is there
