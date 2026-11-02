@@ -205,3 +205,89 @@ export function applyDelegationRule(ctx: Context): void {
     return undefined
   })
 }
+
+/**
+ * What the model is told when it reaches for a tool after the graph has run.
+ *
+ * The round after a plan is the judgement: the results are in, and the turn is
+ * either the conclusion that ends the loop or the next graph. Work done one call
+ * at a time here is work that belonged inside a graph.
+ */
+export const JUDGE_ONLY = 'The graph has run — every result is above. This turn is the judgement: write the '
+  + 'conclusion if the results answer the request, or hand over the next graph with refine_plan for what is '
+  + 'still missing. Direct tool calls belong inside a graph, not after one.'
+
+/**
+ * What the model is told when it stops a turn that never handed over a graph.
+ *
+ * A turn is a graph: stopping without one answers the request with the loop never
+ * having run.
+ */
+export const MUST_PLAN = 'This turn has not handed over a graph yet. The work of a turn is the graph: call '
+  + 'refine_plan with the observable criteria and the nodes, and it runs — the independent nodes together — and '
+  + 'every result comes back. Then the turn ends.'
+
+/**
+ * How many times a turn may be put back on the loop before it is let go.
+ *
+ * A rule that traps an agent is worse than a rule it ignores.
+ */
+export const MUST_PLAN_LIMIT = 3
+
+/**
+ * Whether a call is one the model asked for itself.
+ *
+ * The calls a plan makes are nested under the plan's own call.
+ *
+ * @param execution - the call being executed.
+ * @returns true when the model asked for it.
+ */
+export function isModelCall(execution: {
+  readonly callId: string
+  readonly rootCallId: string
+}): boolean {
+  return execution.callId === execution.rootCallId
+}
+
+/**
+ * Refuse work done one call at a time after the graph has run.
+ *
+ * The round after a plan is the judgement, so the only ways on are the conclusion
+ * and the next graph. The calls a plan makes are nested and go through untouched.
+ *
+ * @param ctx - the plugin context supplying the tool registry.
+ * @param plans - the request tracker.
+ */
+export function applyJudgementGuard(ctx: Context, plans: Plans): void {
+  ctx.tools.guard((execution) => {
+    const agent = execution.agent
+    if (agent === undefined) return undefined
+    if (!isModelCall(execution)) return undefined
+    if (execution.name === 'refine_plan') return undefined
+    if (plans.waiting(agent.session.id)) return undefined
+    return JUDGE_ONLY
+  })
+}
+
+/**
+ * Put a turn back on the loop when it stops without a graph.
+ *
+ * @param ctx - the plugin context supplying the agent runtime.
+ * @param plans - the request tracker.
+ */
+export function applyMustPlan(ctx: Context, plans: Plans): void {
+  const nudges = new Map<string, number>()
+  ctx.on('agent/turn-stopping', ({ agent, signal }) => {
+    if (signal.aborted) return
+    const sessionId = agent.session.id
+    if (!plans.waiting(sessionId)) return
+    if (agent.inbox.nextTurn.length > 0) return
+    const used = (nudges.get(sessionId) ?? 0) + 1
+    nudges.set(sessionId, used)
+    if (used > MUST_PLAN_LIMIT) return
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: MUST_PLAN }],
+      source: { kind: 'system-prompt' },
+    }))
+  })
+}
