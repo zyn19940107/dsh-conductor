@@ -13,10 +13,10 @@
  */
 
 /** The kinds of node a plan may hold. */
-export type PlanNodeKind = 'tools' | 'subagent'
+export type PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'
 
 /** The node kinds that start an agent. */
-export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent']
+export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent', 'subagent_fork']
 
 /** One call inside a tools node. */
 export interface PlanToolCall {
@@ -42,15 +42,6 @@ export interface PlanNode {
 
 /** The plan a call carries. */
 export interface PlanArgs {
-  /**
-   * Whether the plan asks to be continued.
-   *
-   * With `more`, the nodes are only the first slice of the work: when they have
-   * run, the plugin shows the results to the model and asks what the next slice
-   * is, the same way a failed call is repaired. That is how a serial chain that
-   * needs a result to write the next call stays inside one plan.
-   */
-  more: boolean
   /** The observable criteria that decide whether the plan succeeded. */
   criteria: string[]
   /** The nodes of the plan. */
@@ -110,7 +101,6 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     .map(entry => entry.trim())
   if (parsedCriteria.length === 0) return undefined
 
-  const more = record.more === true
   const parsedNodes: PlanNode[] = []
   const seen = new Set<string>()
   for (const entry of nodes) {
@@ -120,7 +110,7 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     const kind = item.kind
     if (typeof id !== 'string' || id.trim() === '') return undefined
     if (typeof kind !== 'string') return undefined
-    if (kind !== 'tools' && kind !== 'subagent') return undefined
+    if (kind !== 'tools' && kind !== 'subagent' && kind !== 'subagent_fork') return undefined
     const nodeId = id.trim()
     if (seen.has(nodeId)) return undefined
     seen.add(nodeId)
@@ -166,43 +156,7 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     }
   }
 
-  return { criteria: parsedCriteria, nodes: parsedNodes, more }
-}
-
-/**
- * What the model answered when it was asked for the next slice.
- */
-export type NextSlice =
-  | { done: true }
-  | { done: false, plan: PlanArgs }
-
-/**
- * Read the answer to "what is the next slice".
- *
- * The model either repeats the plan shape with the next nodes, or says it is
- * done. Anything else is read as done, so a bad answer can only stop the loop —
- * never make the plan worse.
- *
- * @param text - what the model said.
- * @param criteria - the criteria the slice was asked under.
- * @returns the answer.
- */
-export function parseNextSlice(text: string, criteria: readonly string[]): NextSlice {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start === -1 || end <= start) return { done: true }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text.slice(start, end + 1))
-  } catch {
-    return { done: true }
-  }
-  if (parsed === null || typeof parsed !== 'object') return { done: true }
-  const record = parsed as Record<string, unknown>
-  if (record.done === true) return { done: true }
-  const plan = parsePlanArgs({ criteria: [...criteria], nodes: record.nodes, more: record.more === true })
-  if (plan === undefined) return { done: true }
-  return { done: false, plan }
+  return { criteria: parsedCriteria, nodes: parsedNodes }
 }
 
 /**
@@ -254,6 +208,22 @@ export function buildWaves(nodes: readonly PlanNode[]): PlanWaves {
       if (dependency === node.id) return { error: `the node "${node.id}" depends on itself` }
       if (!byId.has(dependency)) {
         return { error: `the node "${node.id}" depends on "${dependency}", which is not a node of this plan` }
+      }
+    }
+  }
+  // Two children are two parallel branches, never a pipeline. A child that waits
+  // on another child runs after it, which turns the plan's parallelism into a
+  // queue: with N children the wall clock becomes their sum instead of their
+  // maximum. That shape belongs in tools nodes, or in the next round.
+  for (const node of nodes) {
+    if (!AGENT_NODE_KINDS.includes(node.kind)) continue
+    for (const dependency of node.after) {
+      const upstream = byId.get(dependency)
+      if (upstream === undefined || !AGENT_NODE_KINDS.includes(upstream.kind)) continue
+      return {
+        error: `the node "${node.id}" is a subagent and depends on "${dependency}", which is also a subagent. `
+          + 'Children are parallel branches: give this one no dependency and let it work from its own task, '
+          + 'or move the step that needs the other result into a tools node or the next round.',
       }
     }
   }
