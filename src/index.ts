@@ -65,7 +65,9 @@ export const REFINE_GUIDANCE = [
   '- The next turn starts with those results: if the request is answered, write the conclusion — that ends the '
   + 'loop. If it is not, draw the next graph.',
   '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
-  + 'with its own context), "subagent_fork" (a child that inherits this conversation).',
+  + 'with its own context), "subagent_fork" (a child agent that starts with this conversation).',
+  '- What you have already read is already inside a "subagent_fork": the files, the greps, the results. A '
+  + '"subagent" starts empty and reads them again itself.',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',
