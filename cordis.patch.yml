@@ -2,29 +2,15 @@
 #
 # One row mounts this package. It replaces nothing: every tool the profile
 # already had stays mounted and stays visible. This plugin adds one tool
-# (`refine_plan`), the guidance that says when to use it, and the rule that
-# makes a turn one plan: the turn hands over one plan, the plan runs, the
-# results come back together, and the turn ends with the conclusion.
+# (`refine_plan`), the turn doctrine that says a turn is the graph or the
+# conclusion, and the rule that delegation goes through the plan.
 #
-# The plugin never chooses a search backend and never decides what a call
-# means — it only decides how many calls travel together, and how a turn
-# opens.
+# Only `enabled` is written here. Every other value is the plugin's own default,
+# documented in README.md — a second copy of them in this file is how the plugin
+# ends up running settings that no longer match its code.
 
 - insert:
     - id: refine-loop
       name: '@zyn19940107/dsh-refine-loop'
       config:
         enabled: true
-        maxBatchSize: 8
-        maxBatchTimeoutMs: 600000
-        maxAgentDepth: 1
-        agentNodeTimeoutMs: 300000
-        requirePlan: true
-        planPullbacks: 2
-        conclusionPullbacks: 10
-        respectConcurrencySafety: true
-        concurrentTools:
-          - glob
-          - grep
-        concurrentShell: true
-        shellTool: ops_bash
