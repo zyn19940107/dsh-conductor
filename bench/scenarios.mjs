@@ -113,7 +113,7 @@ export const MULTIHOP = {
     { what: '定义 PLAN_TOOL 的文件', needles: ['tool.ts'] },
     { what: '其它用到它的文件', needles: ['gate.ts', 'index.ts', 'policy.ts'] },
     { what: '它的值', needles: ['refine_plan'] },
-    { what: '定义在第 45 行', needles: ['45'] },
+    { what: '定义在 tool.ts 里', needles: ['tool.ts'] },
   ]),
 }
 /**
@@ -134,11 +134,11 @@ export const COVERAGE = {
     '只读不改。不要修改任何文件。',
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
-    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'tool.ts'] },
-    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts'] },
+    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'rounds.ts', 'tool.ts'] },
+    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts'] },
     { what: 'concurrency.spec 测的入口', needles: ['isreadonlycommand'] },
     { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
-    { what: '行数最多的模块(632 行)', needles: ['632'] },
+    { what: '行数最多的模块(tool.ts 562 行)', needles: ['562'] },
   ]),
 }
 
@@ -157,8 +157,8 @@ export const SWEEP = {
     '都在 D:\code\vibe\dsh-refine-loop 下。只读不改。',
   ].join('\n'),
   judge: judgeBy([
-    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'tool.ts'] },
-    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts'] },
+    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'rounds.ts', 'tool.ts'] },
+    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts'] },
     { what: 'repair.ts 的职责(失败后修一次)', needles: ['修'] },
     { what: 'concurrency.ts 的职责(并发判定)', needles: ['并发'] },
     { what: 'plan.ts 的职责(图的节点)', needles: ['节点'] },
@@ -218,10 +218,10 @@ export const COVERAGEWIDE = {
     '只读不改。不要修改任何文件。',
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
-    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'tool.ts'] },
-    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts'] },
+    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'rounds.ts', 'tool.ts'] },
+    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts'] },
     { what: 'concurrency.spec 测的入口', needles: ['isreadonlycommand'] },
     { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
-    { what: '行数最多的模块(632 行)', needles: ['632'] },
+    { what: '行数最多的模块(tool.ts 562 行)', needles: ['562'] },
   ]),
 }

@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
+import { applyRule, applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -154,6 +154,21 @@ export const DEFAULT_SHELL_TOOL = 'ops_bash'
  */
 export const DEFAULT_MAX_ROUNDS = 16
 
+/**
+ * Whether a turn has to hand its work over as a plan.
+ *
+ * This is the plugin's contract, not a preference: a turn is one graph, or one
+ * conclusion. Turn it off and the plugin becomes a tool the model may ignore.
+ */
+export const DEFAULT_REQUIRE_PLAN = true
+
+/**
+ * How many refusals a turn gets before the rule lets it alone.
+ *
+ * A rule that traps an agent is worse than a rule it ignores.
+ */
+export const DEFAULT_PLAN_PULLBACKS = 2
+
 /** Plugin config. */
 export interface Config {
   /** Whether the plugin is mounted at all. */
@@ -174,6 +189,10 @@ export interface Config {
   concurrentShell: Volatile<boolean>
   /** The shell tool the read-only rule applies to. */
   shellTool: Volatile<string>
+  /** Whether tool calls have to go inside a plan. */
+  requirePlan: Volatile<boolean>
+  /** How many refusals a turn gets before it is left alone. */
+  planPullbacks: Volatile<number>
   /** How many rounds one request may run before the loop stops on its own. */
   maxRounds: Volatile<number>
   /** How many times a turn may be pulled back after it handed over its plan. */
@@ -189,6 +208,8 @@ export const Config = z.object({
   concurrentTools: z.array(z.string()).default([...DEFAULT_CONCURRENT_TOOLS]).volatile(),
   concurrentShell: z.boolean().default(DEFAULT_CONCURRENT_SHELL).volatile(),
   shellTool: z.string().default(DEFAULT_SHELL_TOOL).volatile(),
+  requirePlan: z.boolean().default(DEFAULT_REQUIRE_PLAN).volatile(),
+  planPullbacks: z.number().step(0).min(0).default(DEFAULT_PLAN_PULLBACKS).volatile(),
   maxRounds: z.number().step(1).min(1).default(DEFAULT_MAX_ROUNDS).volatile(),
 })
 
@@ -255,6 +276,10 @@ export function apply(ctx: Context, config: Config): void {
 
 
   applyRounds(ctx, rounds)
+  applyRule(ctx, {
+    requirePlan: () => config.requirePlan.get(),
+    planPullbacks: () => config.planPullbacks.get(),
+  })
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
