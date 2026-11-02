@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyRounds, NEXT_ROUND, Rounds } from './rounds.js'
+import { applyMustPlan, applyRounds, NEXT_ROUND, Plans, Rounds } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -55,15 +55,15 @@ export const REFINE_GUIDANCE = [
   'Refined loop:',
   `- ${PLAN_TOOL}: one call that carries the whole shape of the turn — the observable criteria that decide `
   + 'whether it succeeded, and the nodes it is made of.',
-  '- The loop, one turn at a time:',
-  '  1. Call tools to find out what the plan should say. A call here is reconnaissance — it makes the plan '
-  + 'accurate, it is not the work.',
-  '  2. Hand the plan over with refine_plan: the observable criteria that decide whether it succeeded, and '
-  + 'the nodes it is made of. The nodes that depend on nothing run at the same time, and that is where the '
-  + 'work happens.',
-  '  3. The plan runs and every result comes back together. That ends the turn.',
-  '  4. The next turn starts with those results: if the request is answered, write the conclusion — that '
-  + 'ends the loop. If it is not, go back to step 1.',
+  '- When a turn starts, what you think about is the graph: what the pieces of work are, which of them can '
+  + 'run at the same time, what each node is made of, and what observable criteria decide the graph succeeded. '
+  + 'Drawing that graph is the work of the turn.',
+  '- A tool call exists to answer a question the graph needs answered — which file holds this, which line a '
+  + 'symbol is on, does this path exist. It is not the work; the work is the graph.',
+  '- Hand the graph over with refine_plan. The nodes that depend on nothing run at the same time, every result '
+  + 'comes back together, and that ends the turn.',
+  '- The next turn starts with those results: if the request is answered, write the conclusion — that ends the '
+  + 'loop. If it is not, draw the next graph.',
   '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
   + 'with its own context), "subagent_fork" (a child that inherits this conversation).',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
@@ -221,6 +221,7 @@ export function apply(ctx: Context, config: Config): void {
   const policy = new SessionPolicy()
   // Whether a conversation has opened its turn with a plan.
   const rounds = new Rounds()
+  const plans = new Plans()
 
   ctx.systemPrompt.section({
     name: 'tool:refine-loop',
@@ -249,6 +250,7 @@ export function apply(ctx: Context, config: Config): void {
     // turn, and the pending message is what makes the harness open the next.
     onPlanFinished: (agent: Agent) => {
       const sessionId = agent.session.id
+      plans.done(sessionId)
       if (rounds.bump(sessionId) > config.maxRounds.get()) return false
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: NEXT_ROUND }],
@@ -260,7 +262,8 @@ export function apply(ctx: Context, config: Config): void {
   })
 
 
-  applyRounds(ctx, rounds)
+  applyRounds(ctx, rounds, plans)
+  applyMustPlan(ctx, plans)
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
