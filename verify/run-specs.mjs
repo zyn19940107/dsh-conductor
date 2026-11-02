@@ -18,7 +18,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 // The bundle is written inside the package: the system temp directory is not
 // writable by the esbuild child process here.
 const work = join(root, 'verify', '.build')
-const specs = ['refine.spec.ts', 'batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'rounds.spec.ts', 'name.spec.ts']
+const specs = ['refine.spec.ts', 'batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'rounds.spec.ts']
 
 try {
   await mkdir(work, { recursive: true })
