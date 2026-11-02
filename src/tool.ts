@@ -415,15 +415,13 @@ export function applyPlanTool(
   ctx.tools.register(defineTool({
     name: PLAN_TOOL,
     timeoutMs: options.timeoutMs(),
-    description: 'Run one plan of work and return every result together. A turn is one plan: this call '
-      + 'carries the whole shape of the turn — the observable criteria that decide whether it succeeded, and '
-      + 'the nodes it is made of. A node is one of two kinds — "tools" (several calls that run together) or '
-      + '"subagent" (a self-contained task for a child that starts with no context) — and a node may name the '
-      + 'nodes it depends on, so the ones that depend on nothing run together and the next layer waits for '
-      + 'them. Choose "subagent" for work that has to look at a result before it knows the next call, such as '
-      + 'searching, tracing, or auditing something you cannot name in advance. Set "more": true when even the '
-      + 'nodes themselves depend on what comes back: the plan then runs, shows you those results, and asks you '
-      + 'for the next slice. Without it the plan is one shot — every call in it is fixed before anything runs.',
+    description: 'Run one plan of work and return every result together. This is where the work happens: '
+      + 'a turn hands its shape over here — the observable criteria that decide whether it succeeded, and the '
+      + 'nodes it is made of. A node is one of three kinds: "tools" (a batch of calls that run together), '
+      + '"subagent" (a child agent with its own context), "subagent_fork" (a child agent that inherits this '
+      + 'conversation). A node may name the nodes it depends on in "after": the ones that depend on nothing '
+      + 'run together and the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes '
+      + 'the output of that node, and counts as a dependency too.',
     parameters: {
       criteria: {
         type: 'array',
@@ -431,12 +429,6 @@ export function applyPlanTool(
         required: true,
         description: 'The observable criteria that decide whether this plan succeeded. Each one is something '
           + 'you could check against the results.',
-      },
-      more: {
-        type: 'boolean',
-        description: 'Set true when these nodes are only the first slice: when they have run, you are asked '
-          + 'for the next slice with their results in hand. Use it when the next call depends on a result you '
-          + 'do not have yet — a line number a grep will find, a file name a glob will return.',
       },
       nodes: {
         type: 'array',
@@ -471,8 +463,7 @@ export function applyPlanTool(
             },
             task: {
               type: 'string',
-              description: 'The task of an agent node. Only for kind "subagent". State '
-                + 'everything the child needs: a child that starts with no context knows nothing but this.',
+              description: 'The task of an agent node. For kind "subagent" and "subagent_fork".',
             },
             after: {
               type: 'array',
