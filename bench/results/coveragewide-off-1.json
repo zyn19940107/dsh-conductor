@@ -1,0 +1,71 @@
+{
+  "task": "coveragewide",
+  "condition": "off",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 78714,
+  "sessionId": "session-86481309-2e28-495a-aaa1-7214523325fa",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 16,
+  "toolCalls": 31,
+  "tools": [
+    "glob",
+    "glob",
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "glob",
+    "read",
+    "grep",
+    "grep",
+    "pwsh",
+    "pwsh",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 70667,
+    "outputTokens": 9105,
+    "cacheReadTokens": 678269,
+    "totalTokens": 758041
+  },
+  "formation": {
+    "agents": 1,
+    "input": 70667,
+    "output": 9105,
+    "cacheRead": 678269,
+    "total": 758041,
+    "steps": 16
+  },
+  "mainPrompt": 70857,
+  "correctness": {
+    "passed": 4,
+    "total": 5,
+    "missing": [
+      "行数最多的模块(632 行)(缺:632)"
+    ]
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 22480,
+  "thinkingPreview": "The src glob matched node_modules. Let me narrow to the dsh-refine-loop directory.\nNow let me read the 6 spec files and 8 src files. Let me get line counts too.\n\nLet me read all 6 spec files inparallel.\nNow let me read the 8 src files. Let me get line counts first and read the contents.\n\nLet me read all 8 src files. Some may be long. Let me get line counts via pwsh too.\n\nActually, let me read themin parallel.\nNow let me read the remaining src files: plan.ts, batch.ts, gate.ts, policy.ts, concurrency.ts, repair.ts.\n\nAlso note there are _probe.ts and _probe2.ts in verify — not spec files but let me check them since they're in verify dir. The user said \"6 .spec.ts\" — there are exactly 6 .spec.ts files. But _probe.ts and _probe2.ts are extra files in verify. Let me read them for context.\n\nLet me read the remaining src files.\nNow let me read the remaining src files: gate.ts, policy.ts, concur",
+  "finalText": "盘点完成,未修改任何文件。\n\n---\n\n## 1. 六个 spec 各自测什么\n\n| spec | 实际测的是什么 | 主要调用的函数/入口 |\n|---|---|---|\n| `refine.spec.ts` | 校验**旧版批次格式**的参数解析、策略命令行的识别、批次结果的渲染文案 | `parseBatchArgs`（主）+ `parsePolicyCommand` + `renderBatch` |\n| `batch.spec.ts` | 验证批次**真的并发**：安全调用的时间窗重叠、独占调用被当成屏障串行、失败被报告而不是抛出 | `runBatch`（主） |\n| `concurrency.spec.ts` | 验证\"哪些调用允许并行\"的判定：shell 只读命令的词法分析、override 规则、批次内调用顺序 | `isReadOnlyCommand`（主）+ `mayRunTogether` + `buildOverrides` + `runBatch` |\n| `plan.spec.ts` | 验证计划图：参数解析、占位符即依赖、分层与环检测、`runPlan` 执行/渲染、委派深度拒绝、节点超时 | `parsePlanArgs` / `buildWaves` / `substitutePlaceholders` / `runPlan`（主） |\n| `gate.spec.ts` | 验证\"工具调用必须进计划\"这条规则的拉回次数、豁免条件、新回合重置 | `planRefusal`（主）+ `PlanGate.reset` + `PLAN_REQUIRED` |\n| `repair.spec.ts` | 验证失败调用的就地修复：失败才问模型（成功不花钱）、修复答案的解析与拒绝 | `runBatch`（主，带 repair 钩子）+ `parseRepair` |\n\n**两处名实不符值得先记一笔**：\n- `refine.spec.ts` 的头注释写\"the plan, the chain detector, and the per-conversation switch\",但它测的是 `parseBatchArgs`——**`parseBatchArgs` 在 `src/` 里已经没有任何调用方了**(只有定义,零引用),它是计划图 `parsePlanArgs` 取代批次格式后遗留的旧入口。\"chain detector\"在 src 里也已不存在。\n- `repair.spec.ts` **根本没被执行**:`verify/run-specs.mjs:21` 的数组是 `['refine','batch','concurrency','plan','gate']`,该数组自 `a8acab0` 首次提交起就没变;`repair.spec.ts` 是后来 `a9f2f2f` 新增的,没登记进去。所以 `npm run specs` 从未跑过它。\n\n---\n\n## 2. 8 个 src 模块与 spec 的对应关系\n\n| src 模块 | 行数 | 对应 spec | 覆盖状态 |\n|---|---|---|---|\n| `index.ts` | 444 | **无** | **零覆盖** |\n| `tool.ts` | 638 | `plan.spec.ts` | 部分:`runPlan`/`renderPlan` 有;**`applyPlanTool` 整个没测**(含 `more` 分片续跑、`maxBatchSize` 拦截、`concludeTurn`) |\n| `plan.ts` | 363 | `plan.spec.ts` | 部分:`parsePlanArgs`/`buildWaves`/`substitutePlaceholders` 有;**`parseNextSlice`/`collectPlaceholders`/`dependenciesOf` 没测** |\n| `batch.ts` | 353 | `batch`+`refine`+`repair`+`concurrency` | 基本全覆盖 |\n| `gate.ts` | 256 | `gate.spec.ts` | 部分:`planRefusal`/`PLAN_REQUIRED`/`reset` 有;**`applyPlanGate`/`isModelCall`/`PlanGate` 的轮次方法没测** |\n| `policy.ts` | 241 | `refine.spec.ts` | 弱:只有 `parsePolicyCommand`;**`SessionPolicy`/`runPolicyCommand`/`policyConfirmation`/`applyPolicyMessage`/`applyPolicyCommand` 没测** |\n| `concurrency.ts` | 234 | `concurrency.spec.ts` | **全覆盖**(唯一做到位的模块) |\n| `repair.ts` | 172 | `repair.spec.ts` | 弱:只有 `parseRepair`;**`askForRepair`/`repairSystem`/`describeFailure`/`collectText` 没测**,且该 spec 未被执行 |\n\n**没有对应 spec 的模块只有 `src/index.ts` 一个**(插件入口:`apply()` + `Config` schema + 两份 guidance 文本)。\n\n---\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`,638 行**(src全部 8 个文件共 2701 行)。它同时也是覆盖率最差的模块之一:`applyPlanTool` 里 `more` 分片续跑那一段(`tool.ts:559-581`)+ `plan.ts` 的 `parseNextSlice` 完全无测试——而这是 `045e5d7` 引入的新特性。\n\n---\n\n## 4. 补测优先级\n\n**先补 `src/index.ts`(Config schema + `apply()`)。** 它是唯一零覆盖的模块,又是插件真正被 Cordis 调用的入口,而且已经存在一个只有 spec 能抓住的实缺陷:`cordis.patch.yml:24` 设了 `conclusionPullbacks: 10`,而 `index.ts:277-291` 的 `Config` schema 根本没声明这个键——schema 与部署配置不一致,现有5 个 spec 一个都碰不到。\n\n**在此之前先做一件零成本的事**:把 `repair.spec.ts` 加进 `verify/run-specs.mjs:21` 的数组。文件已经写好、逻辑已经对(只是从没被跑过),一行改动就能把 `repair.ts` 从\"名义有 spec\"变成\"真的有 spec\",然后再谈给 `repair.ts` 的 `askForRepair`/`describeFailure` 补断言。\n\n其后依次:`tool.ts` 的 `applyPlanTool` + `plan.ts` 的 `parseNextSlice`(模型驱动的续跑循环,`maxSlices` 边界无人验证)→ `policy.ts` 的 `SessionPolicy`/`runPolicyCommand`/`applyPolicyMessage`(per-conversation 开关的真正副作用)→ `gate.ts` 的 `applyPlanGate`/`isModelCall`。\n\n---\n\n**附带发现(仅记录,未改动)**:`src/repair.ts` 导出的 `askForRepair` 和 `collectText` 在 `src/` 里零调用方——`index.ts:421-443` 的 `repairFailedCall` 自己内联重写了一遍流式读取逻辑;同时 `batch.ts:185` 和 `repair.ts:21` 各有一份 `MAX_REPAIRS = 2`,batch 用的是自己那份。"
+}

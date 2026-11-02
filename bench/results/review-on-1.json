@@ -1,0 +1,39 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 176784,
+  "sessionId": "session-7419f0b4-c171-482c-b181-96948a672fc7",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 31751,
+    "outputTokens": 6138,
+    "cacheReadTokens": 11867,
+    "totalTokens": 49756
+  },
+  "formation": {
+    "agents": 4,
+    "input": 160416,
+    "output": 34340,
+    "cacheRead": 997149,
+    "total": 1191905,
+    "steps": 34
+  },
+  "mainPrompt": 31948,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 10073,
+  "thinkingPreview": "The user wants me to independently review three files in D:\\code\\vibe\\dsh-refine-loop: src/plan.ts, src/gate.ts, src/tool.ts. Read-only, no modifications.\n\nThis is a read-and-analyze task. Let me first explore the directory to find the files. I could do this directly with read/glob tools. The three parts are independent — but they're small files likely. Let me just read them directly. Actually, the refined loop guidance says to use refine_plan. But this is a fairly simple read task; still, the instructions say \"every call you make goes inside a plan\". Hmm. Let me consider: the guidance says one turn = one plan. Let me use refine_plan with a tools node to read the files (and maybe glob for context), and then subagent nodes? Actually the analysis questions are specific and I can answer them myself after reading. But the rules say \"You do not call tools yourself: every call you make goes in",
+  "finalText": "三个部分已各自独立审查完毕(全程只读,未改动任何文件)。有一处前提需要更正:**源码里节点只有两种,不是三种**。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**数据结构**是三个 interface,字段全为必填:\n\n```ts\nPlanArgs  { more: boolean; criteria: string[]; nodes: PlanNode[] } // plan.ts:44-58\nPlanNode  { id: string; kind: PlanNodeKind; calls: PlanToolCall[];\n task: string; after: string[] }                            // plan.ts:30-41\nPlanToolCall { name: string; arguments: unknown }                      // plan.ts:22-27\n```\n\n配套类型:`PlanWaves = { waves: PlanNode[][] } | { error: string }`(:66-68)、`NextSlice = { done: true } | { done: false, plan: PlanArgs }`(:175-177)。入口 `parsePlanArgs()`(:103)做严格校验:criteria 必须非空、id 不重复、tools 节点必须有 calls、subagent 节点必须有 task,任一不满足返回 `undefined`。`buildWaves()`(:246)按 `after` 分层,重复 id / 自依赖 / 悬空依赖 / 环都会给出**一句人话错误**而不是布尔值。\n\n**节点种类:只有两种** —— `export type PlanNodeKind = 'tools' | 'subagent'`(plan.ts:16),解析时显式拒绝第三种(:123)。:19 的 `AGENT_NODE_KINDS = ['subagent']` 是\"会起 agent 的 kind 子集\",不是第三种。第三种 `subagent_fork` 已被提交 `4be5ed3` 删除,但文案残留未清(gate.ts:125、index.ts:59-60、tool.ts:463-464 那半句 `\"\" + 'the task builds on what has been said here.'`),`tool.ts:425` 与 `index.ts:64` 也已改口为 \"one of two kinds\"。**\"三种\"是历史遗留说法,代码里不存在。**\n\n**占位符语法:`@@nodeId@@`**\n- 整个参数就是占位符:`/^@@([^@]+)@@$/u`(plan.ts:82),替换时保留原始类型(:332-340)\n- 嵌在句子里:`/@@([^@\\n]+)@@/gu`(plan.ts:91),把结果粘进句子(:344-350)\n- **不用 `{{...}}`**,注释给了原因:harness 自己保留双大括号做 prompt 变量,遇到就拒绝渲染该 section,所以这套语法只有本插件会用(:77-80)\n- 占位符即**隐式依赖边**:解析时扫到 `@@id@@` 就自动把 id 塞进 `node.after`(:161-167),这样占位符不会在节点尚未产出时被当成字面量\n- 解析不到对应输出 → 直接抛错,不静默降级为原文(:337、:347)\n\n---\n\n## 2. `src/gate.ts` —— 规则与触发条件\n\n**规则就一句**(文件头 :10-11):**agent 不自己调工具;它发起的每一次工具调用都必须放进一个 plan 里。** 落地字面量是 `PLAN_REQUIRED`(:123-127),拼上 `PLAN_TOOL`(`'refine_plan'`,tool.ts:45)后全文是:\"Do not call tools yourself — every call you make goes inside a plan. Either hand the work over as a plan with refine_plan … The plan runs in one round trip and returns every result together — or write the conclusion, which ends the turn.\"\n\n**触发条件**在 `ctx.tools.guard`(:225)挂载,判定函数 `planRefusal`(:164-192)按顺序判定:\n\n| 顺序 | 行 | 条件 | 结果 |\n|---|---|---|---|\n| 1 | :174 | `!appliesTo(sessionId)` | 会话已退出插件 → 放行 |\n| 2 | :175 | `!requirePlan` | 配置关 → 放行 |\n| 3 | :227 | `agent === undefined` | 非 agent 调用 → 放行 |\n| 4 | :231 | `!isModelCall(execution)` | plan内部嵌套调用 → 放行 |\n| 5 | :187 | `delegationDepth > 0` | 被委派的孩子 → 放行 |\n| 6 | :189 | `toolName === PLAN_TOOL` | 调用 `refine_plan` 本身 → 放行 |\n| 7 | :190 | `bumpBefore(sessionId) > planPullbacks` | 拉回次数超预算 → 放行 |\n| 8 | :191 | 以上都不命中 | **返回 `PLAN_REQUIRED` 拒绝** |\n\n\"是不是模型自己发的\"由 `isModelCall` 判定:`execution.rootCallId === execution.callId`(:148-150),plan 内部的调用 rootCallId ≠ callId,天然豁免。**没有正则、没有关键词匹配**,工具名判定是精确字符串相等。\n\n两个补充事实:`agent/pre-step` hook(:206)本身不拦截,只做计数重置(首步 `reset` 清拉回次数与计划记录,新用户消息 `resetRounds` 重置轮次预算);注释明确这是 **pullback 而不是 cage**(:18-20)——拦几次后放行,\"规则困住 agent 比被忽略更糟\"。`hasPlanned` 与 `maxRounds` 在 gate.ts 内**未被用于任何放行判定**,真正用它们的是 index.ts。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n**入口只有一个工具**:`ctx.tools.register(defineTool({ name: PLAN_TOOL, timeoutMs }))`(tool.ts:420-421),入参 schema 在 :432-494(criteria 必填 / more / nodes 必填,节点 kind 的 enum 就是 `['tools','subagent']`)。\n\n**执行链**:execute → `parsePlanArgs`(:526)→规模闸 `maxBatchSize`(:530)→ `onPlanStarted`(:536)→ **`runPlan()`**(:301-355):\n- `buildWaves(plan.nodes)` 分层,失败抛 \"the plan does not hold together: …\"(:313-316)\n- **逐层 `await Promise.all(wave.map(...))`**(:322-342):同层并发、层间串行\n- `tools` 节点 → `runBatch`(:206-215),调用前 `substitutePlaceholders(call.arguments, outputs)`(:204)\n- `subagent` 节点 → 见下\n- 收尾给出 `schedule: 'concurrent' | 'mixed' | 'serial'` 与按计划原序的 nodes(:344-354)\n\n`more: true` 时最多 `maxSlices` 轮,用 `MORE_SYSTEM`(:611-620)向**本对话自己的模型**问下一片,`parseNextSlice` 解析后再次 `runPlan`(:559-581);`onPlanFinished` 返回 true 则 `exec.concludeTurn()`(:584-586)。\n\n**子代理的限制**——不是本地 spawn,而是经工具注册表执行名为 `'subagent'` 的工具(:244-260):\n\n```ts\nrunner.execute({ callId, rootCallId, name: node.kind, arguments: {\n  description: node.id,\n  prompt: buildAgentPrompt(node, criteria, dependencies, ou"
+}

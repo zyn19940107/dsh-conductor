@@ -1,0 +1,43 @@
+{
+  "task": "coveragewide",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 388888,
+  "sessionId": "session-4b547a17-7c01-4258-8a8b-87d7cf7f7d6d",
+  "stderr": "custom-agent: tool \"reviewer\" registered provider=spawn allow=[read read_image grep glob]\ncustom-agent: 1/1 tools active\n",
+  "steps": 4,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 59676,
+    "outputTokens": 17666,
+    "cacheReadTokens": 102144,
+    "totalTokens": 179486
+  },
+  "formation": {
+    "agents": 3,
+    "input": 212661,
+    "output": 39734,
+    "cacheRead": 1375828,
+    "total": 1628223,
+    "steps": 32
+  },
+  "mainPrompt": 59973,
+  "correctness": {
+    "passed": 4,
+    "total": 5,
+    "missing": [
+      "行数最多的模块(632 行)(缺:632)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 25296,
+  "thinkingPreview": "The user wants a read-only inventory of test coverage for a plugin. The paths given: D:\\code\\vibe\\dsh-refine-loop\\verify (6 .spec.ts) and D:\\code\\vibe\\dsh-refine-loop\\src (8 .ts). Note the user's message has mangled backslashes: \"D:codeibedsh-refine-looperify\" — that's `D:\\code\\vibe\\dsh-refine-loop\\verify` and `D:\\code\\vibe\\dsh-refine-loop\\src`.\n\nLet me explore. This is read-only work. Let me use refine_plan or just direct tools. The instructions say the refined loop: one plan call carrying the whole shape of the turn. Let me think about what nodes.\n\nActually let me first do a quick glob to see what's there. But the guidance says \"You do not call tools yourself: every call you make goes inside a plan.\" Hmm, but that's for the refined loop. Let me just design a plan.\n\nPlan:\n- Node A (tools): glob for spec files and src files, plus line counts. Actually glob for `**/*.spec.ts` under verify",
+  "finalText": "盘点完成,全程只读(仅 `read`/`grep`/`glob`/行数统计,未写入、未运行任何构建或测试)。\n\n---\n\n## 1. `verify/` 下 6 个 spec 各自实际测什么\n\n先说个共性:这 6 个 spec **都不是测试框架**,而是一套手写脚本 —— 本地 `check(name, condition)` 断言函数 + 顶层 `await` + `console.log` + 失败时 `process.exit(1)`。没有 `describe/it`,`pnpm specs` 是 `verify/run-specs.mjs` 用 esbuild 打包后逐个进程跑。\n\n| spec | 行数 | 一句话说明它实际测的 | 主要调用的入口 |\n|---|---:|---|---|\n| `batch.spec.ts` | 166 | 用假 runner 记录每次调用的起止窗口,断言\"可并行的调用真的并行\"(窗口重叠、总耗时 < 300ms、结果保持计划顺序),工具自称 exclusive 时 schedule 变 `mixed` 且独占调用不与他人重叠,失败调用被报告而非抛出 | **`runBatch()`**(`src/batch.ts`) |\n| `concurrency.spec.ts` | 123 | 断言 `isReadOnlyCommand` 对 ~26 条命令串的判定(接受 ls/cat/grep/绝对路径/`find -name`/引号模式;拒绝 rm、npm install、node -e、重定向、链接 `&& | ;`、`$(pwd)`、反引号、`&`、echo、`find -exec/-delete`、`sort -o`、`tail -f`、空串、非字符串),以及 `mayRunTogether` 的三级优先级、`buildOverrides` 的覆盖生成,最后断言 exclusive 调用必须等前一个结束 | **`isReadOnlyCommand()`**(`src/concurrency.ts`) |\n| `gate.spec.ts` | 81 | 断言 agent 自己调工具会被拉回计划:直接调用返回 `PLAN_REQUIRED` 且文案含 `inside a plan`/`conclusion`,`refine_plan` 自身永不拦,拦满 2 次后放行(是拉回不是牢笼),会话 opt-out 或 `requirePlan=false` 时不拦,`PlanGate.reset()` 后计数归零重新拦 | **`planRefusal()`**(`src/gate.ts`) |\n| `plan.spec.ts` | 283 | 覆盖最全的一个:`parsePlanArgs` 的接收/拒绝分支(重复 id、未知 kind、tools 节点无 calls、subagent 节点无 task)、`@@占位符@@` 自动生成隐式依赖边、`buildWaves` 的分层(平铺 1 层/依赖 2 层/链 3 层)与环/缺依赖/自依赖报错、`substitutePlaceholders` 的整参数与行内替换及不可解析时抛错、`runPlan` 两层三节点 `mixed` 且把依赖输出注入 fork 子提示词、`renderPlan` 的结尾文案、子代理里计划被拒、超 120ms 预算节点失败 | **`parsePlanArgs()`**(`src/plan.ts`;另直接调 `buildWaves()`/`substitutePlaceholders()`,并经 `runPlan()`/`renderPlan()` 覆盖 `src/tool.ts`) |\n| `refine.spec.ts` | 81 | 实际只测两个窄解析器:`parseBatchArgs` 保留 criteria/调用顺序/参数并拒绝各类畸形输入 + trim criteria;`parsePolicyCommand` 认 `on`/`off` 而忽略别的插件命令/无模式/不在首行/普通消息;`renderBatch` 输出含 criteria、条目名、失败文案且不含 `conclusion` | **`parseBatchArgs()`**(`src/batch.ts`;另调 `parsePolicyCommand()` 来自 `src/policy.ts`) |\n| `repair.spec.ts` | 162 | 测\"失败调用怎么被模型修好\":失败调用只被修一次(模型被问 1 次,第一次用计划的 `limit:'5'`、第二次用修好的 `limit:5`,最终 ok=true),成功的调用一次都不问模型,修不出可用结果就停并保留工具原始错误;`parseRepair` 读纯 JSON、容忍 JSON 前后散文、拒绝垃圾和 `arguments` 为数组 | **`runBatch()`** 的 repair 回调路径(`src/batch.ts`),并直接调 **`parseRepair()`**(`src/repair.ts`) |\n\n两个必须点名的问题:\n\n- **`repair.spec.ts` 从来没被执行过。** `verify/run-specs.mjs:21` 硬编码了列表:\n  ```js\n  const specs = ['refine.spec.ts', 'batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'gate.spec.ts']\n  ```\n  6 个 spec 里跑 5 个。`src/repair.ts` 在 CI 里的真实覆盖是 **0**。\n- **`refine.spec.ts` 名不符实。** 它的文件头写着 \"Regression tests for the plan, the chain detector, and the per-conversation switch\",但 plan 和 chain detector 两项根本没测 —— 名字像插件级 spec,实际是两个解析器。\n\n另外 `verify/` 里还有 5 个非 spec 文件:`_probe.ts`(27)、`_probe2.ts`(71,还在读旧版 `PlanNode` 的 `files` 字段,已过期)、`run-specs.mjs`(48)、`dump-sandbox-log.mjs`(56)、`dump-sandbox-turn.mjs`(26)。\n\n---\n\n## 2. `src/` 8 个模块中哪些没有对应 spec\n\n| 模块 | 行数 | 被哪个 spec 碰到 | 缺口 |\n|---|---:|---|---|\n| `src/index.ts` | 444 | **无**(只有 `_probe.ts` 引过 `Config`,而它不是 spec) | **整个模块零覆盖**:`Config` 的 zod schema、13 个 `DEFAULT_*`、`REFINE_GUIDANCE`/`CHILD_GUIDANCE`、`apply()` 里的 `{{` 守卫和 `enabled=false` 早退 |\n| `src/tool.ts` | 638 | `plan.spec.ts` | `applyPlanTool()` 全无覆盖:`defineTool` 注册、`execute`、`more` 切片循环、`onPlanStarted/onPlanFinished` |\n| `src/plan.ts` | 363 | `plan.spec.ts` | `parseNextSlice()`、`collectPlaceholders()`、`dependenciesOf()` 未见直接断言 |\n| `src/batch.ts` | 353 | 4 个 spec | 相对最全;`runBatch` 的 `rootCallId` 透传、批次超时无覆盖 |\n| `src/gate.ts` | 256 | `gate.spec.ts` | `applyPlanGate()`、`isModelCall()`、`markPlanned/bumpRound/roundsUsed/resetRounds` 无覆盖 |\n| `src/policy.ts` | 241 | `refine.spec.ts` | 只测了 `parsePolicyCommand`;`runPolicyCommand`、`SessionPolicy`、`policyConfirmation`、`applyPolicyCommand`、`applyPolicyMessage` 全无覆盖 |\n| `src/concurrency.ts` | 234 | `concurrency.spec.ts` | 覆盖最好 |\n| `src/repair.ts` | 172 | `repair.spec.ts`(但**不执行**) | `askForRepair`、`repairSystem`、`describeFailure`、`collectText` 无覆盖 |\n\n**直接回答:完全没有对应 spec 的只有 `src/index.ts`(444 行)**;另有 6 个模块\"有 spec 但覆盖不全\",其中 `src/repair.ts` 因为 spec 没进 runner,实际等同零覆盖。\n\n顺带一个系"
+}

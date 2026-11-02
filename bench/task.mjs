@@ -12,12 +12,12 @@
  * survives being published.
  */
 
-import { BIGREAD, COVERAGE, DISCOVERY, FANOUT, MULTIHOP, SWEEP } from './scenarios.mjs'
+import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, MULTIHOP, SWEEP } from './scenarios.mjs'
 
 /**
  * The scenario tasks that say where the plugin helps and where it does not.
  */
-const SCENARIOS = { discovery: DISCOVERY, fanout: FANOUT, multihop: MULTIHOP, coverage: COVERAGE, sweep: SWEEP, bigread: BIGREAD }
+const SCENARIOS = { discovery: DISCOVERY, fanout: FANOUT, multihop: MULTIHOP, coverage: COVERAGE, coveragewide: COVERAGEWIDE, sweep: SWEEP, bigread: BIGREAD }
 
 /**
  * The plugin health check: independent lookups, one synthesis.

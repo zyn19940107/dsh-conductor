@@ -197,3 +197,31 @@ export const BIGREAD = {
     { what: 'tools/index 的主要导出', needles: ['tooldefinition'] },
   ]),
 }
+
+/**
+ * The same audit asked as a chore: read all 14 files and describe each one.
+ *
+ * Kept next to {@link COVERAGE} because the difference between them is the
+ * point: the same facts, asked as a reading list instead of as questions, and
+ * the two conditions respond to that differently.
+ */
+export const COVERAGEWIDE = {
+  text: [
+    '对这个插件的测试覆盖做一次盘点,只读不改:',
+    '',
+    '1. 读 D:\code\vibe\dsh-refine-loop\verify 下全部 6 个 .spec.ts,每个用一句话说明它实际测的是什么,',
+    '   注明它主要调用的那个函数/入口的名字。',
+    '2. 读 D:\code\vibe\dsh-refine-loop\src 下全部 8 个 .ts,判断哪些模块没有对应的 spec。',
+    '3. 行数最多的那个模块是哪个?多少行?',
+    '4. 给出补测优先级:先补哪个,为什么(一句话)。',
+    '',
+    '只读不改。不要修改任何文件。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'tool.ts'] },
+    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts'] },
+    { what: 'concurrency.spec 测的入口', needles: ['isreadonlycommand'] },
+    { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
+    { what: '行数最多的模块(632 行)', needles: ['632'] },
+  ]),
+}
