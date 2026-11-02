@@ -79,7 +79,7 @@ export const FANOUT = {
     '分别读下面五个文件的第一行,把每个文件的第一行原样列出来:',
     '',
     '1. D:\\code\\vibe\\dsh-refine-loop\\src\\plan.ts',
-    '2. D:\\code\\vibe\\dsh-refine-loop\\src\\gate.ts',
+    '2. D:\\code\\vibe\\dsh-refine-loop\\src\\rounds.ts',
     '3. D:\\code\\vibe\\dsh-refine-loop\\src\\batch.ts',
     '4. D:\\code\\vibe\\dsh-refine-loop\\src\\repair.ts',
     '5. D:\\code\\vibe\\dsh-refine-loop\\src\\tool.ts',
