@@ -67,7 +67,10 @@ export const REFINE_GUIDANCE = [
   '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
   + 'with its own context), "subagent_fork" (a child agent that starts with this conversation).',
   '- What you have already read is already inside a "subagent_fork": the files, the greps, the results. A '
-  + '"subagent" starts empty and reads them again itself.',
+  + '"subagent" starts empty and reads them again itself. When a child is born after you have looked around, '
+  + '"subagent_fork" is the kind that is already holding what it needs.',
+  '- Delegation happens inside the plan: a child is a node of the graph, under the plan's budget. The '
+  + 'harness's direct delegation tools are not the way in from here.',
   '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
   + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
   + 'node, and counts as a dependency too.',
