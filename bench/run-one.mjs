@@ -52,7 +52,7 @@ async function run() {
     '--expose-internals',
     CLI,
     '--profile',
-    'headless',
+    'bench',
   ]
   // `--patch` has to come before `--json`: the launcher's option parser stops
   // reading options once the positional task argument starts, and a patch
