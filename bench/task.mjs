@@ -67,7 +67,7 @@ export const CHAIN = {
  */
 export const REVIEW = {
   text: [
-    '分别独立审查 D:\code\vibe\dsh-refine-loop 的三个部分,每部分给出结论:',
+    '分别独立审查 D:\\code\\vibe\\dsh-refine-loop 的三个部分,每部分给出结论:',
     '',
     '1. src/plan.ts —— 计划的数据结构长什么样?节点有哪几种?调用参数是怎么处理的?',
     '2. src/gate.ts —— 这个插件的那条规则是什么?它的触发条件是什么?',
