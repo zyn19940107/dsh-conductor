@@ -1,0 +1,49 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 59209,
+  "timedOut": false,
+  "sessionId": "session-1b252652-76c9-49bf-a8e6-7341c8451d60",
+  "stderr": "",
+  "steps": 6,
+  "toolCalls": 7,
+  "tools": [
+    "pwsh",
+    "glob",
+    "pwsh",
+    "glob",
+    "pwsh",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 43840,
+    "outputTokens": 6507,
+    "cacheReadTokens": 81024,
+    "totalTokens": 131371
+  },
+  "formation": {
+    "agents": 1,
+    "input": 43840,
+    "output": 6507,
+    "cacheRead": 81024,
+    "total": 131371,
+    "steps": 6
+  },
+  "mainPrompt": 43181,
+  "correctness": {
+    "passed": 4,
+    "total": 5,
+    "missing": [
+      "行数最多的模块(tool.ts 562 行)(缺:562)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 13576,
+  "thinkingPreview": "The user asks about a path \"D:codeibedsh-refine-loop\" — this looks like \"D:\\code\\ibed\\sh-refine-loop\" with some characters stripped (probably `D:\\code\\ibed\\sh-refine-loop\\verify` and `D:\\code\\ibed\\sh-refine-loop\\src`). The text has vertical tabs or something. Let me explore.\n\nWorking directory is D:\\code\\vibe. Let me find the actual directory.\n\nLet me start with tool calls to find the directory. I'll use glob or pwsh to list D:\\code.\n\nNote the instruction: read-only, don't modify anything.\n\nLet me plan: First, discover the directory structure. Use pwsh to list D:\\code recursively maybe limited.\n\nLet's do a first round with tools nodes:\n- node \"list\": pwsh list D:\\code directories to find the refine-loop path\n- Actually I can just run one pwsh command to explore.\n\nLet me be careful about the odd path \"ibedsh-refine-loop\" — probably \"ibed\\sh-refine-loop\" where backslash + \"sh-refine-loop\".",
+  "finalText": "路径修正：实际项目在 `D:\\code\\vibe\\dsh-refine-loop`（`ibedsh` 是路径字符被吞了）。以下全部只读，未改动任何文件。\n\n## 1. `verify/` 下 7 个 .spec.ts 实际测的入口函数\n\n| spec | 真实 import 的入口 | 源码位置 |\n|---|---|---|\n| `batch.spec.ts` (166行) | **`runBatch`**（+ `BatchRunner` 类型） | `src/batch.ts:279` |\n| `concurrency.spec.ts` (123行) | **`isReadOnlyCommand` / `mayRunTogether` / `buildOverrides`**，外加 `runBatch` 一次（验证批次内顺序） | `src/concurrency.ts:138 / 222 / 195` |\n| `fork.spec.ts` (122行) | **`buildSeedFromNow` / `openTurnClosers`**（+ `SessionEventLike`） | `src/fork.ts:230 / 180` |\n| `plan.spec.ts` (353行) | **`runPlan` / `renderPlan`**（来自 `tool.js`）+ **`parsePlanArgs` / `buildGroups` / `WORKER_MARKER`**（来自 `plan.js`） | `src/tool.ts:354 / 401`，`src/plan.ts:115 / 190` |\n| `refine.spec.ts` (81行) | **`parseBatchArgs` / `renderBatch`**（`batch.js`）+ **`parsePolicyCommand`**（`policy.js`）——注意**没有 `src/refine.ts` 这个模块** | `src/batch.ts:95 / 360`，`src/policy.ts:145` |\n| `repair.spec.ts` (162行) | **`runBatch` 的修复分支**（传 repair hook）+ **`parseRepair`** | `src/repair.ts:139` |\n| `rounds.spec.ts` (169行) | **`Rounds` / `Workers` 两个类** + **`applyTurnDoctrine` / `applyWorkerRule` / `isWorkerConversation`** + 常量 `NEXT_ROUND` / `ROUND_LOOP` / `WORKER_NO_PLAN` | `src/rounds.ts:77 / 218 / 183 / 290 / 253` |\n\n⚠️ 顺带一个发现：`verify/run-specs.mjs:21` 的 specs 列表只有 6 个 —— `['refine','batch','concurrency','plan','rounds','fork']`，**`repair.spec.ts` 不在里面，跑 `node verify/run-specs.mjs` 时它根本不会执行**。\n\n## 2. 没有对应 spec 的模块\n\n`src/` 下共 9 个 .ts，其中 `index.ts` 是插件入口（`apply` / `Config` / 默认值），你说的 8 个模块即其余 8 个。有同名 spec 的 6 个：`batch` `concurrency` `fork` `plan` `repair` `rounds`。\n\n**没有对应 spec 的是两个：**\n\n- **`policy.ts`** —— 无 `policy.spec.ts`。仅在 `refine.spec.ts` 里被测了 `parsePolicyCommand` 一个函数；`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全无测试。\n- **`tool.ts`** —— 无 `tool.spec.ts`。仅在 `plan.spec.ts` 里被测了 `runPlan` / `renderPlan`；`applyPlanTool`（真正注册工具的入口）、`PLAN_TOOL`、`PlanForkOptions` 无测试。\n\n另外两处不对称：**`refine.spec.ts` 没有对应的 `src/refine.ts` 模块**（它测的是 batch + policy）；`index.ts` 也没有任何 spec（不在 8 个之列，但同样是零覆盖）。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，620 行**（含空行；非空行 599）。\n\n8 个模块完整行数（含空行）：\n\n| 模块 | 行数 |\n|---|---|\n| **tool.ts** | **620** |\n| rounds.ts | 384 |\n| batch.ts | 375 |\n| fork.ts | 372 |\n| policy.ts | 241 |\n| concurrency.ts | 234 |\n| plan.ts | 215 |\n| repair.ts | 173 |\n\n若把 `index.ts`（329 行）也算进去，结论不变，仍是 `tool.ts` 最多。\n\n（行数用 `Get-Content .Count` 与 `File.ReadAllLines().Length` 两种方式交叉验证，两者一致；早先 `Measure-Object -Line` 得到的数值偏小，因为它跳过空行。）"
+}

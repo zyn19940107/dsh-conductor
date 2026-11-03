@@ -1,0 +1,49 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 86392,
+  "timedOut": false,
+  "sessionId": "session-e254ba3b-e32f-46c2-a5af-5230b2cccda6",
+  "stderr": "",
+  "steps": 7,
+  "toolCalls": 9,
+  "tools": [
+    "glob",
+    "read",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "refine_plan",
+    "read",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 40686,
+    "outputTokens": 9664,
+    "cacheReadTokens": 166813,
+    "totalTokens": 217163
+  },
+  "formation": {
+    "agents": 4,
+    "input": 138035,
+    "output": 29584,
+    "cacheRead": 712696,
+    "total": 880315,
+    "steps": 29
+  },
+  "mainPrompt": 53216,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 16403,
+  "thinkingPreview": "The glob returned node_modules noise. Let me list the src directory specifically and read the other files.\n\nLet me look at the project structure excluding node_modules.\nNow I need to find the \"强制的那条规则\" — the forced rule. Likely in policy.ts (a rule about the turn doctrine — every turn must hand over a plan via refine_plan). Let me read policy.ts, index.ts, rounds.ts, fork.ts.\n\nLet me read themin parallel.\nNow I need rounds.ts, which contains the rule (applyRounds, applyTurnDoctrine, applyJudgementGuard, applyWorkerRule, applyDelegationRule). The \"forced rule\" is \"a turn is one plan\" — the first call of a turn is the plan, and after the plan has run the turn is over.\n\nLet me read rounds.ts, fork.ts, concurrency.ts, batch.ts.\n\nThe question asks about three parts:\n1. src/plan.ts — data structure, node kinds, how call arguments are handled.\n2. The forced rule — what is it, how implemented, t",
+  "finalText": "三份源码已交叉验证完毕（`plan.ts` / `tool.ts` / `rounds.ts` / `batch.ts` / `fork.ts` / `policy.ts` / `index.ts`），未修改任何文件。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构、节点种类、调用参数处理\n\n**数据结构**（两层、纯数据）：\n\n- `PlanArgs = { criteria: string[]; nodes: PlanNode[] }`（plan.ts:87-92）\n- `PlanNode = { id, kind, calls: PlanToolCall[], task: string, order: PlanNodeOrder, writes: string[] }`（plan.ts:71-84）——六个字段恒存在，按 `kind` 归一化：`tools` 节点 `task`置空串，agent 节点 `calls` 置空数组（plan.ts:160、166）\n- `PlanToolCall = { name: string; arguments: unknown }`（plan.ts:63-68）\n\n**四种节点**（plan.ts:24），区分点是两个正交维度——**是否继承对话** × **是否自己画计划**：\n\n| kind | 继承对话 | 自己画计划 | 宿主工具（plan.ts:46-50） |\n|---|---|---|---|\n| `tools` | — | — | 批量子调用 |\n| `worker` | 是 | 否 | `subagent_fork` |\n| `spawner` | 否（空白起步） | 是 | `subagent` |\n| `forker` | 是 | 是 | `subagent_fork` |\n\n`AGENT_NODE_KINDS = ['worker','spawner','forker']`（plan.ts:27）标出后三种才是「起一个 agent」；`NODE_AGENT_TOOL` 里 worker 与 forker 共用同一工具——kind 描述子代理行为，工具只描述启动方式。\n\n**调用参数的处理**：参数是插件**唯一不预检**的部分。\n- 解析期只做两件事：`name` 必须是非空字符串并被 trim；`arguments` **原样透传**，仅把 `undefined` 换成 `{}`，`null` 保留（plan.ts:151-159）。不校验、不转换、不深拷贝，调用对象的未知字段被忽略。\n- 形状由目标工具的 schema 决定——工具参数里 `arguments` 声明为 `type: 'json'`（tool.ts:510），调用对象 `additionalProperties: false`（tool.ts:507）。\n- 透传链：plan.ts → tool.ts:218-221 → batch.ts:233-240 `runner.execute({ name, arguments })`，每个调用拿唯一 `callId`、共享计划自己的 `rootCallId`。\n- **参数还参与调度**：`runner.executionMode({ name, arguments })` 与 `mayRunTogether(call.name, call.arguments, ...)`（batch.ts:309-317）——例如 shell 是否只读，是按命令参数本身判的。\n- **参数可以被改写**：失败调用送去问模型修复，`name` 和 `arguments` 一起被替换（batch.ts:252-257），`MAX_REPAIRS=2` 即最多 3 次尝试（batch.ts:197、228）。\n- `writes` 只用于分组，不参与执行：两个节点写同一文件则不并组（plan.ts:190-215）；不声明 `writes` 的节点按声明信任处理（plan.ts:207-208）。\n- 校验的拒绝面：criteria/nodes 非数组、criteria 去空后为空、id 空或重复、kind 非法、`tools` 节点无 calls、agent 节点 task 为空——**空计划合法**（plan.ts:168-172），是「无事可做」的合法交出。\n\n## 2. 强制的那条规则\n\n**规则本身**：**「一个回合 = 一个计划」**。回合的工作必须一次性以 `refine_plan` 交出；计划跑完之后，回合只剩两个出口——写结论，或交下一个计划。直接的工具调用被拒绝。附带一条：**委派必须发生在计划内部**，不能直接调 harness 的委派工具。\n\n**硬实现**（三处 `ctx.tools.guard` / 重注册，全在 rounds.ts）：\n\n1. **`applyJudgementGuard`**（rounds.ts:375-384）——核心。命中即返回 `JUDGE_ONLY` 文本拒绝该调用。\n2. **`applyDelegationRule`**（rounds.ts:312-338）——把 `subagent`/`subagent_fork` 重新注册，`execute` 里 `if (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)`（rounds.ts:331）；嵌套在计划下的同名调用原样放行。另外 `list_agents`/`send_message`/`interrupt_agent` 在 `agent/created` 时直接从模型视野里隐藏（rounds.ts:313-314、68-72）。\n3. **`applyWorkerRule`**（rounds.ts:290-299）——worker 会话里调用 `refine_plan` 返回 `WORKER_NO_PLAN`。工具**故意留在工具表里**：拿走会改请求头、破坏继承前缀的缓存命中，所以改成「调用处拒绝」（rounds.ts:270-276、fork.ts:325-328）。\n\n**触发条件**（judgement guard 全部满足才拒）：有 agent；调用是**模型直接发起**的（`callId === rootCallId`，rounds.ts:359-364）；工具名不是 `refine_plan`；且**本次请求已经跑过计划**（`plans.waiting(sessionId) === false`）。\n\n标志位的生命周期：`applyRounds` 在每条 user 消息到来时 `plans.expect(sessionId)`（rounds.ts:161-173）；计划工具 `execute` 末尾经 `onPlanFinished` → `plans.done(sessionId)`（index.ts:266、tool.ts:608）清除。因此**一个请求里只要跑过一次计划，后续所有回合的直接工具调用都被封死**，直到下一个请求重置。\n\n**触发条件的缺口（值得注意）**：规则宣称的另一半——「回合的第一个调用必须是计划」——**只有软约束**。`plans.waiting` 为 true 时 guard 主动让路（rounds.ts:381），直接调工具是允许的；这时靠的是 `applyTurnDoctrine` 在第 1 步末尾注入 `ROUND_LOOP` 消息（rounds.ts:183-207）和系统提示里的 `REFINE_GUIDANCE`（index.ts:54-79、231-243）。**「第一个调用是计划」没有被代码强制，只被教条告知。**\n\n**豁免**：worker 会话（`workers.has()` 或从消息里的 `WORKER_MARKER` 识别，rounds.ts:194、253-265）不受 judgement guard 管辖（其首条消息是 user 源，fork.ts:337-340，会触发 `plans.expect`），但被 worker rule 禁止画计划；spawner/forker 故意不标记，它们正是要走这条循环的；`/dsh-refine-loop off`（policy.ts:68-74）把计划工具从该会话作用域里 `restrict` 掉，工具不可达 → `plans.done()` 永不触发 → guard 全程敞开，同时系统提示里的指引也随之消失（index.ts:242）；空计划是合法的收尾；轮数上限 `maxRounds=16`（index.ts:164）后回合直接结束等人工。\n\n## 3. `src/tool.ts` —— 计划怎么跑起来 / 子代理受什么限制\n\n**跑起来的链路**：`refine_plan` 是插件唯一工具（tool.ts:46、426-614、index.ts:245）。`execute`（tool.ts:567-612）依次：解析失败直接抛错（568-571）→ 节点数超 `maxBatchSize`（默认 8）抛错（572-576）→ `onPlanStarted` → 从会话自己的请求头取 LLM 配置做修复（581-584）→ 组装 fork 通道（587-592）→ `runPlan`（593-605）→ `onPlanFinished` 为真则"
+}

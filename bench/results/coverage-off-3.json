@@ -1,0 +1,66 @@
+{
+  "task": "coverage",
+  "condition": "off",
+  "index": 3,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 41043,
+  "timedOut": false,
+  "sessionId": "session-e014a988-6985-4142-a6f1-ba6fc40947e2",
+  "stderr": "",
+  "steps": 11,
+  "toolCalls": 24,
+  "tools": [
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "grep",
+    "grep",
+    "grep",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 34940,
+    "outputTokens": 7070,
+    "cacheReadTokens": 288153,
+    "totalTokens": 330163
+  },
+  "formation": {
+    "agents": 1,
+    "input": 34940,
+    "output": 7070,
+    "cacheRead": 288153,
+    "total": 330163,
+    "steps": 11
+  },
+  "mainPrompt": 44441,
+  "correctness": {
+    "passed": 4,
+    "total": 5,
+    "missing": [
+      "行数最多的模块(tool.ts 562 行)(缺:562)"
+    ]
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 17841,
+  "thinkingPreview": "Let me explore the directories. The paths given: D:\\code\\vibedsh-refine-loop\\verify — hmm, likely \"D:\\code\\vibe\\dsh-refine-loop\\verify\"? The text shows \"D:codeibedsh-refine-looperify\" which seems to be \"D:\\code\\vibe\\dsh-refine-loop\\verify\" with backslashes and some chars dropped. Actually \"D:code\" + \"ibedsh-refine-loop\" ... Let me think: original probably \"D:\\code\\vibe\\dsh-refine-loop\\verify\". The escape sequences: `\\v` → vertical tab, `\\e` → escape, `\\v` → vertical tab... In the displayed text: \"D:codeibedsh-refine-looperify\" = \"D:code\" + \"\\v\" removed + \"ibe\" + \"\\d\" removed... hmm \"\\d\" isn't an escape. Let's decode: \"D:\\code\\vibe\\dsh-refine-loop\\verify\" with escapes: D:code + \\v (VT, maybe dropped/control) + ibe + \\d → \"d\" literal in JS but Python keeps \\d... Anyway, it's D:\\code\\vibe\\dsh-refine-loop\\verify.\n\nSecond: \"D:codeibedsh-refine-loopsrc\" = D:\\code\\vibe\\dsh-refine-loop\\src.\n\nLet",
+  "finalText": "全程只读（`read`/`glob`/`grep` + 只读的 `Get-Content` 计数），未修改任何文件。\n\n---\n\n## 1. `verify/` 下每个 spec实际测的入口函数\n\n| spec | 实际调用的入口函数 | 来自 |\n|---|---|---|\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch` | `src/batch.ts` |\n| | `parsePolicyCommand` | `src/policy.ts` |\n| `batch.spec.ts` | `runBatch`（注入假 `BatchRunner`，测并发/独占/失败不抛） | `src/batch.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides` | `src/concurrency.ts` |\n| | `runBatch`（只测\"计划顺序 vs 独占串行\"） | `src/batch.ts` |\n| `plan.spec.ts` | `parsePlanArgs`、`buildGroups`（+ `WORKER_MARKER`） | `src/plan.ts` |\n| | `runPlan`、`renderPlan` | `src/tool.ts` |\n| `rounds.spec.ts` | `Rounds`、`Workers`、`applyTurnDoctrine`、`applyWorkerRule`、`isWorkerConversation`，常量 `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN` | `src/rounds.ts` |\n| | `WORKER_MARKER` | `src/plan.ts` |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers` | `src/fork.ts` |\n| `repair.spec.ts` | `runBatch`（走修复分支） | `src/batch.ts` |\n| | `parseRepair` | `src/repair.ts` |\n\n三个值得注意的点：\n\n- **文件名和实际内容对不上**：`refine.spec.ts` 没有\"refine\"模块，它测的是 batch 的解析/渲染 + policy 命令解析；`plan.spec.ts` 主体测的是 `tool.ts` 的 `runPlan`/`renderPlan`；`fork.spec.ts` 只测种子构造，没测 `spawnForkedChild`。\n- **`repair.spec.ts` 存在但没被跑到**：`verify/run-specs.mjs:21` 的列表是 `['refine','batch','concurrency','plan','rounds','fork']` —— 缺 `repair.spec.ts`，所以 `pnpm specs` 根本不执行它。\n- import 后缀不统一：`fork.ts`/`rounds.ts` 用 `../src/xxx.ts`，其余用 `../src/xxx.js`（esbuild 都能解析，只是风格不一致）。\n\n---\n\n## 2. `src/` 下没有对应 spec 的模块\n\n先纠正一个前提：`src/` 下实际有 **9 个 `.ts` 文件**，不是 8 个。把 `index.ts`（插件入口/装配层）算作\"入口\"的话，\"8 个模块\"就是下面这 8 个 —— **它们每一个都有对应 spec**：\n\n| 模块 | 对应 spec |\n|---|---|\n| `batch.ts` | `batch.spec.ts`（+ refine/repair/concurrency 都借它） |\n| `concurrency.ts` | `concurrency.spec.ts` |\n| `fork.ts` | `fork.spec.ts` |\n| `plan.ts` | `plan.spec.ts`（+ `rounds.spec.ts` 取 `WORKER_MARKER`） |\n| `policy.ts` | `refine.spec.ts` |\n| `repair.ts` | `repair.spec.ts`（但未接进 runner） |\n| `rounds.ts` | `rounds.spec.ts` |\n| `tool.ts` | `plan.spec.ts` |\n\n**唯一零 spec 覆盖的文件是 `src/index.ts`** ——没有任何 spec import 它，`apply()`、`REFINE_GUIDANCE`、`Config`、默认常量、`repairFailedCall` 全部没有测试。\n\n按\"导出符号\"粒度看，各模块未覆盖的部分：\n\n- `index.ts`：`apply`、`REFINE_GUIDANCE`、`Config`、全部 `DEFAULT_*` — 0 覆盖\n- `tool.ts`：`applyPlanTool`（工具注册本身）未测；`runPlan`/`renderPlan` 已测\n- `fork.ts`：`spawnForkedChild` 未测\n- `repair.ts`：只有 `parseRepair` 被测，`askForRepair`/`repairSystem`/`describeFailure`/`collectText` 未测\n- `policy.ts`：只有 `parsePolicyCommand` 被测，`runPolicyCommand`/`policyConfirmation`/`applyPolicyMessage`/`applyPolicyCommand` 未测\n- `rounds.ts`：`applyRounds`、`applyJudgementGuard`、`applyDelegationRule`、`Plans`、`JUDGE_ONLY` 未测\n- `concurrency.ts`、`plan.ts`、`batch.ts`：导出函数全覆盖\n\n---\n\n## 3. 行数最多的模块\n\n**`src/tool.ts` —— 620 行**（含空行；非空行 599 行，22.7 KB）。\n\n全量排名：\n\n```\ntool.ts        620   ←最多\nrounds.ts      384\nbatch.ts       375\nfork.ts        372\nindex.ts       329\npolicy.ts      241\nconcurrency.ts 234\nplan.ts        215\nrepair.ts      173\n```\n\n即使把 `index.ts` 排除、只在\"8 个模块\"里比，`tool.ts` 仍然是第一。"
+}
