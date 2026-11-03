@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyDelegationRule, applyJudgementGuard, applyRounds, applyTurnDoctrine, NEXT_ROUND, Plans, Rounds, Workers } from './rounds.js'
+import { applyDelegationRule, applyJudgementGuard, applyRounds, applyTurnDoctrine, applyWorkerRule, NEXT_ROUND, Plans, Rounds, Workers } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -64,9 +64,13 @@ export const REFINE_GUIDANCE = [
   '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
   + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
   + '"order": "sequential", or a worker.',
+  '- A "worker" or a "forker" already sees this conversation, including what you have read so far, so its '
+  + 'task says what to do; only a "spawner" starts empty and needs the context in its task.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
-  '- Write the tool calls of a node with absolute paths. A plan is written before anything has run, so a '
-  + 'relative path is a guess.',
+  '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
+  + 'tools resolve them there.',
+  '- Keep each node task to one sentence and the criteria to one or two: they decide the round, they are '
+  + 'not a report.',
   '- The plan runs in one round trip and every result comes back together. A result may be too long to fit '
   + 'and be left out of what you see — the rest is in the spill file.',
 ].join('\n')
@@ -274,6 +278,7 @@ export function apply(ctx: Context, config: Config): void {
   applyTurnDoctrine(ctx, workers)
   applyRounds(ctx, rounds, plans)
   applyJudgementGuard(ctx, plans)
+  applyWorkerRule(ctx, workers)
   applyDelegationRule(ctx)
 
   applyPolicyCommand(ctx, policy)

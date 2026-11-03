@@ -288,10 +288,6 @@ export async function spawnForkedChild(
   parent: Agent,
   prompt: string,
   options: {
-    /** The plan tool name, denied for a child that must not plan. */
-    planTool: string
-    /** Whether this child plans. */
-    plans: boolean
     /** The child's budget, in milliseconds. */
     timeoutMs: number
     /** The signal that cancels the child. */
@@ -326,10 +322,10 @@ export async function spawnForkedChild(
         delegationDepth: depth,
       },
       ...(seed.length > 0 ? { seed, inheritedEventCount: seed.length } : {}),
+      // No tool restriction: the child's request header must match the parent's
+      // for the inherited prefix to hit the cache. A worker that must not plan
+      // is refused where it calls the plan tool instead (see applyWorkerRule).
       ...(parent.options === undefined ? {} : { agentOptions: parent.options }),
-      setup: (agentCtx: { tools: { restrict: (filter: { deny: string[] }) => unknown } }) => {
-        if (!options.plans) agentCtx.tools.restrict({ deny: [options.planTool] })
-      },
     })
   } catch (error: unknown) {
     return { output: '', error: error instanceof Error ? error.message : String(error) }

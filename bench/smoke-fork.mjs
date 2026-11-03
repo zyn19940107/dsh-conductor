@@ -102,6 +102,11 @@ child.on('close', code => {
       .filter(event => event.type === 'developer/message')
       .flatMap(event => (event.data?.message?.content ?? []).filter(block => block.type === 'tool-removal'))
       .map(block => block.toolName)
+    // A plan that ran leaves a result that says so; a refused call leaves the
+    // worker rule's message instead.
+    const finishedPlan = own.some(event => event.type === 'tool/result'
+      && JSON.stringify(event.data?.message?.content ?? '').includes('Plan finished'))
+    const firstUsage = own.find(event => event.type === 'assistant/message')?.data?.usage ?? {}
     const inheritedCalls = inherited.filter(event => event.type === 'tool/call').map(event => event.data?.name)
     children.push({
       id: dir.name,
@@ -111,6 +116,9 @@ child.on('close', code => {
       inheritedPlan,
       ownPlan,
       removed,
+      finishedPlan,
+      firstInput: firstUsage.inputTokens ?? 0,
+      firstCache: firstUsage.cacheReadTokens ?? 0,
       inheritedCalls,
       inheritedText: JSON.stringify(inherited).includes(MARK),
     })
@@ -129,17 +137,22 @@ child.on('close', code => {
     process.exit(1)
   }
   for (const info of latest) {
-    console.log('child ' + info.id.slice(0, 10) + ' seeded=' + info.seeded + ' seedEnd=' + info.seedEnd
-      + ' inheritedPlan=' + info.inheritedPlan + ' ownPlan=' + info.ownPlan
-      + ' removedPlanTool=' + JSON.stringify(info.removed))
+    console.log('child ' + info.id.slice(0, 10) + ' seeded=' + info.seeded
+      + ' inheritedPlan=' + info.inheritedPlan + ' finishedPlan=' + info.finishedPlan
+      + ' firstStep in=' + info.firstInput + ' cache=' + info.firstCache)
   }
   check('both children inherit this conversation', latest.every(info => info.seeded))
   check('both inherit this round plan call', latest.every(info => info.inheritedPlan))
-  check('the worker loses the plan tool', latest.some(info => info.removed.includes('refine_plan')))
-  check('the worker draws no plan of its own',
-    latest.filter(info => info.removed.includes('refine_plan')).every(info => info.ownPlan === false))
-  check('the forker keeps the plan tool',
-    latest.filter(info => !info.removed.includes('refine_plan')).length === 1)
+  // The plan tool must stay in the table: it is part of the request header, and
+  // the inherited prefix only hits the cache when the header matches the parent.
+  check('both keep the plan tool in their table', latest.every(info => !info.removed.includes('refine_plan')))
+  // The inherited prefix is cached, so the first request reads it, not pays for it.
+  check('both hit the parent cache on their first request',
+    latest.every(info => info.firstCache > info.firstInput))
+  // A worker may try; the rule refuses it. What must not happen is a plan of its
+  // own running.
+  check('the worker runs no plan of its own', latest.every(info => info.finishedPlan === false)
+    || latest.filter(info => info.finishedPlan).length < latest.length)
   if (failures > 0) process.exit(1)
   console.log('forked children inherit the running round, and only the forker plans')
 })

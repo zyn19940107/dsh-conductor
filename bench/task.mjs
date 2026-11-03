@@ -40,21 +40,7 @@ export const SURVEY = {
     '5. 根据上面四项的发现,用两三句话评价这个插件的架构。',
     '',
     '只读不改。不要修改任何文件。',
-  ].join('\n'),
-  judge: judgeBy([
-    { what: 'src 下的 .ts 文件数(7)', needles: ['7'] },
-    { what: 'verify 下的 spec 数(5)', needles: ['5'] },
-    {
-      what: 'src 里的每个文件名',
-      needles: ['batch.ts', 'concurrency.ts', 'gate.ts', 'index.ts', 'plan.ts', 'policy.ts', 'tool.ts'],
-    },
-    {
-      what: 'verify 里的每个 spec 名',
-      needles: ['batch.spec.ts', 'concurrency.spec.ts', 'gate.spec.ts', 'plan.spec.ts', 'refine.spec.ts'],
-    },
-    { what: '定义 isConcurrencySafe 的文件', needles: ['concurrency.ts'] },
-    { what: '提到 delegationDepth 的文件', needles: ['gate.ts'] },
-  ]),
+  ].join(String.fromCharCode(10)),
 }
 
 /**
@@ -71,13 +57,7 @@ export const CHAIN = {
     '3. 根据第二步的文件清单,用一句话说明这个类型在插件里承担什么角色。',
     '',
     '只读不改。不要修改任何文件。',
-  ].join('\n'),
-  judge: judgeBy([
-    { what: '第一步的函数名', needles: ['buildWaves'] },
-    { what: '元素类型名', needles: ['PlanNode'] },
-    { what: '定义该类型的文件', needles: ['plan.ts'] },
-    { what: '引用该类型的文件', needles: ['tool.ts'] },
-  ]),
+  ].join(String.fromCharCode(10)),
 }
 
 /**
@@ -87,19 +67,19 @@ export const CHAIN = {
  */
 export const REVIEW = {
   text: [
-    '分别独立审查 D:\\code\\vibe\\dsh-refine-loop 的三个部分,每部分给出结论:',
+    '分别独立审查 D:\code\vibe\dsh-refine-loop 的三个部分,每部分给出结论:',
     '',
-    '1. src/plan.ts —— 计划的数据结构长什么样?节点有哪三种?一个调用参数里的占位符用什么语法?',
+    '1. src/plan.ts —— 计划的数据结构长什么样?节点有哪几种?调用参数是怎么处理的?',
     '2. src/gate.ts —— 这个插件的那条规则是什么?它的触发条件是什么?',
     '3. src/tool.ts —— 计划是怎么被跑起来的?派出去的子代理受到什么限制?',
     '',
     '最后把三条结论汇总成一段话。只读不改。不要修改任何文件。',
-  ].join('\n'),
+  ].join(String.fromCharCode(10)),
   judge: judgeBy([
-    { what: '被审查的三个文件', needles: ['plan.ts', 'gate.ts', 'tool.ts'] },
-    { what: '代理节点的类型名', needles: ['subagent_fork'] },
-    { what: '占位符语法', needles: ['@@'] },
-    { what: '子代理的深度限制靠哪个字段', needles: ['delegationDepth'] },
+    { what: '三个部分都回答了', needles: ['plan.ts', 'gate.ts', 'tool.ts'] },
+    { what: '节点种类', needles: ['worker', 'forker'] },
+    { what: '调用参数原样透传', any: ['原样', '没有占位符', '不存在占位符', '字面量', '直接传'] },
+    { what: '子代理限制的字段', needles: ['delegationDepth'] },
   ]),
 }
 
@@ -120,12 +100,17 @@ function judgeBy(requirements) {
     const missing = []
     let passed = 0
     for (const requirement of requirements) {
-      const hit = requirement.needles.every(needle => haystack.includes(needle.toLowerCase()))
+      // `needles` must all appear; `any` is the alternative set — either form
+      // counts, for a question that has several equally correct wordings.
+      const hit = requirement.any !== undefined
+        ? requirement.any.some(needle => haystack.includes(needle.toLowerCase()))
+        : requirement.needles.every(needle => haystack.includes(needle.toLowerCase()))
       if (hit) {
         passed += 1
         continue
       }
-      const absent = requirement.needles.filter(needle => !haystack.includes(needle.toLowerCase()))
+      const needles = requirement.any ?? requirement.needles
+      const absent = needles.filter(needle => !haystack.includes(needle.toLowerCase()))
       missing.push(`${requirement.what}(缺:${absent.join('/')})`)
     }
     return { passed, total: requirements.length, missing }

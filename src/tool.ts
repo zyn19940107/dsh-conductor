@@ -262,8 +262,6 @@ async function runNode(
       agent,
       buildAgentPrompt(node, criteria),
       {
-        planTool: PLAN_TOOL,
-        plans: node.kind === 'forker',
         timeoutMs: agentNodeTimeoutMs,
         signal,
         ...(node.kind === 'worker' && fork.onWorker !== undefined ? { onCreated: fork.onWorker } : {}),
@@ -459,7 +457,13 @@ export function applyPlanTool(
       + '"tools" (calls whose arguments are already decided), '
       + '"worker" (a child that starts with this conversation and does the work itself, without drawing a '
       + 'plan of its own), "spawner" (a child that starts empty and plans through this loop), '
-      + '"forker" (a child that starts with this conversation and plans through this loop). ',
+      + '"forker" (a child that starts with this conversation and plans through this loop). '
+      + 'Keep it small: a node task is one sentence, one or two criteria decide the round, and a child that '
+      + 'inherits this conversation already sees it, so its task says what to do rather than what the '
+      + 'conversation says. Shape of a plan: {"criteria": ["...", "..."], "nodes": ['
+      + '{"id": "scan", "kind": "tools", "calls": [{"name": "read", "arguments": {"file_path": "src/plan.ts"}}]}, '
+      + '{"id": "plan-review", "kind": "worker", "task": "Review src/plan.ts: structure, node kinds, argument '
+      + 'handling. Cite line numbers."}]}',
     parameters: {
       criteria: {
         type: 'array',

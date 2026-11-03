@@ -10,7 +10,10 @@ import {
   Rounds,
   NEXT_ROUND,
   ROUND_LOOP,
+  WORKER_NO_PLAN,
+  Workers,
   applyTurnDoctrine,
+  applyWorkerRule,
   isWorkerConversation,
 } from '../src/rounds.ts'
 import { WORKER_MARKER } from '../src/plan.ts'
@@ -116,19 +119,47 @@ console.log('a worker conversation is recognised')
   check('a message without content is ignored', !isWorkerConversation([{}, { content: [] }]))
 }
 
-console.log('the doctrine hook skips the worker and takes the plan tool away')
+console.log('the doctrine hook skips the worker, and the plan tool stays in its table')
 {
   const handler = captureDoctrine()
 
   const workerRestricted: string[] = []
   const workerDecision = await handler(payload(`${WORKER_MARKER} do the work`, workerRestricted), enter)
   check('a worker is not given the doctrine', workerDecision.messages.length === 0)
-  check('a worker loses the plan tool', workerRestricted.includes('refine_plan'))
+  // The tool stays, because the request header has to match the parent's for
+  // the inherited prefix to hit the cache; the rule refuses it at call time.
+  check('a worker keeps the plan tool in its table', workerRestricted.length === 0)
 
   const normalRestricted: string[] = []
   const normalDecision = await handler(payload('please do the thing', normalRestricted), enter)
   check('a normal turn is given the doctrine', normalDecision.messages.length === 1)
   check('a normal turn keeps the plan tool', normalRestricted.length === 0)
+}
+
+console.log('the worker rule refuses the plan tool where it is called')
+{
+  const workers = new Workers()
+  workers.mark('session-worker')
+  let guard: ((execution: unknown) => string | undefined) | undefined
+  const ctx = {
+    tools: { guard: (registered: typeof guard) => { guard = registered } },
+  } as unknown as Context
+  applyWorkerRule(ctx, workers)
+  if (guard === undefined) throw new Error('the worker rule registered no guard')
+
+  const modelCall = (name: string, sessionId: string) => ({
+    name,
+    agent: { session: { id: sessionId } },
+    callId: 'call-1',
+    rootCallId: 'call-1',
+  })
+  check('the worker is refused the plan tool',
+    guard(modelCall('refine_plan', 'session-worker')) === WORKER_NO_PLAN)
+  check('the worker may call other tools',
+    guard(modelCall('read', 'session-worker')) === undefined)
+  check('another conversation is not touched',
+    guard(modelCall('refine_plan', 'session-other')) === undefined)
+  check('the refusal says not to plan', WORKER_NO_PLAN.includes('Do not draw a plan'))
 }
 
 if (failures > 0) {

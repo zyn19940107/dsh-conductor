@@ -172,17 +172,12 @@ export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
     if (decision.kind !== 'enter') return decision
 
     // A worker is a child that does the work itself: it is not handed the
-    // doctrine that tells a conversation to draw a plan, and the plan tool is
-    // taken out of its table entirely. The plugin started it, so it knows the
-    // session; the marker in the delegation prompt is the fallback for a
-    // worker that somehow arrived by another route.
+    // doctrine that tells a conversation to draw a plan. The plan tool stays in
+    // its table on purpose — taking it away would change the request header and
+    // the inherited prefix would stop matching the parent's cache, which is the
+    // whole point of inheriting. The tool is refused where it is called; see
+    // {@link applyWorkerRule}.
     if (workers?.has(payload.agent.session.id) === true || isWorkerConversation(payload.messages)) {
-      try {
-        payload.agent.ctx.tools.restrict({ deny: [PLAN_TOOL] })
-      } catch {
-        // The scope already refuses it, or the registry does not allow the
-        // restriction here; the marker in the prompt is the fallback.
-      }
       return decision
     }
 
@@ -253,6 +248,40 @@ export function isWorkerConversation(messages: readonly { content?: unknown }[])
     }
   }
   return false
+}
+
+/**
+ * What a worker is told when it reaches for the plan tool.
+ *
+ * The tool stays in the worker's table because its request header has to match
+ * the parent's for the inherited prefix to hit the cache; what changes is the
+ * answer when the worker tries to use it.
+ */
+export const WORKER_NO_PLAN = 'You are a worker: this conversation inherits the plan you are part of, and your '
+  + 'job is to do the work yourself and report what you found. Do not draw a plan of your own — use the tools '
+  + 'and answer.'
+
+/**
+ * Refuse the plan tool inside a worker conversation.
+ *
+ * A worker inherits the conversation that started it and does the work itself.
+ * Its turn is not a plan, so the tool it could use to draw one is answered with
+ * the rule instead of being removed from the table: removing it would change
+ * the tool list, the tool list is part of the request header, and the inherited
+ * prefix would stop matching the parent's cache.
+ *
+ * @param ctx - the plugin context supplying the tool registry.
+ * @param workers - the worker conversations.
+ */
+export function applyWorkerRule(ctx: Context, workers: Workers): void {
+  ctx.tools.guard((execution) => {
+    const agent = execution.agent
+    if (agent === undefined) return undefined
+    if (!isModelCall(execution)) return undefined
+    if (execution.name !== PLAN_TOOL) return undefined
+    if (!workers.has(agent.session.id)) return undefined
+    return WORKER_NO_PLAN
+  })
 }
 
 /**
