@@ -111,9 +111,9 @@ harness 自带的 `subagent_fork` 只 seed「已完成的轮次」；计划节�
 
 同一份代码、同一个 profile、同一个模型、同一个任务，只切插件的 `enabled`。
 原始记录在 `bench/results/`；旧版（多轮 DAG 图）的记录在 `bench/results/before-one-layer/`。
-**这一轮重跑了四个场景，每臂 5 次、取中位数**：coverage、review，以及公开评测集里的
-humeval-hard、quixbugs。其余场景（panel、humeval、长程题）来自更早几轮，抽样次数各不相同，
-看趋势，不要看小数。
+**这一轮重跑了六个场景，每臂 5 次、取中位数**：coverage、review，公开评测集里的
+humeval、humeval-hard、quixbugs，以及长程的 2048。其余场景（panel、nbody、matpower、
+commit0）来自更早几轮，抽样次数各不相同，看趋势，不要看小数。
 
 ### 这一版的 A/B：coverage 与 review（各 5 次，中位数）
 
@@ -378,13 +378,14 @@ QuixBugs 的用例本来就是公开的、agent 看得见，所以判据里另�
 | | 主 agent 往返步数 | 11 | **7** | **−36%** |
 | | 编队人数 | 1 | 1 | — |
 | | 正确性 | 4/4 | 4/4 | — |
-| **humeval**（5 道独立实现题，更早一轮） | 总耗时 | 327s | 112s | −66% |
-| | 总 token | 528k | 83k | −84% |
-| | 主 agent 往返步数 | 19 | 4 | −79% |
+| **humeval**（5 道独立实现题，本轮重跑） | 总耗时 | 327s | **101s** | **−69%** ✅ |
+| | 总 token | 528k | **84k** | **−84%** ✅ |
+| | ├ input / cacheRead / output | 38k / 470k / 19k | 6k / 65k / 11k | −84% / **−86%** / −42% |
+| | 主 agent context | 36k | 26k | −28% ✅ |
+| | 主 agent 往返步数 | 19 | **4** | **−79%** ✅ |
 | | 正确性 | 5/5 | 5/5 | — |
 
-> `humeval` 那一行是更早一轮的测量（本轮模型端点抖动，没重跑完）；humeval-hard 和
-> quixbugs 是本轮 5 次 × 2 臂的中位数。
+> 三个场景都是本轮 5 次 × 2 臂的中位数。
 
 每次运行的原始记录在 `bench/results/`，表是 `bench/pubeval-table.mjs` 生成的，不是手打的。
 本轮 10 次开插件的运行里 **10 次都真的画了图**（全是 `tools` 节点，没有派子代理）。
@@ -436,77 +437,34 @@ ibe\dsh-sandbox\lhtb\`），仓库里只留跑它们的脚本 —— 判据是 o
 
 #### 2048（5 次 × 2 臂，中位数）
 
-| 指标 | 关掉插件 | 开着插件 | 变化 |
-|---|---:|---:|---:|
-| 总耗时(秒) | 584s | 293s | **-50%** |
-| 整个编队的 token | 1510k | 409k | **-73%** |
-| ├ input | 66k | 66k | +1% |
-| ├ cacheRead | 1401k | 291k | **-79%** |
-| └ output | 48k | 52k | +8% |
-| 主 agent 的 context（最后一次请求的 prompt） | 74k | 76k | +3% |
-| 主 agent 的往返步数 | 26 | 7 | **-73%** |
-| 编队人数 | 1 | 1 | 0% |
-| 分数（band / 11） | 4 | 4 | — |
-| 连续分（原始 band 值） | 4.79 | 4.79 | 0% |
-
-```
- off 1: 776.1s agents=1 tokens=902156  mainCtx=65682 band=4/11 score=4.7852 plan=n
- off 2: 712.7s agents=1 tokens=1136594 mainCtx=68852 band=4/11 score=4.7852 plan=n
- off 3: 584.3s agents=1 tokens=3168012 mainCtx=79259 band=4/11 score=4.7812 plan=n
- off 4: 580.2s agents=1 tokens=2281977 mainCtx=79449 band=4/11 score=4.7852 plan=n
- off 5: 361.1s agents=1 tokens=1510339 mainCtx=73872 band=4/11 score=4.7852 plan=n
- on  1: 293.2s agents=1 tokens=626990  mainCtx=47432 band=4/11 score=4.7852 plan=n
- on  2: 387.0s agents=1 tokens=408877  mainCtx=76320 band=4/11 score=4.7852 plan=y
- on  3: 243.0s agents=1 tokens=519914  mainCtx=69973 band=4/11 score=4.7852 plan=y
- on  4: 261.7s agents=1 tokens=288344  mainCtx=78508 band=4/11 score=4.7852 plan=y
- on  5: 311.2s agents=1 tokens=332707  mainCtx=77231 band=4/11 score=4.7852 plan=y
-```
-
-#### N 体优化（3 次 × 2 臂，中位数）
-
-### lhtb-nbody  (off 3 次 / on 3 次,中位数)
+> 这一节是**本轮重跑**：两臂各 5 次。判据是 11 分制（最大 tile 的 band + 棋盘进度）。
 
 | 指标 | 关掉插件 | 开着插件 | 变化 |
 |---|---:|---:|---:|
-| 总耗时(秒) | 1200s | 1200s | -0% |
-| 整个编队的 token | 3405k | 2217k | -35% |
-| ├ input | 115k | 86k | -25% |
-| ├ cacheRead | 3199k | 2064k | -35% |
-| └ output | 92k | 71k | -22% |
-| 主 agent 的 input | 113k | 86k | -24% |
-| 主 agent 的 cacheRead | 3086k | 1971k | -36% |
-| 主 agent 的 output | 92k | 71k | -22% |
-| 主 agent 的 context(最后一次请求的 prompt) | 115k | 97k | -15% |
-| 主 agent 的往返步数 | 38 | 30 | -21% |
-| 编队步数 | 39 | 31 | -21% |
-| 编队人数 | 1 | 1 | 0% |
-| 通过的档(加权分见下) | 4/4 | 4/4 | — |
-| 连续分(原始 band 值) | 1.00 | 1.00 | 0% |
-| 其中真的交了图的运行 | — | 1/3 | — |
+| 总耗时 | 584s | **438s** | **−25%** ✅ |
+| 整个编队的 token | 1510k | **975k** | **−35%** ✅ |
+| ├ input / cacheRead / output | 66k / 1401k / 48k | 28k / 907k / 55k | −58% / −35% / +15% |
+| 主 agent 的 context | 74k | 73k | −1% |
+| 主 agent 的往返步数 | 26 | **22** | −15% |
+| 编队人数 | 1 | 1 | — |
+| band 分（11 分制） | 4 | 4 | 持平 |
 
-只看**真的交了图**的那 1 次(样本太少,只当个例看):
+逐样本（墙钟 / 编队 token / 主 agent 步数）：
 
-| 指标 | 关掉插件(全部) | 开着插件(交图的) |
-|---|---:|---:|
-| 总耗时(秒) | 1200s | 704s |
-| 整个编队的 token | 3405k | 593k |
-| ├ input | 115k | 86k |
-| ├ cacheRead | 3199k | 436k |
-| └ output | 92k | 71k |
-| 主 agent 的 input | 113k | 86k |
-| 主 agent 的 cacheRead | 3086k | 436k |
-| 主 agent 的 output | 92k | 71k |
-| 主 agent 的 context(最后一次请求的 prompt) | 115k | 97k |
-| 主 agent 的往返步数 | 38 | 8 |
-| 编队步数 | 39 | 8 |
-| 编队人数 | 1 | 1 |
+```
+off: 776s/902k/19   713s/1137k/23   584s/3168k/56   580s/2282k/43   361s/1510k/26
+on : 217s/975k/22   333s/1381k/25   438s/1146k/29   477s/691k/11    569s/524k/9
+```
 
- off 1: 1199.9s agents=1 tokens=815232 mainCtx=61169 correct=4/4 plan=n/0 profile=bench-off
- off 2: 1200.0s agents=1 tokens=3404962 mainCtx=114903 correct=4/4 plan=n/0 profile=bench-off
- off 3: 1200.0s agents=1 tokens=4840592 mainCtx=122625 correct=4/4 plan=n/0 profile=bench-off
- on  1: 1199.9s agents=1 tokens=2217022 mainCtx=93938 correct=4/4 plan=n/0 profile=bench-on
- on  2: 1200.0s agents=1 tokens=3116955 mainCtx=113687 correct=4/4 plan=n/0 profile=bench-on
- on  3: 704.1s agents=1 tokens=593042 mainCtx=97331 correct=4/4 plan=y/0 profile=bench-on
+读数：
+
+- **同样的结果，更便宜。** 两臂 10 次全打到 band 4（512 的 tile）；耗时 −25%、token −35%，
+  省下来的主要是新输入（−58%）和缓存输入（−35%）。
+- **逐样本方差很大** ✗：off 的 token 从 902k 到 3,168k，on 从 524k 到 1,381k。
+  这题的任务是「一直玩到预算」，模型玩多久本身就不稳定，中位数只是趋势。
+- **比更早一轮的 on 样本低** ✗：旧版 5 次是 243–387s / 289k–627k。这一轮的同题数字
+  更高，但两批样本的波动都覆盖了两个方向，**不把它当作回归的证据**。
+- **模型自己选的形状还是 `tools` 节点**（编队人数 1）—— 这题不需要派子代理。
 
 ### 读数
 
