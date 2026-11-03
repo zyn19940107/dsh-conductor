@@ -166,6 +166,12 @@ function buildAgentPrompt(node: PlanNode, criteria: readonly string[]): string {
     : `What this plan is judged on:
 ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
 ` + String.fromCharCode(10) + String.fromCharCode(10)
+  // What the parent needs back is the judgement itself: the parent composes the
+  // final answer. A child that writes a report, or a trail of citations, is the
+  // parent doing the work twice.
+  const contract = 'Answer with your conclusion. The parent composes the final answer from it, so return the '
+    + 'verdict and the few facts it rests on — not a report, and not a citation trail.'
+    + String.fromCharCode(10) + String.fromCharCode(10)
   // A worker is told what it is: it does the work, it does not draw a graph of
   // its own. The marker is also how the plugin recognises the worker's own
   // conversation and keeps the turn doctrine away from it.
@@ -174,7 +180,7 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
       + 'report what you found. Do not draw a plan and do not delegate.'
       + String.fromCharCode(10) + String.fromCharCode(10)
     : ''
-  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}`.trim()
+  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${contract}${judged}`.trim()
 }
 
 /**
@@ -462,8 +468,8 @@ export function applyPlanTool(
       + 'inherits this conversation already sees it, so its task says what to do rather than what the '
       + 'conversation says. Shape of a plan: {"criteria": ["...", "..."], "nodes": ['
       + '{"id": "scan", "kind": "tools", "calls": [{"name": "read", "arguments": {"file_path": "src/plan.ts"}}]}, '
-      + '{"id": "plan-review", "kind": "worker", "task": "Review src/plan.ts: structure, node kinds, argument '
-      + 'handling. Cite line numbers."}]}',
+      + '{"id": "plan-review", "kind": "worker", "task": "Review src/plan.ts: its structure, its node kinds, '
+      + 'how it handles arguments."}]}',
     parameters: {
       criteria: {
         type: 'array',

@@ -66,6 +66,9 @@ export const REFINE_GUIDANCE = [
   + '"order": "sequential", or a worker.',
   '- A "worker" or a "forker" already sees this conversation, including what you have read so far, so its '
   + 'task says what to do; only a "spawner" starts empty and needs the context in its task.',
+  '- An agent node answers with its conclusion, and that conclusion goes into your answer as it stands: give '
+  + 'it a task that says what to decide. Asking a child for a report, or for proofs of what it found, is you '
+  + 'doing the work twice.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',
