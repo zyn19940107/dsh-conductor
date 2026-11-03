@@ -1,0 +1,63 @@
+{
+  "task": "lhtb-matpower",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 596098,
+  "timedOut": false,
+  "sessionId": "session-f5cd4307-d296-4173-9883-eb9622714be2",
+  "stderr": "",
+  "steps": 14,
+  "toolCalls": 20,
+  "tools": [
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "refine_plan",
+    "read",
+    "read",
+    "read",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 137126,
+    "outputTokens": 82159,
+    "cacheReadTokens": 805575,
+    "totalTokens": 1024860
+  },
+  "formation": {
+    "agents": 1,
+    "input": 137126,
+    "output": 82159,
+    "cacheRead": 805575,
+    "total": 1024860,
+    "steps": 14
+  },
+  "mainPrompt": 137339,
+  "correctness": {
+    "passed": 11,
+    "total": 12,
+    "missing": [
+      "11/12 个判据测试通过"
+    ],
+    "score": 0.9167
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 64540,
+  "thinkingPreview": "Letme read all the existing files.\nNow I need to understand PYPOWER's API. Let me check what's available: `pypower.case9`, `pypower.rundcopf`, `pypower.runopf`, `pypower.runpf`, etc.\n\nLet me explore the pypower package.\n\nKey points from the spec:\n- Load official PYPOWER case function by name (e.g., `case9`).\n- Apply manifest modifications.\n- Run AC power flow, DC OPF, AC OPF with quiet PYPOWER options.\n- Report case-level objectives, success flags, voltage range, min voltage margin, branch-loading maxima, binding generator/branch counts, violations.\n- Write per-bus voltage rows, per-generator dispatch rows, per-branch flow/loading rows.\n\nLet me look at pypower's API for `runopf`, `rundcopf`, `runpf`.\n\nImportant details:\n- `runopf` returns `ppc, results, success, info`? Actually in pypower, `runopf` returns `results, success, raw` — let me check.\n\nLet me explore.\n\nAlso I need to think abo",
+  "finalText": "The request is answered — implementation, verification, and artifacts are all in place.\n\n## 实现思路\n\n**单文件流水线** `src/power_audit/audit.py`(CLI `python -m power_audit.cli run --manifest ... --out-dir ...` 和 `experiments/run_opf_suite.py` 共用同一个 `run_audit`)。\n\n关键点(都是踩坑后确认的 PYPOWER 事实):\n\n- **case载入**:`getattr(pypower.api, name)()` 拿官方 case 函数,每次调用返回全新矩阵(避免跨 case 污染)。\n- **矩阵布局**:PYPOWER 的 case 矩阵是**二维数组**(不是结构化数组),列序即 MATPOWER 外部格式 —— `idx_bus` 中 `VM=7, VA=8, VMAX=11, VMIN=12`,`idx_gen` 中 `PG=1, PMAX=8`,`idx_brch` 中 `PF=13, RATE_A=5`。求解器返回的结果同样是二维数组,必须按列下标读,不能用字段名。\n- **行序**:`int2ext` 会把结果还原成原始 case 顺序(bus/gen/branch 行序 = 输入行序),所以 `bus_index/gen_index/branch_index` 直接按结果矩阵行号。\n- **修改**:`load_scale`→bus `PD`/`QD`;`branch_rate_scale`→`RATE_A>0` 处;`gen_pmax_scale`→`PMAX`。全部在**任何求解之前**做,每次求解都传入 `deepcopy` 的干净副本。\n- **求解**:AC PF(`runpf` → `(results, success)`)、DC OPF(`rundcopf`)、AC OPF(`runopf`,成功标志在 `results['success']`,目标值是标量 `results['f']`),统一 `ppoption(VERBOSE=0, OUT_ALL=0)` 静音。\n- **三张明细表全部取自 AC OPF**;PF 只贡献 `pf_success` 标志。AC OPF 失败的 case **不产出任何明细行**,目标值/电压字段为 `null`。\n- **违规**:`component` 仅 `solver`/`bus`/`branch`;求解失败 → `fatal`;电压越限/支路过载 → `hard`。容差取 1e-5,吸收内点法 ~1e-7 的残差(否则 `case30_load_102` 会被误判为过载)。\n- **确定性**:无时间戳,浮点全精度 `repr`,CSV 固定 `\\n` 行尾、`\\n` 空行区分空值;布尔统一小写 `true/false`。\n\n## 每个 case 的状态(全部通过)\n\n| case_id | pf | dcopf | acopf | dcopf obj | acopf obj | v_min | margin_min | max loading |\n|---|---|---|---|---|---|---|---|---|\n| case9_base | true | true | true | 5216.027 | 5296.687 | 1.07173 | 8.27e-07 | 0.5386 |\n| case14_base | true | true | true | 7642.594 | 8081.526 | 1.01446 | 4.63e-08 | 0.0131 |\n| case30_base | true | true | true | 565.206 | 576.892 | 0.96112 | 1.53e-08 | 1.0000 |\n| case57_base | true | true | true | 41006.735 | 41737.785 | 0.95082 | 8.46e-08 | 0.0193 |\n| case118_base | true | true | true | 125947.873 | 129660.686 | 1.01075 | 1.09e-08 | 0.0418 |\n| case14_load_110 | true | true | true | 8672.480 | 9127.981 | 1.01403 | 1.12e-07 | 0.0133 |\n| case30_load_102 | true | true | true | 579.589 | 597.738 | 0.95277 | 1.98e-07 | 1.0000 |\n| case57_load_105 | true | true | true | 43620.770 | 44439.758 | 0.94298 | 3.54e-08 | 0.0204 |\n| case118_load_102 | true | true | true | 129305.431 | 133027.869 | 1.01079 | 1.04e-08 | 0.0420 |\n| case30_gen_110 | true | true | true | 565.206 | 576.892 | 0.96113 | 4.78e-08 | 1.0000 |\n\n`violation_count=0`,`overall_pass=true`,`detail_rows = bus 477 / generator 153 / branch 704`。\n\n## 验证\n\n- **独立复核**:另写一个**不 import 本实现**的脚本,重新跑 PYPOWER 并逐字段比对(目标值、负荷缩放、电压/无功裕度、PG 向量、支路 P/Q/MVA/loading、索引与 ID、行数、CSV 表头、JSON 键集、md 五个标题与每条状态行)→ **PROBLEMS: 0**。\n- **确定性**:连跑两次,七个文件 SHA256 **完全一致**。\n\n## 文件清单(`outputs/`)\n\n`opf_report.json`(10.6 KB)、`grid_summary.md`(3.8 KB)、`case_table.csv`(5.0 KB)、`violations.csv`(仅表头,122 B)、`bus_voltage_table.csv`(50.6 KB)、`generator_dispatch.csv`(20.3 KB)、`branch_loading.csv`(125.1 KB)。\n\n未改动 `D:\\code\\vibe\\dsh-refine-loop` 下任何文件。"
+}

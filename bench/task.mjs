@@ -16,6 +16,8 @@ import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, GREENSPECS, MULTIHO
 import { PUBLIC_TASKS } from './pubeval.mjs'
 import { LHTB_TASKS } from './lhtb.mjs'
 import { LHTB_NBODY_TASKS } from './lhtb-nbody.mjs'
+import { LHTB_COMMIT0_TASKS } from './lhtb-commit0.mjs'
+import { LHTB_MATPOWER_TASKS } from './lhtb-matpower.mjs'
 
 /**
  * The scenario tasks that say where the plugin helps and where it does not.
@@ -104,7 +106,7 @@ export const REVIEW = {
 /**
  * Every task, keyed by the name the runner takes.
  */
-export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS }
+export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

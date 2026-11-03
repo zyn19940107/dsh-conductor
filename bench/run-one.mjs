@@ -81,10 +81,36 @@ async function run() {
 
   const started = Date.now()
   let timedOut = false
+  // A task may need its own environment (the commit0 task needs PYTHONPATH
+  // pointing at its three library trees, the way the container had it).
+  const environment = { ...process.env, ...(task.env ?? {}) }
+
+  // The sealed network. Upstream runs this task with `network_mode: none`, so
+  // the agent cannot fetch the real libraries and copy them in. DSH has no
+  // "no internet" switch and the LLM client honours the proxy variables, so
+  // the benchmark runs a local proxy that blocks the package sources and
+  // forwards everything else (the model API) untouched.
+  const proxy = process.env.DSH_BENCH_PROXY
+  if (proxy !== undefined && proxy !== '') {
+    Object.assign(environment, {
+      HTTP_PROXY: proxy,
+      HTTPS_PROXY: proxy,
+      ALL_PROXY: proxy,
+      http_proxy: proxy,
+      https_proxy: proxy,
+      all_proxy: proxy,
+      NO_PROXY: '',
+      no_proxy: '',
+      GIT_CONFIG_GLOBAL: resolve(SANDBOX_HOME, '..', 'sealed', 'gitconfig'),
+      GIT_TERMINAL_PROMPT: '0',
+      PIP_NO_INDEX: '1',
+      PIP_DISABLE_PIP_VERSION_CHECK: '1',
+    })
+  }
   const child = spawn(EXE, args, {
     cwd: CWD,
     env: {
-      ...process.env,
+      ...environment,
       DSH_HOME: SANDBOX_HOME,
       ELECTRON_RUN_AS_NODE: '1',
       DSH_PERMISSION_MODE: 'danger-full-access',
@@ -227,6 +253,11 @@ const record = {
     // the band it reached, and the raw value is the finer signal.
     ...(verdict.score === undefined ? {} : { score: verdict.score }),
     ...(verdict.moves === undefined ? {} : { moves: verdict.moves }),
+    // A judge may also report the raw score and what it voided, so a record
+    // keeps both the credited score and the reason a run was voided.
+    ...(verdict.rawScore === undefined ? {} : { rawScore: verdict.rawScore }),
+    ...(verdict.voidedScore === undefined ? {} : { voidedScore: verdict.voidedScore }),
+    ...(verdict.copied === undefined ? {} : { copied: verdict.copied }),
   },
   planned: tools.includes('refine_plan'),
   planAgentNodes: planCalls,
