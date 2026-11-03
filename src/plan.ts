@@ -1,22 +1,63 @@
 /**
  * The plan a `refine_plan` call carries.
  *
- * A plan is a small graph. Each node is one piece of work, and each node says
- * what it depends on. The nodes that depend on nothing run together; the
- * nodes that depend on those run after them.
+ * A plan is a set of nodes that run together. There is one layer: every node
+ * starts at the same time, and every result comes back together. A node is
+ * one of four kinds:
  *
- * The graph is what makes the plan a plan rather than a list: the agent draws
- * the whole shape of the work before it starts, so the shape is one thing it
- * decided rather than a thing it re-decided at every step.
+ * - `tools` — calls whose arguments are already decided;
+ * - `worker` — a child that starts with this conversation and does the work
+ *   itself, in its own loop, without drawing a plan of its own;
+ * - `spawner` — a child that starts empty and plans through this plugin's loop;
+ * - `forker` — a child that starts with this conversation and plans through
+ *   this plugin's loop.
+ *
+ * There is no `after` and no layering: a node that needs another node's
+ * output belongs to the next round, where the main agent sees the results and
+ * decides what is still missing. Work that belongs together belongs in one
+ * node — in a worker, which can take its own steps as it goes.
  *
  * @module @zyn19940107/dsh-refine-loop/plan
  */
 
 /** The kinds of node a plan may hold. */
-export type PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'
+export type PlanNodeKind = 'tools' | 'worker' | 'spawner' | 'forker'
 
 /** The node kinds that start an agent. */
-export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['subagent', 'subagent_fork']
+export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['worker', 'spawner', 'forker']
+
+/**
+ * The node kinds that start a child which does not plan.
+ *
+ * A worker is a child that thinks and acts, and never draws a graph of its
+ * own: the work it was given is the whole of its job.
+ */
+export const WORKER_NODE_KINDS: readonly PlanNodeKind[] = ['worker']
+
+/**
+ * The harness tool each agent node runs through.
+ *
+ * The node kinds are named for what the child does, not for the tool that
+ * starts it: a plan node is not a tool call, and two of the three child kinds
+ * share one tool. A `worker` starts with this conversation and works; a
+ * `spawner` starts empty and plans; a `forker` starts with this conversation
+ * and plans.
+ */
+export const NODE_AGENT_TOOL: Readonly<Record<'worker' | 'spawner' | 'forker', string>> = {
+  worker: 'subagent_fork',
+  spawner: 'subagent',
+  forker: 'subagent_fork',
+}
+
+/**
+ * How the calls of a tools node run.
+ *
+ * `parallel` is the default and lets the calls that are safe together run
+ * together. `sequential` runs them in the order they are written, which is how
+ * a node says "write the file, then run the test" — an order of business that
+ * the tool's own safety rules cannot express.
+ */
+export type PlanNodeOrder = 'parallel' | 'sequential'
 
 /** One call inside a tools node. */
 export interface PlanToolCall {
@@ -28,7 +69,7 @@ export interface PlanToolCall {
 
 /** One node of a plan. */
 export interface PlanNode {
-  /** The node's name; other nodes refer to it in `after`. */
+  /** The node's name. */
   id: string
   /** What kind of work the node is. */
   kind: PlanNodeKind
@@ -36,8 +77,10 @@ export interface PlanNode {
   calls: PlanToolCall[]
   /** The task of an agent node. */
   task: string
-  /** The nodes this one depends on. */
-  after: string[]
+  /** How the calls of a tools node run. */
+  order: PlanNodeOrder
+  /** The files a node writes, so two nodes that write the same one do not run together. */
+  writes: string[]
 }
 
 /** The plan a call carries. */
@@ -49,37 +92,15 @@ export interface PlanArgs {
 }
 
 /**
- * The layers of a plan, or the reason there are none.
+ * The marker that opens a worker's task.
  *
- * The reason is a sentence the agent can act on, not a boolean: a plan that
- * does not hold together has to say which node broke it.
+ * The doctrine that tells a conversation to draw a plan is a message at the
+ * head of every turn. A worker is told not to draw one, and the plugin has to
+ * recognise the worker's own conversation to keep the doctrine away from it.
+ * The delegation prompt is the first thing the worker reads, so the marker in
+ * it is what the plugin looks for.
  */
-export type PlanWaves =
-  | { waves: PlanNode[][] }
-  | { error: string }
-
-/**
- * An argument that stands for a node's output.
- *
- * The whole argument has to be the placeholder. A placeholder inside a longer
- * string is left alone, because the output of a node can be long and a long
- * output spliced into an argument is worse than a caller that passes it whole.
- *
- * The harness reserves double braces for its own prompt variables and refuses
- * to render a section that contains one, so the placeholder here does not use
- * them: `@@nodeId@@` is this plugin's, and nothing else in the prompt can be
- * mistaken for it.
- */
-const PLACEHOLDER = /^@@([^@]+)@@$/u
-
-/**
- * A placeholder anywhere inside a string.
- *
- * The anchored form above replaces a whole argument; this one lets a plan paste
- * a result into a sentence — which is how a child gets the facts it needs
- * instead of being told to go and find them again.
- */
-const INLINE_PLACEHOLDER = /@@([^@\n]+)@@/gu
+export const WORKER_MARKER = '[refine-loop worker]'
 
 /**
  * Read the plan out of a tool call.
@@ -110,15 +131,18 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     const kind = item.kind
     if (typeof id !== 'string' || id.trim() === '') return undefined
     if (typeof kind !== 'string') return undefined
-    if (kind !== 'tools' && kind !== 'subagent' && kind !== 'subagent_fork') return undefined
+    if (kind !== 'tools' && kind !== 'worker' && kind !== 'spawner' && kind !== 'forker') {
+      return undefined
+    }
     const nodeId = id.trim()
     if (seen.has(nodeId)) return undefined
     seen.add(nodeId)
 
-    const after = Array.isArray(item.after)
-      ? item.after
-        .filter((dep): dep is string => typeof dep === 'string' && dep.trim() !== '')
-        .map(dep => dep.trim())
+    const order: PlanNodeOrder = item.order === 'sequential' ? 'sequential' : 'parallel'
+    const writes = Array.isArray(item.writes)
+      ? item.writes
+        .filter((path): path is string => typeof path === 'string' && path.trim() !== '')
+        .map(path => path.trim())
       : []
 
     if (kind === 'tools') {
@@ -133,203 +157,59 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
         const args = callItem.arguments
         parsedCalls.push({ name: name.trim(), arguments: args === undefined ? {} : args })
       }
-      parsedNodes.push({ id: nodeId, kind, calls: parsedCalls, task: '', after })
+      parsedNodes.push({ id: nodeId, kind, calls: parsedCalls, task: '', order, writes })
       continue
     }
 
     const task = item.task
     if (typeof task !== 'string' || task.trim() === '') return undefined
-    parsedNodes.push({ id: nodeId, kind, calls: [], task: task.trim(), after })
+    parsedNodes.push({ id: nodeId, kind, calls: [], task: task.trim(), order, writes })
   }
   // An empty plan is allowed and the model decides when it is right: a turn that
   // already has what it needs hands over nothing to run and goes to the
   // conclusion. The loop does not prescribe how much a plan must contain.
 
-  // A placeholder in a call's arguments is a dependency. The call cannot run
-  // before the node it names has produced its output, so the edge is there
-  // whether the plan said so or not — otherwise the placeholder would be
-  // resolved against a node that has not run yet, and the tool would receive
-  // the literal text instead of the output.
-  for (const node of parsedNodes) {
-    for (const call of node.calls) {
-      for (const referenced of collectPlaceholders(call.arguments)) {
-        if (!node.after.includes(referenced)) node.after.push(referenced)
-      }
-    }
-  }
-
   return { criteria: parsedCriteria, nodes: parsedNodes }
 }
 
 /**
- * The nodes a value refers to through placeholders.
+ * The groups of nodes that may run at the same time.
  *
- * @param value - the value to look in.
- * @returns the names of the nodes it refers to.
- */
-export function collectPlaceholders(value: unknown): string[] {
-  const found: string[] = []
-  const walk = (entry: unknown): void => {
-    if (typeof entry === 'string') {
-      for (const match of entry.matchAll(INLINE_PLACEHOLDER)) {
-        const id = match[1]!
-        if (!found.includes(id)) found.push(id)
-      }
-      return
-    }
-    if (Array.isArray(entry)) {
-      for (const item of entry) walk(item)
-      return
-    }
-    if (entry !== null && typeof entry === 'object') {
-      for (const item of Object.values(entry as Record<string, unknown>)) walk(item)
-    }
-  }
-  walk(value)
-  return found
-}
-
-/**
- * Split the plan into the layers that run one after the other.
+ * Two nodes that write the same file do not run together: the file is written
+ * twice and the second write lands on the first one's result. A node that
+ * declares no writes is taken at its word — the plan cannot know what a call
+ * does to the disk — and the ones that do declare are separated.
  *
- * A node that depends on nothing is in the first layer. A node that depends
- * on a node in the first layer is in the second, and so on. The layers are
- * the plan's waves: every node of a wave runs at the same time.
+ * The groups are in the order the plan declared them, and the nodes inside a
+ * group keep their order too, so a plan that runs entirely in series runs in
+ * the order it was written.
  *
  * @param nodes - the nodes of the plan.
- * @returns the waves, or the reason there are none.
+ * @returns the groups.
  */
-export function buildWaves(nodes: readonly PlanNode[]): PlanWaves {
-  const byId = new Map<string, PlanNode>()
+export function buildGroups(nodes: readonly PlanNode[]): PlanNode[][] {
+  const groups: PlanNode[][] = []
   for (const node of nodes) {
-    if (byId.has(node.id)) return { error: `two nodes are called "${node.id}"` }
-    byId.set(node.id, node)
+    const group = groups.find(candidate => canRunTogether(candidate, node))
+    if (group === undefined) groups.push([node])
+    else group.push(node)
   }
-  for (const node of nodes) {
-    for (const dependency of node.after) {
-      if (dependency === node.id) return { error: `the node "${node.id}" depends on itself` }
-      if (!byId.has(dependency)) {
-        return { error: `the node "${node.id}" depends on "${dependency}", which is not a node of this plan` }
-      }
-    }
-  }
-  // Two children are two parallel branches, never a pipeline. A child that waits
-  // on another child runs after it, which turns the plan's parallelism into a
-  // queue: with N children the wall clock becomes their sum instead of their
-  // maximum. That shape belongs in tools nodes, or in the next round.
-  for (const node of nodes) {
-    if (!AGENT_NODE_KINDS.includes(node.kind)) continue
-    for (const dependency of node.after) {
-      const upstream = byId.get(dependency)
-      if (upstream === undefined || !AGENT_NODE_KINDS.includes(upstream.kind)) continue
-      return {
-        error: `the node "${node.id}" is a subagent and depends on "${dependency}", which is also a subagent. `
-          + 'Children are parallel branches: give this one no dependency and let it work from its own task, '
-          + 'or move the step that needs the other result into a tools node or the next round.',
-      }
-    }
-  }
-
-  const depth = new Map<string, number>()
-  const visiting = new Set<string>()
-  /**
-   * The layer of one node: one more than the deepest layer it depends on.
-   *
-   * @param node - the node.
-   * @returns the layer, or undefined when the dependencies form a cycle.
-   */
-  const depthOf = (node: PlanNode): number | undefined => {
-    const known = depth.get(node.id)
-    if (known !== undefined) return known
-    if (visiting.has(node.id)) return undefined
-    visiting.add(node.id)
-    let layer = 0
-    for (const dependency of node.after) {
-      const dependencyNode = byId.get(dependency)
-      if (dependencyNode === undefined) return undefined
-      const dependencyDepth = depthOf(dependencyNode)
-      if (dependencyDepth === undefined) return undefined
-      layer = Math.max(layer, dependencyDepth + 1)
-    }
-    visiting.delete(node.id)
-    depth.set(node.id, layer)
-    return layer
-  }
-  for (const node of nodes) {
-    if (depthOf(node) === undefined) {
-      return { error: 'the dependencies of the plan form a cycle, so no node can run first' }
-    }
-  }
-
-  const layers = Math.max(...nodes.map(node => depth.get(node.id) ?? 0)) + 1
-  const waves: PlanNode[][] = Array.from({ length: layers }, () => [])
-  for (const node of nodes) {
-    waves[depth.get(node.id) ?? 0]!.push(node)
-  }
-  return { waves }
+  return groups
 }
 
 /**
- * Put a node's dependencies in front of it.
+ * Whether a node may join a group of nodes.
  *
- * @param node - the node.
- * @param byId - every node of the plan.
- * @returns the nodes it depends on, in the order they were declared.
+ * @param group - the nodes already in the group.
+ * @param node - the node that wants to join.
+ * @returns true when the two do not write the same file.
  */
-export function dependenciesOf(
-  node: PlanNode,
-  byId: ReadonlyMap<string, PlanNode>,
-): PlanNode[] {
-  const dependencies: PlanNode[] = []
-  for (const id of node.after) {
-    const dependency = byId.get(id)
-    if (dependency !== undefined) dependencies.push(dependency)
-  }
-  return dependencies
-}
-
-/**
- * Replace a placeholder with what it stands for.
- *
- * A placeholder that cannot be resolved is an error, not a literal. A tool
- * that receives the text `{{nodeId}}` instead of an output fails in a way
- * that points at the wrong thing, so the plan says so instead.
- *
- * @param value - the value to substitute into.
- * @param outputs - the output of each node that has finished.
- * @returns the value with its placeholders replaced.
- */
-export function substitutePlaceholders(value: unknown, outputs: ReadonlyMap<string, string>): unknown {
-  if (typeof value === 'string') {
-    const exact = PLACEHOLDER.exec(value)
-    if (exact !== null) {
-      const id = exact[1]!
-      const output = outputs.get(id)
-      if (output === undefined) {
-        throw new Error(`the argument refers to the output of "${id}", and that node has not produced one`)
-      }
-      return output
+function canRunTogether(group: readonly PlanNode[], node: PlanNode): boolean {
+  if (node.writes.length === 0) return true
+  for (const other of group) {
+    for (const path of other.writes) {
+      if (node.writes.includes(path)) return false
     }
-    if (!value.includes('@@')) return value
-    // A placeholder inside a sentence: paste the result where it stands, so a
-    // child can be given the facts instead of being sent to find them.
-    return value.replace(INLINE_PLACEHOLDER, (whole, id: string) => {
-      const output = outputs.get(id)
-      if (output === undefined) {
-        throw new Error(`the argument refers to the output of "${id}", and that node has not produced one`)
-      }
-      return output
-    })
   }
-  if (Array.isArray(value)) {
-    return value.map(entry => substitutePlaceholders(entry, outputs))
-  }
-  if (value !== null && typeof value === 'object') {
-    const result: Record<string, unknown> = {}
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = substitutePlaceholders(entry, outputs)
-    }
-    return result
-  }
-  return value
+  return true
 }

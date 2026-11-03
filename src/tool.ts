@@ -2,10 +2,10 @@
  * The plan tool: one call that carries the whole shape of the work.
  *
  * The agent draws the plan before it starts. The plan says which pieces of the
- * work are independent tool calls, which ones need a child that starts with no
- * context, which ones need a child that inherits this conversation, and what
- * depends on what. The plugin runs the plan and hands back every result at
- * once.
+ * work are tool calls whose arguments are already decided, which ones need a
+ * child that does the work itself, and which ones need a child that starts
+ * empty or inherits this conversation. The plugin runs every node at the same
+ * time and hands back every result at once.
  *
  * This is the difference between a chain and a plan. In a chain the agent
  * decides the next step after seeing the last result, so it re-plans at every
@@ -29,12 +29,14 @@ import {
   type RepairCall,
 } from './batch.js'
 import { mayRunTogether, type ConcurrencyOverride } from './concurrency.js'
+import { spawnForkedChild, type SpawnResult } from './fork.js'
 import {
   AGENT_NODE_KINDS,
-  buildWaves,
-  dependenciesOf,
+  NODE_AGENT_TOOL,
+  WORKER_MARKER,
+  WORKER_NODE_KINDS,
+  buildGroups,
   parsePlanArgs,
-  substitutePlaceholders,
   type PlanArgs,
   type PlanNode,
   type PlanNodeKind,
@@ -42,6 +44,20 @@ import {
 
 /** The tool that runs a plan. */
 export const PLAN_TOOL = 'refine_plan'
+
+/**
+ * What a plan needs to start a child that inherits this conversation.
+ *
+ * Without it a `worker` or a `forker` falls back to the harness's own
+ * delegation tools, which seed completed turns only — inside a running round
+ * that means no inherited context at all.
+ */
+export interface PlanForkOptions {
+  /** The host context carrying the agent factory. */
+  host: Record<string, unknown>
+  /** Told the child's session id when a worker starts, so the loop leaves it alone. */
+  onWorker?: (sessionId: string) => void
+}
 
 /** What one node of a plan produced. */
 export type PlanNodeResult = {
@@ -61,10 +77,8 @@ export type PlanNodeResult = {
 export type PlanOutput = {
   /** The criteria the plan was drawn against. */
   criteria: string[]
-  /** How many layers the plan had. */
-  waves: number
-  /** How the plan's layers were shaped. */
-  schedule: 'concurrent' | 'mixed' | 'serial'
+  /** How many groups of nodes ran. */
+  groups: number
   /** One entry per node, in the order the plan listed them. */
   nodes: PlanNodeResult[]
 }
@@ -140,31 +154,27 @@ async function runWithDeadline<T>(
 }
 
 /**
- * The task an agent node hands to its child, with the output of the nodes it
- * depends on put in front of it.
+ * The task an agent node hands to its child.
  *
  * @param node - the agent node.
- * @param dependencies - the nodes it depends on.
- * @param outputs - the output of every node that has finished.
+ * @param criteria - the criteria the plan was drawn against.
  * @returns the prompt.
  */
-function buildAgentPrompt(
-  node: PlanNode,
-  criteria: readonly string[],
-  dependencies: readonly PlanNode[],
-  outputs: ReadonlyMap<string, string>,
-): string {
+function buildAgentPrompt(node: PlanNode, criteria: readonly string[]): string {
   const judged = criteria.length === 0
     ? ''
     : `What this plan is judged on:
 ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
 ` + String.fromCharCode(10) + String.fromCharCode(10)
-  if (dependencies.length === 0) return `${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}`.trim()
-  const sections = dependencies.map((dependency) => {
-    const output = outputs.get(dependency.id) ?? ''
-    return `Output of ${dependency.id}:\n${output}`
-  })
-  return `${node.task}\n\n---\nWhat the nodes this task depends on produced:\n\n${sections.join('\n\n')}`
+  // A worker is told what it is: it does the work, it does not draw a graph of
+  // its own. The marker is also how the plugin recognises the worker's own
+  // conversation and keeps the turn doctrine away from it.
+  const opener = node.kind === 'worker'
+    ? `${WORKER_MARKER} You are a worker. This conversation is yours: do the work yourself — think, act, and `
+      + 'report what you found. Do not draw a plan and do not delegate.'
+      + String.fromCharCode(10) + String.fromCharCode(10)
+    : ''
+  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}`.trim()
 }
 
 /**
@@ -185,8 +195,6 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
 async function runNode(
   runner: BatchRunner,
   node: PlanNode,
-  dependencies: readonly PlanNode[],
-  outputs: ReadonlyMap<string, string>,
   criteria: readonly string[],
   agent: Agent | undefined,
   signal: AbortSignal,
@@ -196,15 +204,16 @@ async function runNode(
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
   repair: RepairCall | undefined,
+  fork: PlanForkOptions | undefined,
 ): Promise<PlanNodeResult> {
   if (node.kind === 'tools') {
     const calls = node.calls.map(call => ({
       name: call.name,
-      arguments: substitutePlaceholders(call.arguments, outputs),
+      arguments: call.arguments,
     }))
     const batch: BatchOutput = await runBatch(
       runner,
-      { criteria: [...criteria], calls },
+      { criteria: [...criteria], calls, order: node.order },
       agent,
       signal,
       respectConcurrencySafety,
@@ -234,6 +243,41 @@ async function runNode(
     }
   }
 
+  // A worker and a forker inherit this conversation, this round included. The
+  // harness's own fork tool cannot do that from inside a running round, so the
+  // child is started here, on a seed built from the log as it stands.
+  const forked = node.kind === 'worker' || node.kind === 'forker'
+  if (forked && agent === undefined) {
+    return {
+      id: node.id,
+      kind: node.kind,
+      ok: false,
+      output: '',
+      error: 'a plan outside a conversation cannot start a child that inherits it',
+    }
+  }
+  if (forked && fork !== undefined && agent !== undefined) {
+    const result: SpawnResult = await spawnForkedChild(
+      fork.host,
+      agent,
+      buildAgentPrompt(node, criteria),
+      {
+        planTool: PLAN_TOOL,
+        plans: node.kind === 'forker',
+        timeoutMs: agentNodeTimeoutMs,
+        signal,
+        ...(node.kind === 'worker' && fork.onWorker !== undefined ? { onCreated: fork.onWorker } : {}),
+      },
+    )
+    return {
+      id: node.id,
+      kind: node.kind,
+      ok: result.error === undefined,
+      output: result.output,
+      error: result.error ?? '',
+    }
+  }
+
   try {
     const deadline = new AbortController()
     const onPlanAbort = (): void => deadline.abort()
@@ -244,10 +288,14 @@ async function runNode(
         () => runner.execute({
           callId: nextPlanCallId(),
           rootCallId,
-          name: node.kind,
+          // The node kind says what the child does; the tool says how it is
+          // started. A worker starts from this conversation without the loop,
+          // so it runs through the fork tool and the plugin keeps the doctrine
+          // and the plan tool away from it.
+          name: NODE_AGENT_TOOL[node.kind as 'worker' | 'spawner' | 'forker'],
           arguments: {
             description: node.id,
-            prompt: buildAgentPrompt(node, criteria, dependencies, outputs),
+            prompt: buildAgentPrompt(node, criteria),
             run_in_background: false,
           },
           ...(agent === undefined ? {} : { agent }),
@@ -285,8 +333,8 @@ async function runNode(
 /**
  * Run a whole plan and collect every result.
  *
- * The nodes of a layer run at the same time. A node that depends on another
- * waits for it, and its output becomes part of what the next node is given.
+ * The nodes run at the same time — one layer — and every result is collected.
+ * The only thing that splits the layer is two nodes writing the same file.
  *
  * @param runner - the tool registry every call runs through.
  * @param plan - the plan.
@@ -308,22 +356,15 @@ export async function runPlan(
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
   repair?: RepairCall,
+  fork?: PlanForkOptions,
 ): Promise<PlanOutput> {
-  const built = buildWaves(plan.nodes)
-  if ('error' in built) {
-    throw new Error(`the plan does not hold together: ${built.error}`)
-  }
-  const waves = built.waves
-  const byId = new Map(plan.nodes.map(node => [node.id, node]))
-  const outputs = new Map<string, string>()
+  const groups = buildGroups(plan.nodes)
   const results = new Map<string, PlanNodeResult>()
 
-  for (const wave of waves) {
-    const settled = await Promise.all(wave.map(async (node) => await runNode(
+  for (const group of groups) {
+    const settled = await Promise.all(group.map(async (node) => await runNode(
       runner,
       node,
-      dependenciesOf(node, byId),
-      outputs,
       plan.criteria,
       agent,
       signal,
@@ -333,22 +374,14 @@ export async function runPlan(
       maxAgentDepth,
       agentNodeTimeoutMs,
       repair,
+      fork,
     )))
-    for (const result of settled) {
-      results.set(result.id, result)
-      outputs.set(result.id, result.output)
-    }
+    for (const result of settled) results.set(result.id, result)
   }
-
-  const parallelLayers = waves.filter(wave => wave.length > 1).length
-  const schedule: PlanOutput['schedule'] = parallelLayers === waves.length
-    ? 'concurrent'
-    : parallelLayers === 0 ? 'serial' : 'mixed'
 
   return {
     criteria: plan.criteria,
-    waves: waves.length,
-    schedule,
+    groups: groups.length,
     nodes: plan.nodes.map(node => results.get(node.id)).filter((result): result is PlanNodeResult => result !== undefined),
   }
 }
@@ -361,8 +394,8 @@ export async function runPlan(
  */
 export function renderPlan(output: PlanOutput): string {
   const lines: string[] = []
-  lines.push(`Plan finished — ${output.nodes.length} node(s) in ${output.waves} layer(s), `
-    + `shaped ${output.schedule}.`)
+  lines.push(`Plan finished — ${output.nodes.length} node(s) in ${output.groups} group(s), `
+    + 'run in parallel.')
   lines.push(`Criteria: ${output.criteria.join('; ')}`)
   lines.push('')
   for (const node of output.nodes) {
@@ -399,6 +432,10 @@ export function applyPlanTool(
     maxAgentDepth: () => number
     /** The budget for one agent node, in milliseconds. */
     agentNodeTimeoutMs: () => number
+    /** The host context carrying the agent factory, for children that inherit the conversation. */
+    host?: () => Record<string, unknown>
+    /** Told a worker's session id, so the loop leaves that conversation alone. */
+    onWorker?: (sessionId: string) => void
     /** Told when a plan starts running, so a rule can know the turn handed its plan over. */
     onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
     /** Build the repair for one conversation, from its own call configuration. */
@@ -417,12 +454,12 @@ export function applyPlanTool(
     timeoutMs: options.timeoutMs(),
     description: 'Run one plan and return every result together. A plan may be empty: it then returns at '
       + 'once, and the round can end with the conclusion. A turn hands its shape over here — the observable '
-      + 'criteria that decide whether it succeeded, and the nodes it is made of. A node is one of three kinds: '
-      + '"tools" (a batch of calls that run together), '
-      + '"subagent" (a child agent with its own context), "subagent_fork" (a child agent that inherits this '
-      + 'conversation). A node may name the nodes it depends on in "after": the ones that depend on nothing '
-      + 'run together and the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes '
-      + 'the output of that node, and counts as a dependency too.',
+      + 'criteria that decide whether it succeeded, and the nodes it is made of. There is one layer: every '
+      + 'node starts at the same time. A node is one of four kinds: '
+      + '"tools" (calls whose arguments are already decided), '
+      + '"worker" (a child that starts with this conversation and does the work itself, without drawing a '
+      + 'plan of its own), "spawner" (a child that starts empty and plans through this loop), '
+      + '"forker" (a child that starts with this conversation and plans through this loop). ',
     parameters: {
       criteria: {
         type: 'array',
@@ -440,14 +477,16 @@ export function applyPlanTool(
             id: {
               type: 'string',
               required: true,
-              description: 'The name of this node. Other nodes refer to it in "after".',
+              description: 'The name of this node.',
             },
             kind: {
               type: 'string',
-              enum: ['tools', 'subagent', 'subagent_fork'],
+              enum: ['tools', 'worker', 'spawner', 'forker'],
               required: true,
-              description: '"tools" runs a batch of calls together. "subagent" is a child agent with its own '
-                + 'context. "subagent_fork" is a child agent that inherits this conversation.',
+              description: '"tools" runs a batch of calls together. "worker" is a child that starts with '
+                + 'this conversation and does the work itself, and never draws a plan of its own. "spawner" '
+                + 'is a child that starts empty and plans. "forker" is a child that starts with this '
+                + 'conversation and plans.',
             },
             calls: {
               type: 'array',
@@ -456,20 +495,27 @@ export function applyPlanTool(
                 additionalProperties: false,
                 properties: {
                   name: { type: 'string', required: true, description: 'The tool to call.' },
-                  arguments: { type: 'json', required: true, description: 'The arguments to call it with. '
-                    + 'An argument that is exactly "@@nodeId@@" becomes the output of that node.' },
+                  arguments: { type: 'json', required: true, description: 'The arguments to call it with.' },
                 },
               },
               description: 'The calls of a tools node. Only for kind "tools".',
             },
             task: {
               type: 'string',
-              description: 'The task of an agent node. For kind "subagent" and "subagent_fork".',
+              description: 'The task of an agent node. For kind "worker", "spawner" and "forker".',
             },
-            after: {
+            order: {
+              type: 'string',
+              enum: ['parallel', 'sequential'],
+              description: 'How the calls of a tools node run. "parallel" (the default) lets the calls that '
+                + 'are safe together run together; "sequential" runs them in the order they are written, for '
+                + 'an order of business like "write the file, then run the test".',
+            },
+            writes: {
               type: 'array',
               items: { type: 'string' },
-              description: 'The nodes this one depends on. Their output is put in front of this node.',
+              description: 'The files this node writes. Two nodes that write the same file do not run '
+                + 'together, because the second write would land on the result of the first one.',
             },
           },
         },
@@ -483,8 +529,7 @@ export function applyPlanTool(
         additionalProperties: false,
         properties: {
           criteria: { type: 'array', items: { type: 'string' }, required: true },
-          waves: { type: 'number', required: true },
-          schedule: { type: 'string', enum: ['concurrent', 'mixed', 'serial'], required: true },
+          groups: { type: 'number', required: true },
           nodes: {
             type: 'array',
             required: true,
@@ -493,7 +538,7 @@ export function applyPlanTool(
               additionalProperties: false,
               properties: {
                 id: { type: 'string', required: true },
-                kind: { type: 'string', enum: ['tools', 'subagent', 'subagent_fork'], required: true },
+                kind: { type: 'string', enum: ['tools', 'worker', 'spawner', 'forker'], required: true },
                 ok: { type: 'boolean', required: true },
                 output: { type: 'string', required: true },
                 error: { type: 'string', required: true },
@@ -525,6 +570,14 @@ export function applyPlanTool(
       const repair = options.repair === undefined || ownConfig === undefined
         ? undefined
         : options.repair(ownConfig)
+      // Workers and forkers inherit this conversation, this round included, so
+      // they are started here rather than through the harness's own fork tool.
+      const fork: PlanForkOptions | undefined = options.host === undefined
+        ? undefined
+        : {
+            host: options.host(),
+            ...(options.onWorker === undefined ? {} : { onWorker: options.onWorker }),
+          }
       let output = await runPlan(
         ctx.tools,
         parsed,
@@ -536,6 +589,7 @@ export function applyPlanTool(
         options.maxAgentDepth(),
         options.agentNodeTimeoutMs(),
         repair,
+        fork,
       )
       // The plan has run. If the loop has a round left, the next one is already
       // queued; ending this turn is what lets the harness open it.

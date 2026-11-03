@@ -31,12 +31,24 @@ export interface BatchCall {
   arguments: unknown
 }
 
+/**
+ * How the calls of a batch run.
+ *
+ * `parallel` lets the calls that are safe together run together. `sequential`
+ * runs them one after another in the order they are written: an order of
+ * business, such as "write the file, then run the test", that the tool's own
+ * safety rules cannot express.
+ */
+export type BatchOrder = 'parallel' | 'sequential'
+
 /** The plan a batch carries. */
 export interface BatchArgs {
   /** The observable criteria that decide whether the batch succeeded. */
   criteria: string[]
   /** The calls the batch is made of. */
   calls: BatchCall[]
+  /** How the calls run. */
+  order?: BatchOrder
 }
 
 /** How one call inside a batch was scheduled. */
@@ -282,6 +294,16 @@ export async function runBatch(
   // before it finish before it starts, and the calls after it wait for it.
   // This is the order the harness's own scheduler uses, and a batch that
   // reordered its calls would report results the model never asked for.
+  // A batch that was asked to run in order runs in order: the order the caller
+  // wrote is the order of business, and the tool's own safety rules only say
+  // which calls may share a moment.
+  if (args.order === 'sequential') {
+    for (const [index, call] of calls.entries()) {
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair)
+    }
+    return { criteria: args.criteria, schedule: 'serial', results: results.filter(item => item !== undefined) }
+  }
+
   const waves: { indexes: number[], concurrent: boolean }[] = []
   for (const [index, call] of calls.entries()) {
     const mode = runner.executionMode({

@@ -15,7 +15,7 @@
  *   made of. A node is a set of tool calls that run together, a task for a
  *   child that starts with no context, or a task for a child that inherits
  *   this conversation; a node may say what it depends on, so the plan runs in
- *   layers and every result comes back in one tool result.
+ *   one layer and every result comes back in one tool result.
  * - The rule makes a turn one plan: the first call of a turn is the plan, and
  *   after the plan has run the turn is over — what the plan did not settle
  *   belongs to the next round.
@@ -29,7 +29,7 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
-import { applyDelegationRule, applyJudgementGuard, applyRounds, applyTurnDoctrine, NEXT_ROUND, Plans, Rounds } from './rounds.js'
+import { applyDelegationRule, applyJudgementGuard, applyRounds, applyTurnDoctrine, NEXT_ROUND, Plans, Rounds, Workers } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -43,7 +43,7 @@ export const name = 'refine-loop'
  * Services this plugin needs: the tool registry, the prompt assembly, and the
  * command registry the per-conversation switch is registered in.
  */
-export const inject = ['tools', 'systemPrompt', 'commands', 'llm']
+export const inject = ['tools', 'systemPrompt', 'commands', 'llm', 'agentLoop']
 
 /**
  * The refined loop, as the model should see it.
@@ -54,13 +54,17 @@ export const inject = ['tools', 'systemPrompt', 'commands', 'llm']
 export const REFINE_GUIDANCE = [
   'Refined loop:',
   `- ${PLAN_TOOL}: one call that carries the whole shape of the round — the criteria that decide whether it `
-  + 'succeeded, and the nodes it is made of. How a round runs, and when the graph or the conclusion is due, is '
-  + 'said at the head of every round.',
-  '- A node is one of three kinds: "tools" (a batch of calls that run together), "subagent" (a child agent '
-  + 'with its own context), "subagent_fork" (a child agent that starts with this conversation).',
-  '- A node may name the nodes it depends on in "after". The nodes that depend on nothing run together, and '
-  + 'the next layer waits for them. A tool argument that is exactly "@@nodeId@@" becomes the output of that '
-  + 'node, and counts as a dependency too.',
+  + 'succeeded, and the nodes it is made of. There is one layer: every node starts at the same time and every '
+  + 'result comes back together. How a round runs, and when the plan or the conclusion is due, is said at the '
+  + 'head of every round.',
+  '- A node is one of four kinds: "tools" (calls whose arguments are already decided), "worker" (a child that '
+  + 'starts with this conversation and does the work itself, without drawing a plan of its own), "spawner" (a '
+  + 'child that starts empty and plans through this loop), "forker" (a child that starts with this conversation '
+  + 'and plans through this loop).',
+  '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
+  + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
+  + '"order": "sequential", or a worker.',
+  '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write the tool calls of a node with absolute paths. A plan is written before anything has run, so a '
   + 'relative path is a guess.',
   '- The plan runs in one round trip and every result comes back together. A result may be too long to fit '
@@ -214,6 +218,8 @@ export function apply(ctx: Context, config: Config): void {
   // Whether a conversation has opened its turn with a plan.
   const rounds = new Rounds()
   const plans = new Plans()
+  // The conversations that are workers, which the loop leaves alone.
+  const workers = new Workers()
 
   ctx.systemPrompt.section({
     name: 'refine-loop:policy',
@@ -240,6 +246,11 @@ export function apply(ctx: Context, config: Config): void {
     ),
     maxAgentDepth: () => config.maxAgentDepth.get(),
     agentNodeTimeoutMs: () => config.agentNodeTimeoutMs.get(),
+    // A worker or a forker inherits this conversation, this round included.
+    // The host context is what can start such a child; the sink is how the loop
+    // learns which conversations are workers.
+    host: () => ctx as unknown as Record<string, unknown>,
+    onWorker: (sessionId: string) => workers.mark(sessionId),
     // One round is a plan and its execution. When the plan has run and the loop
     // still has rounds in budget, queue the next one: the plan tool ends this
     // turn, and the pending message is what makes the harness open the next.
@@ -260,7 +271,7 @@ export function apply(ctx: Context, config: Config): void {
   // The doctrine is registered before the rounds hook: a pre-step hook's next()
   // runs the hooks registered after it, and the doctrine has to be the last
   // message the model reads before it speaks.
-  applyTurnDoctrine(ctx)
+  applyTurnDoctrine(ctx, workers)
   applyRounds(ctx, rounds, plans)
   applyJudgementGuard(ctx, plans)
   applyDelegationRule(ctx)

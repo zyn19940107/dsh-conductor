@@ -1,0 +1,48 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "exitCode": 0,
+  "wallMs": 152508,
+  "sessionId": "session-23060054-00e1-49c0-8058-cf449b5a801e",
+  "stderr": "",
+  "steps": 11,
+  "toolCalls": 10,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "pwsh",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 76906,
+    "outputTokens": 17180,
+    "cacheReadTokens": 541696,
+    "totalTokens": 635782
+  },
+  "formation": {
+    "agents": 1,
+    "input": 76906,
+    "output": 17180,
+    "cacheRead": 541696,
+    "total": 635782,
+    "steps": 11
+  },
+  "mainPrompt": 79050,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 36205,
+  "thinkingPreview": "The user wants me to review three parts of a project at D:\\code\\vibe\\dsh-refine-loop, read-only. Let me plan: read the three files independently — these are independent reads, so they can run in parallel in one round.\n\nThe task says \"分别独立审查\" — review each part independently. I could use subagents for each, but honestly reading three files directly is straightforward. But the instruction says to use refine_plan each round. Let me design a plan: three independent \"tools\" nodes reading each file... Actually, better: use subagents to independently review each part (as \"独立审查\" suggests), each returning a conclusion. Then I aggregate.\n\nLet me first check what's in the directory to know the files exist. Actually I can do a glob + reads in the first round as a discovery node. But refine_plan is the mechanism. Let me design:\n\nRound 1 plan:\n- node \"read_plan\": read D:\\code\\vibe\\dsh-refine-loop\\src\\",
+  "finalText": "三个部分都已审完（全程只读，未修改任何文件）。先说一处事实修正：**`src/gate.ts` 这个文件不存在**——`src/` 下只有 `concurrency.ts`、`policy.ts`、`batch.ts`、`repair.ts`、`index.ts`、`plan.ts`、`rounds.ts`、`tool.ts` 八个文件。插件的那条规则实际落在 `index.ts` + `rounds.ts` 里，下面按这个真实结构回答。\n\n---\n\n## 1. src/plan.ts —— 计划的数据结构\n\n**数据结构**（`plan.ts:22-49`）：\n\n```ts\nPlanArgs     = { criteria: string[]; nodes: PlanNode[] }\nPlanNode     = { id: string; kind: PlanNodeKind; calls: PlanToolCall[]; task: string; after: string[] }\nPlanToolCall = { name: string; arguments: unknown }\n```\n\n- `criteria`：判断这一轮成败的**可观测判据**，非空才合法（空数组 → `parsePlanArgs` 返回 undefined → 工具直接抛错，`plan.ts:98-102`）。\n- `nodes`：**允许为空**（空图 = 这一轮已经有答案，直接进结论，`plan.ts:144-146`）。\n- `id` 唯一，重复即拒；`after` 是依赖的节点 id 列表。\n\n**节点的三种**（`plan.ts:16`）：`PlanNodeKind = 'tools' | 'subagent' | 'subagent_fork'`。\n- `tools`：一批同时跑的调用，必须带非空 `calls`；\n- `subagent`：从零上下文起的孩子，带 `task`；\n- `subagent_fork`：继承本对话的孩子，带 `task`。\n后两者合称 `AGENT_NODE_KINDS`（`plan.ts:19`）。\n\n**占位符语法：`@@nodeId@@`**，两种形态（`plan.ts:73`、`plan.ts:82`）：\n- 整参数形态：整个参数就是 `@@id@@`（正则 `^@@([^@]+)@@$`）→ 替换成该节点的完整输出；\n- 内嵌形态：`@@id@@` 出现在更长的字符串里 → 就地拼接进句子。\n\n用 `@@` 而不是 `{{}}` 是刻意的：harness 的提示词渲染器把双花括号当自己的变量，占着它会拒绝渲染整个 section（`index.ts:202-209` 会在加载时直接抛错）。另外两点：占位符**自动算作依赖边**（`plan.ts:153-159`，哪怕计划没写进 `after`）；**解析不到就报错，不当字面量传下去**（`plan.ts:302-322`）。\n\n`buildWaves`（`plan.ts:202-270`）按依赖深度分层，并拒绝四种坏图：重复 id、依赖自己、依赖不存在的节点、成环；还额外拒绝**子代理依赖另一个子代理**（`plan.ts:220-231`）——孩子是并行分支，不能串成流水线。\n\n---\n\n## 2. src/gate.ts —— 不存在；那条规则实际在哪\n\n规则本体在 `index.ts:19-21` 一句话里：**「一条规则让一个 turn = 一张图：turn 的第一个调用是计划；计划跑完，这个 turn 就结束了——计划没解决的事属于下一轮。」** `policy.ts:117`、`policy.ts:164` 用另一个说法反复点它：*\"the rule that makes a turn one plan\"*。\n\n它的**触发条件**（`rounds.ts` + `index.ts`）：\n\n| 机制 | 挂载点 | 触发条件 | 效果 |\n|---|---|---|---|\n| 教条注入 `applyTurnDoctrine`（`rounds.ts:164`） | `agent/pre-step` | `payload.step === 1` | 把 `ROUND_LOOP` 作为**最后一条消息**塞进去（系统提示词在最前，模型最后读到的才照做） |\n| 判断门 `applyJudgementGuard`（`rounds.ts:242`） | `ctx.tools.guard` | 调用是模型自己发起的（`callId === rootCallId`）、工具不是 `refine_plan`、且该请求**已经交过图**（`plans.waiting(sessionId) === false`） | 拒绝并回 `JUDGE_ONLY`：只能写结论或交下一张图 |\n| 派发门 `applyDelegationRule`（`rounds.ts:190`） | `agent/created` | 模型直接调 harness 的 `subagent`/`subagent_fork`（`callId === rootCallId`） | 抛 `DELEGATE_IN_GRAPH`，让他改成图里的节点；图内嵌套调用原样放行 |\n| 轮次预算 `applyRounds`（`rounds.ts:142`） | `agent/pre-step` | 本轮出现 user 消息 | 重置轮次计数，`plans.expect()` —— 新请求必须交自己的第一张图 |\n| 收尾 `onPlanFinished`（`index.ts:246-255`） | 计划跑完后 | `rounds.bump() > maxRounds`（默认 16） | 超预算就停；否则 `agent.followup(NEXT_ROUND)` 排队下一轮，并 `exec.concludeTurn()` 结束当前 turn |\n| 开关 `policy.ts` | 命令 + 消息 | `/dsh-refine-loop on|off` | off 时 `ctx.tools.restrict({deny:['refine_plan']})` + 系统提示词里的 guidance 一并撤掉，规则随之失效 |\n\n**一个要提请注意的不一致**：README「插件强制了什么」表格里写「一轮结束了却没交图 → 插件把它拽回来（最多 3 次）」，但 `src/` 里**没有这个机制**——`index.ts:177` 只剩一行无主的文档注释「How many times a turn may be pulled back after it handed over its plan.」，`Config` 里也没有对应字段。代码里真正存在的是上表的判断门与 followup 消息。README 的其它描述（「图跑完只能判断」「派发只能走图」）与代码一致。\n\n---\n\n## 3. src/tool.ts —— 计划怎么跑、子代理受什么限制\n\n**跑起来的路径**（`tool.ts:387-547` 注册名为 `refine_plan` 的工具）：\n\n1. `execute`：`parsePlanArgs` 校验 → 校验节点数 ≤ `maxBatchSize`（默认 8，超了报「Split it, or narrow it」）→ `onPlanStarted` → 用会话自己的 requestHeader 配置组装 repair → 调 `runPlan`。\n2. `runPlan`（`tool.ts:300-354`）：`buildWaves` 分层，图不成立就抛「the plan does not hold together: …」；然后**逐层 `Promise.all`** 跑该层所有节点，每层跑完把结果和输出收进 map；最后算 `schedule`（每层都 >1 节点 = `concurrent`，没有并行层 = `serial`，否则 `mixed`），返回 `PlanOutput`，由 `renderPlan`（`tool.ts:362-379`）渲染成一段文本一次性回给模型。\n3. `tools` 节点（`tool.ts:200-223`）：先把参数里的占位符替换掉，再交给 `runBatch`（`batch.ts:267-326`）——批次内部按「独占调用是屏障」再切波次，能并发的 `Promise.all`，独占的排队；并发判定 `mayRunTogether`（`concurrency.ts:222`）先听工具自己的 `isConcurrencySafe`，再吃插件的 override（`glob`/`grep` 恒可并发，`ops_bash` 只在命令是只读简单命令时）。某条调用失败会**就地修复**：最多 `MAX_REPAIRS = 2`（共 3 次），问会话自己的模型「这条调用应该是什么」，用改好的参数重跑那一条，其余节点不受影响。\n4. `subagent`/`subagent_fork` 节点（`tool.ts:237-259`）：以 `runner.execute({ name: node.kind, arguments: { description, prompt, run_in_background: false } })` 调 harness 的派发工具；prompt 由 `"
+}

@@ -12,22 +12,27 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { WORKER_MARKER } from './plan.js'
+import { PLAN_TOOL } from './tool.js'
 
 /**
  * What the model is told at the head of every turn.
  *
  * It says both halves of the rule in one place: hand over the graph, or answer.
  */
-export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the graph: what the pieces of work '
-  + 'are, which of them can run at the same time, what each node is made of, what observable criteria decide it '
-  + 'succeeded. If there is nothing to run — you already have what you need — hand over the empty plan. '
-  + 'Write every call with the exact tool name from the tool list you were given — copy it, do not '
-  + 'reconstruct it from memory. (2) Hand it over with refine_plan — the plan may be empty, and then the round '
-  + 'goes on to the conclusion. (3) It runs — the independent nodes '
-  + 'together — and every result comes back. (4) Only then judge: if those results answer the request, write '
-  + 'the conclusion, which ends the loop; if they do not, the next round designs the next graph. You may call '
-  + 'tools while you design the graph — use them to find out what a node should say. "subagent_fork" starts '
-  + 'with this conversation; "subagent" starts empty and reads everything again.'
+export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the plan: what the pieces of work '
+  + 'are, which of them are independent enough to run at the same time, what each node is made of, what '
+  + 'observable criteria decide it succeeded. If there is nothing to run — you already have what you need — '
+  + 'hand over the empty plan. Write every call with the exact tool name from the tool list you were given — '
+  + 'copy it, do not reconstruct it from memory. (2) Hand it over with refine_plan: one layer, every node '
+  + 'starts at the same time, every result comes back together. The plan may be empty, and then the round goes '
+  + 'on to the conclusion. (3) It runs — the nodes together — and every result comes back. (4) Only then '
+  + 'judge: if those results answer the request, write the conclusion, which ends the loop; if they do not, '
+  + 'the next round designs the next plan. You may call tools while you design the plan — use them to find out '
+  + 'what a node should say. There is no dependency between the nodes of one round: work that needs another '
+  + 'node output belongs to the next round, and work that must happen in order belongs inside one node. '
+  + '"worker" starts with this conversation and does the work itself, never drawing a plan; "spawner" '
+  + 'starts empty and plans; "forker" starts with this conversation and plans.'
 
 /**
  * What the model is told when a plan has run and another round is open.
@@ -45,9 +50,9 @@ export const NEXT_ROUND = 'The plan has run — every result is above. Judge it:
  * of the graph: the child runs as part of the turn, under the round's plan, and
  * the results come back together.
  */
-export const DELEGATE_IN_GRAPH = 'Delegation happens inside the plan: add a "subagent_fork" node to refine_plan '
-  + 'and the child runs as part of this turn\'s graph, under the plan\'s budget. A direct delegation call would '
-  + 'run outside the plan.'
+export const DELEGATE_IN_GRAPH = 'Delegation happens inside the plan: add a "worker", "spawner" or "forker" node'
+  + ' to refine_plan and the child runs as part of this turn, under the plan budget. A direct delegation'
+  + ' call would run outside the plan.'
 
 /** The tools the harness ships for delegating directly. */
 export const DELEGATION_TOOLS = ['subagent', 'subagent_fork'] as const
@@ -161,10 +166,26 @@ export function applyRounds(ctx: Context, rounds: Rounds, plans: Plans): void {
  *
  * @param ctx - the plugin context supplying the agent runtime.
  */
-export function applyTurnDoctrine(ctx: Context): void {
+export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter') return decision
+
+    // A worker is a child that does the work itself: it is not handed the
+    // doctrine that tells a conversation to draw a plan, and the plan tool is
+    // taken out of its table entirely. The plugin started it, so it knows the
+    // session; the marker in the delegation prompt is the fallback for a
+    // worker that somehow arrived by another route.
+    if (workers?.has(payload.agent.session.id) === true || isWorkerConversation(payload.messages)) {
+      try {
+        payload.agent.ctx.tools.restrict({ deny: [PLAN_TOOL] })
+      } catch {
+        // The scope already refuses it, or the registry does not allow the
+        // restriction here; the marker in the prompt is the fallback.
+      }
+      return decision
+    }
+
     if (payload.step !== 1) return decision
     return {
       ...decision,
@@ -174,6 +195,64 @@ export function applyTurnDoctrine(ctx: Context): void {
       })],
     }
   })
+}
+
+/**
+ * The conversations that belong to workers.
+ *
+ * A worker is a child that was started without the plan tool and must be left
+ * alone by the loop: it inherits this conversation, it does the work itself,
+ * and no round of it is a plan. The plugin is the one that starts it, so it
+ * knows the session id and does not have to recognise the conversation from
+ * its messages.
+ */
+export class Workers {
+  /** The worker conversations. */
+  readonly #sessions = new Set<string>()
+
+  /**
+   * Record one worker conversation.
+   *
+   * @param sessionId - the child's session.
+   */
+  mark(sessionId: string): void {
+    this.#sessions.add(sessionId)
+  }
+
+  /**
+   * Whether a conversation is a worker's.
+   *
+   * @param sessionId - the conversation.
+   * @returns true when it is a worker's.
+   */
+  has(sessionId: string): boolean {
+    return this.#sessions.has(sessionId)
+  }
+}
+
+/**
+ * Whether a turn belongs to a worker.
+ *
+ * The plugin's own worker prompt opens with {@link WORKER_MARKER}; the child's
+ * first user message carries it. Reading the marker off the messages is what
+ * lets the plugin keep the turn doctrine, and the plan tool, away from a
+ * conversation that was asked to work rather than to plan.
+ *
+ * @param messages - the conversation's user messages.
+ * @returns true when the conversation is a worker.
+ */
+export function isWorkerConversation(messages: readonly { content?: unknown }[]): boolean {
+  for (const message of messages) {
+    const content = message.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      const text = (block ?? {}) as { type?: unknown, text?: unknown }
+      if (text.type === 'text' && typeof text.text === 'string' && text.text.startsWith(WORKER_MARKER)) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 /**
