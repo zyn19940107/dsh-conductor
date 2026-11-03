@@ -1,0 +1,63 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 2,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 85492,
+  "timedOut": false,
+  "sessionId": "session-b78afd77-b6e1-4a96-81de-54fc151a0cb6",
+  "stderr": "",
+  "steps": 14,
+  "toolCalls": 23,
+  "tools": [
+    "glob",
+    "pwsh",
+    "pwsh",
+    "glob",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "grep",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "read",
+    "pwsh",
+    "grep",
+    "grep",
+    "grep",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 68851,
+    "outputTokens": 14910,
+    "cacheReadTokens": 675328,
+    "totalTokens": 759089
+  },
+  "formation": {
+    "agents": 1,
+    "input": 68851,
+    "output": 14910,
+    "cacheRead": 675328,
+    "total": 759089,
+    "steps": 14
+  },
+  "mainPrompt": 76866,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 29193,
+  "thinkingPreview": "The project has src/plan.ts, src/gate.ts (wait, I don't see gate.ts in the listing — I see batch.ts, concurrency.ts, fork.ts, index.ts, plan.ts, policy.ts, repair.ts, rounds.ts, tool.ts). There's no gate.ts in src! Let me check. The user asked about src/gate.ts. Let me verify.\n\nLet me list the src directory precisely.\nThere is no `src/gate.ts`. The user asked me to review three parts: src/plan.ts, src/gate.ts, src/tool.ts. But gate.ts doesn't exist. Let me search for \"gate\" across the project source to see if the gate logic lives elsewhere (maybe in policy.ts, or index.ts).\n\nThis is important — the user's premise for part 2 may be wrong. Let me investigate thoroughly.\n\nLet me read plan.ts and tool.ts, and grep for \"gate\" in the src.\n\nLet me do these in parallel.\nNo gate.ts. The \"gate\" concept might be `policy.ts` — let me check. Let me read policy.ts and index.ts to understand what the p",
+  "finalText": "三部分审查完毕，**未修改任何文件**（只做读取 + 只读的 `git show`）。\n\n---\n\n## 先说一个前提问题\n\n**`src/gate.ts` 不存在。** 它在 2026-11-02 的提交 `5b6b997`（\"清理:删掉闸门/图内续片/死配置,只留 refine_plan + 轮次预算;README 重写\"）中被删除，同时删掉的还有 `verify/gate.spec.ts`。当前 `src/` 只有 9 个文件：`batch / concurrency / fork / index / plan / policy / repair / rounds / tool`。\n\n所以第 2 问我按**两个版本**分别回答：被删掉的那条老规则，以及它在现版本里被拆散后的等价物。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**结构**：`PlanArgs = { criteria: string[]; nodes: PlanNode[] }`（plan.ts:87-92）。每个 `PlanNode` 是**一个扁平接口**（plan.ts:71-84），六个字段恒定存在：`id / kind / calls / task / order / writes`。注意它**不是判别联合**——`kind` 名义上是判别位，但类型层面不强制：`tools` 节点的 `task` 被写成 `''`、`calls` 被写成 `[]`，agent 节点的 `calls` 同理（plan.ts:160、166）。\n\n**四种节点**（plan.ts:24）：`tools`（参数已定的工具调用）/ `worker`（继承本对话、自己干活、不画图）/ `spawner`（空上下文起步、要在本插件的循环里画图）/ `forker`（继承本对话、要在本插件的循环里画图）。另有 `AGENT_NODE_KINDS`（后三种起代理）和 `WORKER_NODE_KINDS`（仅 worker）。\n\n**调用参数的处理**（`parsePlanArgs`，plan.ts:115-173）：\n- **整体 fail-closed**：任何一个节点畸形（id 非空串、kind 合法、id 不重复、tools 节点必须至少一个 call、agent 节点必须有非空 task），**整个计划被拒**（返回 undefined），工具随即抛 `refine_plan needs criteria, and nodes that each have an id and a kind`。不是\"跳过坏节点\"，是\"一票否决\"。\n- `arguments` 的类型是 `unknown`，**原样透传**，不做任何针对目标工具 schema 的校验；`undefined` 被兜底成 `{}`（plan.ts:158）。参数写错的后果延后到真正执行时才暴露，由 batch 的修复循环兜。\n- `criteria` 必须是非空字符串数组（过滤空串后还要非空）；但**空计划是允许的**（plan.ts:168-172），由模型自己判断该不该交空手。\n- `order` 只有字面量 `'sequential'` 才算串行，其余一律 `'parallel'`（plan.ts:141）；`writes` 可选，过滤空串并 trim。\n- `buildGroups`（plan.ts:190-215）按 `writes` 冲突切分\"一层\"：写同一个文件的两个节点不共组，组间串行、组内并行。**声明为空 `writes` 的节点被\"照单全收\"**——插件无从知道它会写盘。\n\n---\n\n## 2. `src/gate.ts` —— 那条规则与触发条件\n\n### 老规则（`git show 5b6b997^:src/gate.ts`，已删除）\n\n规则一句话：**\"The rule is one line: the agent does not call tools itself. Every tool call it makes goes inside a plan.\"**（模型不许自己调工具，所有调用都得进计划）。实现是 `ctx.tools.guard` → `planRefusal(...)`，返回拒绝理由 `PLAN_REQUIRED`。\n\n**老触发条件**（全部满足才拒绝）：\n\n| # | 条件 | 豁免说明 |\n|---|---|---|\n| 1 | `appliesTo(sessionId)` | 该会话没被 `/dsh-refine-loop off` 关掉 |\n| 2 | `requirePlan()` 为真 | 配置可关 |\n| 3 | `delegationDepth === 0` | **被派出的子代理豁免**（注释：子代理是 agent，得能中途改路） |\n| 4 | `toolName !== PLAN_TOOL` | 计划工具本身永远放行 |\n| 5 | `bumpBefore(sessionId) <= planPullbacks` | **拉回次数用完就放行**——\"The rule is a pullback, not a cage\" |\n| 6 | `isModelCall(execution)`（`callId === rootCallId`） | 计划内部发出的嵌套调用不归这条管 |\n\n### 现版本（`src/rounds.ts` + `src/policy.ts`）\n\n老闸门被拆成**三条独立的守卫**，而且**\"不许直接调工具\"这条总闸已经没了**：\n\n1. **`applyJudgementGuard`（rounds.ts:360-369）** —— 现行主规则：\"图跑完之后的这一轮只做判断\"。触发：代理存在 + 是模型自己发起的调用（`callId === rootCallId`）+ 工具名不是 `refine_plan` + `plans.waiting(sessionId) === false`（即本次请求**已经交过计划**）→ 拒绝并回 `JUDGE_ONLY`。\n   **关键差异**：在第一次交计划**之前**，模型直接调工具是**放行**的（`plans.waiting` 为 true）。老闸门是\"计划没交之前一律拉回\"，新规则是\"计划跑过之后不许再零敲碎打\"。规则强度是**明显放宽**的。\n2. **`applyDelegationRule`（rounds.ts:298-323）** —— `subagent` / `subagent_fork` 不许直接调：`exec.callId === exec.rootCallId` 时抛 `DELEGATE_IN_GRAPH`（\"Delegation happens inside the plan\"）。计划内部的嵌套调用照常放行；工具描述被重写，免得模型以为计划节点看不到本轮已读的内容。\n3. **`applyWorkerRule`（rounds.ts:276-285）** —— worker 会话里调 `refine_plan` 被拒，回 `WORKER_NO_PLAN`。工具**故意留在 worker 的工具表里**（动了工具表就会改 request header，继承的 prefix 就不命中父会话的缓存），改成在调用处拦。\n\n外加：`applyTurnDoctrine`（rounds.ts:169-193）在每轮 step 1 注入 `ROUND_LOOP` 教条；`policy.ts` 的 `/dsh-refine-loop off` 把 `refine_plan` 从该会话 scope 里摘掉，系统提示里的 guidance 随之消失。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n**跑起来的路径**：`refine_plan` 由 `applyPlanTool`（tool.ts:426）注册（参数 JSON schema + 输出 schema + `render`）→ `execute`（tool.ts:567）依次做：`parsePlanArgs` 校验 → 节点数超限就抛错（`maxBatchSize`，默认 8）→ 从 `agent.session.requestHeader()?.config` 取本会话自己的路由来准备修复器 → `runPlan` → `onPlanFinished` → `exec.concludeTurn()`。\n\n`runPlan`（tool.ts:354-393）：`buildGroups` → **组间串行、组内 `Promise.all` 并行** → 结果存进 Map，最后按计划声明顺序输出 `{criteria, groups, nodes}`。\n\n- **tools 节点** → `runBatch`（batch.ts:279）：`order: 'sequential'` 就严格按写下的顺序一个个跑；否则按 `executionMode()` + `mayRunTogether()` 切\"波次\"，不安全调用成为栅栏串行。失败的调用进**修复循环**（`MAX_REPAIRS = 2`，最多 3 次尝试），拿**同一个模型**去问\"这个调用本该是什么\"，连工具名带参数一起改（batch.ts:252-257）。\n- **轮次循环**：`onPlanFinished"
+}

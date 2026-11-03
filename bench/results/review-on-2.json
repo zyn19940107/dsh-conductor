@@ -1,0 +1,45 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 103884,
+  "timedOut": false,
+  "sessionId": "session-40cf4765-3d4c-4c36-b15f-a35207ff1d45",
+  "stderr": "",
+  "steps": 6,
+  "toolCalls": 5,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 55842,
+    "outputTokens": 6939,
+    "cacheReadTokens": 178497,
+    "totalTokens": 241278
+  },
+  "formation": {
+    "agents": 1,
+    "input": 55842,
+    "output": 6939,
+    "cacheRead": 178497,
+    "total": 241278,
+    "steps": 6
+  },
+  "mainPrompt": 66836,
+  "correctness": {
+    "passed": 4,
+    "total": 4,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 11980,
+  "thinkingPreview": "The gate.ts read did not return the file content — it seems the glob result got mixed in, and the \"read\" for gate.ts returned only a glob-like listing. Actually looking at the output, the third call output shows glob results (bench files) — that appears to be truncated/garbled. I need to read gate.ts and also the missing part of tool.ts (lines 1-160).\n\nLet me do another round: read gate.ts fully, and read tool.ts lines 1-160. Also maybe look at the src directory listing to know other files (e.g., index.ts) for context on the gate rule. But the request is only about three files.\n\nLet me run a plan with tools nodes reading gate.ts and tool.ts lines 1-165.\n\nAlso, the glob result was truncated — the src listing wasn't shown. Let me glob src/*.ts specifically.\n\nLet me hand over the next plan.\ngate.ts does not exist in src/ — the src listing shows: concurrency.ts, policy.ts, repair.ts, batch.t",
+  "finalText": "三个文件都读过了(全程只读,未改动任何文件)。先说一个偏差:**`src/gate.ts` 不存在**——`src/` 下只有 `concurrency.ts / policy.ts / repair.ts / batch.ts / plan.ts / fork.ts / index.ts / tool.ts / rounds.ts`。插件的那条规则实现在 **`src/rounds.ts`**(配套的开关在 `src/policy.ts`),下面按这个真实位置回答。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**数据结构**(`src/plan.ts:63-92`)\n\n```ts\nPlanArgs  = { criteria: string[]; nodes: PlanNode[] }\nPlanNode  = { id: string; kind: PlanNodeKind; calls: PlanToolCall[];\n              task: string; order: PlanNodeOrder; writes: string[] }\nPlanToolCall = { name: string; arguments: unknown }\n```\n\n计划只有**一层**:所有节点同时启动、结果一起回来,**没有 `after`/依赖边**(`plan.ts:4-18`)。依赖上一个节点输出的工作属于下一轮。\n\n**节点四种**(`plan.ts:24`):\n\n| kind | 含义 | 落到哪个工具 |\n|---|---|---|\n| `tools` | 参数已定的调用批次 | `runBatch` |\n| `worker` | 带本对话起步、自己干活、**不画计划** | `subagent_fork` |\n| `spawner` | 从空白起步、走本插件的循环 | `subagent` |\n| `forker` | 带本对话起步、走本插件的循环 | `subagent_fork` |\n\n`AGENT_NODE_KINDS = ['worker','spawner','forker']`(`plan.ts:27`)、`WORKER_NODE_KINDS = ['worker']`(`plan.ts:35`)、`NODE_AGENT_TOOL` 映射表在 `plan.ts:46-50`——注意 **worker 和 forker 共用 `subagent_fork`**,kind 说的是\"子代理做什么\",不是\"用哪个工具拉起\"。\n\n**调用参数怎么处理**(`plan.ts:148-161`,JSON schema 在 `tool.ts:503-512`)\n\n- `arguments` 的类型是 **`unknown`**,schema 里只声明成 `type: 'json'`——**plan.ts 完全不按目标工具的 schema 校验参数**。\n- 解析时只做两件事:`name` 必须是非空字符串(会 trim),`arguments` 为 `undefined` 时补成 `{}`;**其余原样透传**,不裁剪、不改写、不展开。\n- 真正的参数校验发生在**运行时**由目标工具自己做;失败后由 `batch.ts:249-257` 的 repair 机制兜底——把失败的那一次调用拿给**本对话自己的模型**改写,最多改 2 次(`MAX_REPAIRS = 2`),其余调用不受影响。\n\n**校验的严格度**(`parsePlanArgs`,`plan.ts:115-173`):criteria 必须至少一条非空字符串;节点 `id` 非空且不重复;`kind` 必须落在四选一;`tools` 节点必须有 ≥1 个调用、agent 节点必须有非空 `task`;`order` 只认 `'sequential'`,其余一律回落 `'parallel'`;`writes` 取非空字符串。**任一项不合格,整份计划被拒(`undefined`),不部分接受**。但**空计划是合法的**——\"这一轮没东西要跑\"直接交给结论(`plan.ts:168-172`)。\n\n另外 `buildGroups`(`plan.ts:190-215`):`writes` 声明了同一文件的两个节点**不并行**;没声明 `writes` 的节点**按它自己的说法信**——插件无从知道调用会不会落盘。\n\n---\n\n## 2. 规则与触发条件(实为 `src/rounds.ts`)\n\n**那条规则:一个 turn = 一份计划。** 第一步必须是 `refine_plan`;计划跑完这一轮就结束,后面只允许\"写结论\"或\"下一轮再画一份计划\";一轮一次地直接调用工具会被拒。\n\n**触发条件(四个钩子,都在 `agent/pre-step` / `ctx.tools.guard` 上)**\n\n1. **Doctrine**(`applyTurnDoctrine`,`rounds.ts:169-193`):`payload.step === 1` 且该会话**不是 worker**(既不在 `Workers` 集合里、消息里也没有 `[refine-loop worker]` 标记)时,在模型说话前追加最后一条用户消息 `ROUND_LOOP`(四步法)。\n2. **Judgement guard**(`applyJudgementGuard`,`rounds.ts:360-369`):对**模型自己发起的**调用(`callId === rootCallId`,即不是计划里的嵌套调用),只要名字不是 `refine_plan`、且该请求**已经交过计划**(`plans.waiting()` 为 false),就返回 `JUDGE_ONLY`:\"The graph has run — every result is above. This turn is the judgement…\"。`plans.expect()` 在 `agent/pre-step` 见到 user 消息时置位(`rounds.ts:151-156`),`plans.done()` 在计划跑完时清掉(`index.ts:266`)。\n3. **Delegation rule**(`applyDelegationRule`,`rounds.ts:298-323`):harness 自带的 `subagent` / `subagent_fork` **名字和 schema 都不动**,但模型直接调用时(`callId === rootCallId`)抛 `DELEGATE_IN_GRAPH`;**计划内部的嵌套调用放行**,所以 worker/spawner/forker 节点照样能跑。同时把这两个工具的 description 改写成\"只能在 refine_plan 里用\"。\n4. **Worker rule**(`applyWorkerRule`,`rounds.ts:276-285`):worker 会话里 `refine_plan` 被 `WORKER_NO_PLAN` 拒绝——**但工具不从表里删**,因为工具表进 request header,删了继承的前缀就命中不到父对话的缓存了。\n\n**预算与开关**:每个请求最多 `maxRounds`(默认 16)轮,超了就结束 turn 等人(`index.ts:164, 267`);`/dsh-refine-loop off` 按会话关掉整条规则(`policy.ts:68-87`)。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来,子代理受什么限制\n\n**跑起来**:`refine_plan`(`PLAN_TOOL`,`tool.ts:46`)→ `execute`(`tool.ts:567-612`)先 `parsePlanArgs`,不合格就抛 `refine_plan needs criteria, and nodes that each have an id and a kind`;再查节点数上限(`maxBatchSize` 默认 8);然后 `runPlan`(`tool.ts:354-393`):`buildGroups` 分组,**组间顺序、组内 `Promise.all` 并行**,结果按计划顺序收进 `PlanOutput`(`criteria / groups / nodes[{id,kind,ok,output,error}]`),由 `renderPlan` 渲染成模型读的一段文本。计划跑完后 `onPlanFinished` 计数并排队 `NEXT_ROUND`,再 `exec.concludeTurn()` 把这一轮结束掉,好让 harness 开下一轮(`index.ts:264-273`,`tool.ts:606-610`)。\n\n**`tools` 节点**:calls 原样交给 `runBatch`(`tool.ts:217-240`),走工具注册表自己的管线(所有 guard/policy 照常生效);`order: 'sequential'` 就严格按写的顺序一个个跑,否则按工具自身的独占声明切 wave 并行(`batch.ts:300-340`),`glob`/`grep` 和只读 shell 由插件 override 放行并发("
+}

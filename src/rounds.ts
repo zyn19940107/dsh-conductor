@@ -58,6 +58,20 @@ export const DELEGATE_IN_GRAPH = 'Delegation happens inside the plan: add a "wor
 export const DELEGATION_TOOLS = ['subagent', 'subagent_fork'] as const
 
 /**
+ * Tools the model inside a refine-loop turn is never shown.
+ *
+ * A plan node is synchronous: there is no background child to list, message or
+ * interrupt, so a model that reaches for these only loses steps to waiting. They
+ * are hidden rather than refused, so the model never reads a description for a
+ * tool it cannot use.
+ */
+export const HIDDEN_TOOLS: readonly string[] = [
+  'list_agents',
+  'send_message',
+  'interrupt_agent',
+]
+
+/**
  * The rounds each conversation has spent.
  */
 export class Rounds {
@@ -297,6 +311,7 @@ export function applyWorkerRule(ctx: Context, workers: Workers): void {
  */
 export function applyDelegationRule(ctx: Context): void {
   ctx.on('agent/created', ({ agent }): undefined => {
+    agent.ctx.tools.restrict({ deny: HIDDEN_TOOLS })
     for (const name of DELEGATION_TOOLS) {
       const original = ctx.tools.get(name)
       if (original === undefined) continue
