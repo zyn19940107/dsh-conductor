@@ -12,7 +12,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const DIR = 'bench/results'
-const TASKS = ['humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody', 'lhtb-commit0', 'lhtb-matpower']
+const TASKS = ['humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody', 'lhtb-commit0', 'lhtb-matpower', 'greenspecs', 'greenspecs-hard']
 
 /**
  * The median of a list of numbers.
@@ -108,6 +108,17 @@ for (const task of TASKS) {
   const onCorrect = pick(task, 'on', record => record.correctness.passed)
   const offTotal = pick(task, 'off', record => record.correctness.total)
   const onTotal = pick(task, 'on', record => record.correctness.total)
+  // How many of the runs actually solved it. The median of a 0/1 criterion
+  // hides the difference between "4 of 5" and "5 of 5".
+  const solved = (condition) => {
+    const mine = runs.filter(run => run.task === task && run.condition === condition)
+    const good = mine.filter(run => run.correctness.passed === run.correctness.total).length
+    return { good, total: mine.length }
+  }
+  const offSolved = solved('off')
+  const onSolved = solved('on')
+  console.log(`| 做对的运行数 | ${offSolved.good}/${offSolved.total} | ${onSolved.good}/${onSolved.total} `
+    + `| ${offSolved.good === onSolved.good ? '—' : (onSolved.good > offSolved.good ? '✅' : '❌')} |`)
   const scaled = task.startsWith('lhtb-')
   const label = task === 'lhtb-commit0'
     ? '命中的判据(隐藏测试)'

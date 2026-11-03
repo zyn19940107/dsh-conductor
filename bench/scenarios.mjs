@@ -306,23 +306,47 @@ const PLANTED = [
 ]
 
 /**
+ * The harder set: four bugs in two files, all of them covered by the specs.
+ *
+ * The point of this variant is not that the bugs are harder to find - the spec
+ * runner names the failing check - but that the loop has to survive more
+ * rounds before it converges. A task the agent can give up on after two
+ * edits tells you nothing about the plugin; one that needs four does.
+ */
+const PLANTED_HARD = [
+  ...PLANTED,
+  {
+    file: 'src/concurrency.ts',
+    // This one runs after the bug above, so the needle matches what is left
+    // of the list by then.
+    find: "['<', '&', '`',",
+    replace: "['<', '`',",
+  },
+  {
+    file: 'src/rounds.ts',
+    find: "  reset(sessionId: string): void {",
+    replace: "  reset(sessionId: string): void {\n    if (sessionId.length >= 0) return",
+  },
+]
+
+/**
  * Build a fresh copy of the repo with the bugs planted.
  *
  * @returns {string} the workspace the task runs in.
  */
-function plant() {
+function plant(bugs = PLANTED) {
   const WORKSPACE = workspace()
   rmSync(WORKSPACE, { recursive: true, force: true })
   mkdirSync(WORKSPACE, { recursive: true })
   for (const name of ['src', 'verify']) cpSync(resolve(REPO, name), resolve(WORKSPACE, name), { recursive: true })
   for (const name of ['package.json', 'tsconfig.json']) cpSync(resolve(REPO, name), resolve(WORKSPACE, name))
   symlinkSync(resolve(REPO, 'node_modules'), resolve(WORKSPACE, 'node_modules'), 'junction')
-  for (const bug of PLANTED) {
+  for (const bug of bugs) {
     const path = resolve(WORKSPACE, bug.file)
     // The source may be checked out with CRLF; match on normalised newlines so
     // the needle does not depend on how git wrote the file.
     const before = readFileSync(path, 'utf8').split(String.fromCharCode(13)).join('')
-    if (!before.includes(bug.find)) throw new Error(`the bug for ${bug.file} no longer matches the source`)
+    if (!before.includes(bug.find)) throw new Error(`the bug for ${bug.file} no longer matches the source: ${JSON.stringify(bug.find)}`)
     writeFileSync(path, before.replace(bug.find, bug.replace))
   }
   return WORKSPACE
@@ -372,5 +396,21 @@ export const GREENSPECS = {
     }
     if (!passed) missing.push('specs 仍然不过')
     return { passed: passed && missing.length === 0 ? 1 : 0, total: 1, missing }
+  },
+}
+
+/**
+ * The same long-horizon shape with four planted bugs instead of two.
+ *
+ * @type {typeof GREENSPECS}
+ */
+export const GREENSPECSHARD = {
+  text: GREENSPECS.text,
+  setup() {
+    plant(PLANTED_HARD)
+    pristineVerify = verifyFingerprint()
+  },
+  judge() {
+    return GREENSPECS.judge()
   },
 }

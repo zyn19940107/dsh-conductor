@@ -61,7 +61,8 @@ const EXPECTED_TOTAL = 784
  * @returns {string} the absolute workspace path.
  */
 function workspace() {
-  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-lhtbcommit0`)
+  const suffix = process.env.DSH_BENCH_SUFFIX ?? 'lhtbcommit0'
+  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-${suffix}`)
 }
 
 /**
@@ -72,6 +73,7 @@ export const LHTB_COMMIT0 = {
   text: [],
   timeoutMs: TIME_BUDGET_MS,
   setup() {
+    process.env.DSH_BENCH_SUFFIX = 'lhtbcommit0'
     const ws = workspace()
     const template = resolve(ASSETS, 'template')
     if (!existsSync(template)) {
@@ -214,4 +216,33 @@ export const LHTB_COMMIT0 = {
   },
 }
 
-export const LHTB_COMMIT0_TASKS = { 'lhtb-commit0': LHTB_COMMIT0 }
+/**
+ * The same task with a much tighter budget.
+ *
+ * Three libraries cannot be implemented one after the other in twelve
+ * minutes, but they can be implemented in parallel by three children. This
+ * is the shape where delegation is not an optimisation but the difference
+ * between finishing and not finishing - the same shape upstream's long-horizon
+ * tasks have, where the score is the peak the agent reached before its
+ * deadline cut it off.
+ *
+ * @type {typeof LHTB_COMMIT0}
+ */
+export const LHTB_COMMIT0_TIGHT = {
+  ...LHTB_COMMIT0,
+  name: 'lhtb-commit0-tight',
+  timeoutMs: 720000,
+  setup() {
+    // Its own workspace, so the two variants never share a directory.
+    process.env.DSH_BENCH_SUFFIX = 'lhtbcommit0tight'
+    LHTB_COMMIT0.setup()
+    this.text = LHTB_COMMIT0.text
+      .replace(`${String(TIME_BUDGET_MS / 60000)} 分钟`, '12 分钟')
+      .replace('把三个库都实现完', '在 12 分钟里尽量多实现一个库')
+  },
+}
+
+export const LHTB_COMMIT0_TASKS = {
+  'lhtb-commit0': LHTB_COMMIT0,
+  'lhtb-commit0-tight': LHTB_COMMIT0_TIGHT,
+}

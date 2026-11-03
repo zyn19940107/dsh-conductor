@@ -12,7 +12,7 @@
  * survives being published.
  */
 
-import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, GREENSPECS, MULTIHOP, PANEL, SWEEP } from './scenarios.mjs'
+import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, GREENSPECS, GREENSPECSHARD, MULTIHOP, PANEL, SWEEP } from './scenarios.mjs'
 import { PUBLIC_TASKS } from './pubeval.mjs'
 import { LHTB_TASKS } from './lhtb.mjs'
 import { LHTB_NBODY_TASKS } from './lhtb-nbody.mjs'
@@ -22,7 +22,7 @@ import { LHTB_MATPOWER_TASKS } from './lhtb-matpower.mjs'
 /**
  * The scenario tasks that say where the plugin helps and where it does not.
  */
-const SCENARIOS = { discovery: DISCOVERY, fanout: FANOUT, multihop: MULTIHOP, coverage: COVERAGE, coveragewide: COVERAGEWIDE, sweep: SWEEP, bigread: BIGREAD, panel: PANEL, greenspecs: GREENSPECS }
+const SCENARIOS = { discovery: DISCOVERY, fanout: FANOUT, multihop: MULTIHOP, coverage: COVERAGE, coveragewide: COVERAGEWIDE, sweep: SWEEP, bigread: BIGREAD, panel: PANEL, greenspecs: GREENSPECS, 'greenspecs-hard': GREENSPECSHARD }
 
 /**
  * The plugin health check: independent lookups, one synthesis.
