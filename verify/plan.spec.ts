@@ -198,6 +198,19 @@ console.log('runPlan')
     prompts.some(prompt => prompt.startsWith(WORKER_MARKER)))
   check('the worker is told not to plan',
     prompts.some(prompt => prompt.includes('Do not draw a plan')))
+  // The contract has to be the last thing a child reads, and it has to say it
+  // wins over a task that asks for a report — the task sits above it and would
+  // otherwise be what the child follows.
+  check('every child prompt ends with the conclusion contract',
+    prompts.every(prompt => prompt.trim().endsWith('the parent composes the final answer.')))
+  check('the contract says it overrides a report-shaped task',
+    prompts.every(prompt => prompt.includes('even when the task above asks for one')))
+  check('the contract comes after the criteria',
+    prompts.every(prompt => prompt.indexOf('What this plan is judged on') < prompt.indexOf('What comes back from you')))
+  if (prompts[0] !== undefined) {
+    console.log('  --- the composed prompt a child actually receives ---')
+    for (const line of prompts[0].split(String.fromCharCode(10))) console.log('  | ' + line)
+  }
   check('a spawner prompt is not marked',
     prompts.some(prompt => !prompt.includes(WORKER_MARKER) && prompt.includes('look it up')))
   check('every node succeeded', output.nodes.every(result => result.ok))

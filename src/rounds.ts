@@ -302,6 +302,16 @@ export function applyDelegationRule(ctx: Context): void {
       if (original === undefined) continue
       agent.ctx.tools.register({
         ...original,
+        // The harness's own wording describes its direct-call tool: a child that
+        // starts from the completed turns only. A plan node is not that: its
+        // child starts from this conversation as it stands, the round it was
+        // handed over in included. The model reads this description every turn,
+        // so leaving the harness's wording there is what makes it assume a node
+        // cannot see what this round has already read.
+        description: `Not called directly: delegation happens inside refine_plan, as a node of kind "worker" `
+          + '(does the work itself), "spawner" (starts empty and plans) or "forker" (starts with this '
+          + 'conversation and plans). The child of a plan node starts from this conversation as it stands when the '
+          + 'plan is handed over, including what this round has already read.',
         execute: async (args: unknown, exec: Parameters<typeof original.execute>[1]) => {
           if (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)
           return await original.execute(args, exec)

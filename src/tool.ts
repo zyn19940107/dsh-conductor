@@ -167,10 +167,12 @@ function buildAgentPrompt(node: PlanNode, criteria: readonly string[]): string {
 ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
 ` + String.fromCharCode(10) + String.fromCharCode(10)
   // What the parent needs back is the judgement itself: the parent composes the
-  // final answer. A child that writes a report, or a trail of citations, is the
-  // parent doing the work twice.
-  const contract = 'Answer with your conclusion. The parent composes the final answer from it, so return the '
-    + 'verdict and the few facts it rests on — not a report, and not a citation trail.'
+  // final answer. The contract is the last thing the child reads, and it says
+  // outright that it wins over a task written to ask for a report — the parent's
+  // own wording is what the child would otherwise follow.
+  const contract = 'What comes back from you is used as it stands: give your conclusion — the verdict and at '
+    + 'most the one or two facts it rests on. Do not quote source, do not write a report, and do not build a '
+    + 'citation trail, even when the task above asks for one; the parent composes the final answer.'
     + String.fromCharCode(10) + String.fromCharCode(10)
   // A worker is told what it is: it does the work, it does not draw a graph of
   // its own. The marker is also how the plugin recognises the worker's own
@@ -180,7 +182,7 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
       + 'report what you found. Do not draw a plan and do not delegate.'
       + String.fromCharCode(10) + String.fromCharCode(10)
     : ''
-  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${contract}${judged}`.trim()
+  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}${contract}`.trim()
 }
 
 /**
