@@ -1,0 +1,41 @@
+{
+  "task": "budgetprobe",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 44327,
+  "timedOut": false,
+  "sessionId": "session-b853b1d2-d623-4312-a028-b024a73d55a5",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 11408,
+    "outputTokens": 1630,
+    "cacheReadTokens": 11776,
+    "totalTokens": 24814
+  },
+  "formation": {
+    "agents": 1,
+    "input": 11408,
+    "output": 1630,
+    "cacheRead": 11776,
+    "total": 24814,
+    "steps": 2
+  },
+  "mainPrompt": 12267,
+  "correctness": {
+    "passed": 1,
+    "total": 1,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 4442,
+  "thinkingPreview": "The user wants me to run a refine_plan with the exact node specified, verify the budgetMs behavior, and then report the sleep node's output verbatim.\n\nLet me hand over the plan first (my first message is the plan), then call refine_plan.\n\nThe node is exactly:\n{\"id\": \"sleep\", \"kind\": \"tools\", \"budgetMs\": 20000,\n \"calls\": [{\"name\": \"pwsh\", \"arguments\": {\"command\": \"python -c \\\"import time; time.sleep(300)\\\"\"}}]}\n\nCriteria: 「sleep 节点在 20 秒预算用尽时停掉了还在跑的调用」\n\nNote the note about Windows sandbox: piped stdio issues. The python sleep command should just run and be killed.\n\nLet me call refine_plan with that node. This will take ~20 seconds.\n\nOne consideration: the AGENTS.md mentions not to use exit code as acceptance criteria, and to ensure the command is observable. But the task here is a mechanism verification of the plan runner's budget behavior, not of the command itself. The observable thing ",
+  "finalText": "## 1. 交出的图（nodes 原样照抄）\n\n```json\n{\n  \"criteria\": [\"sleep 节点在 20 秒预算用尽时停掉了还在跑的调用\"],\n  \"nodes\": [\n    {\"id\": \"sleep\", \"kind\": \"tools\", \"budgetMs\": 20000,\n     \"calls\": [{\"name\": \"pwsh\", \"arguments\": {\"command\": \"python -c \\\"import time; time.sleep(300)\\\"\"}}]}\n  ]\n}\n```\n\n## 2. sleep 节点的 output（原样复述）\n\n```\nBatch finished — 1 call(s), scheduled serial.\nCriteria: sleep 节点在 20 秒预算用尽时停掉了还在跑的调用\n\n1. pwsh — failed (serial)\n   error: tool call aborted\n   output:\n   | Error: tool call aborted\n\n\n[the time budget of 20000ms was reached: calls still running were stopped, the ones that finished are above]\n```\n\n## 3. 结束方式：被预算停下的，不是按时结束\n\n- 判据成立：`budgetMs: 20000` 到点时，报告里明确写出 `[the time budget of 20000ms was reached: calls still running were stopped, ...]`，且那个 `pwsh` 调用标记为 `failed (serial)` / `error: tool call aborted`——即被中止，而不是自己返回。\n- `python -c \"...time.sleep(300)\"` 本身要跑 300 秒；整图却在 20 秒左右就回来了，返回的就是预算中止的产物。所以这次是**预算到期、强行停掉还在跑的调用**，不是命令自然跑完。\n- 附带一条正向证据：若 `python` 不存在，命令会瞬间以「不是内部或外部命令」失败并正常返回，而不会在 20 秒点被 abort。它被 abort，说明进程确实活着并正在 sleep，python 存在且调用真的在跑。\n\n一句话：budgetMs 到点 → 还在跑的调用被停掉 → 节点带着「被预算中止」的说明返回，验证通过。"
+}

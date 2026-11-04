@@ -219,23 +219,46 @@ async function runNode(
       name: call.name,
       arguments: call.arguments,
     }))
-    const batch: BatchOutput = await runBatch(
-      runner,
-      { criteria: [...criteria], calls, order: node.order },
-      agent,
-      signal,
-      respectConcurrencySafety,
-      rootCallId,
-      overrides,
-      repair,
-    )
-    const failed = batch.results.filter(item => !item.ok)
-    return {
-      id: node.id,
-      kind: node.kind,
-      ok: failed.length === 0,
-      output: renderBatch(batch),
-      error: failed.length === 0 ? '' : failed.map(item => `${item.name}: ${item.error}`).join('; '),
+    // A tools node runs long too when one of its calls does — a search, a
+    // solver, a build. Its budget stops the calls still running and keeps the
+    // ones that finished, so the report carries what the node learned rather
+    // than a single timeout with nothing in it.
+    const limit = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let spent = false
+    if (node.budgetMs > 0) {
+      timer = setTimeout(() => {
+        spent = true
+        limit.abort()
+      }, node.budgetMs)
+      ;(timer as { unref?: () => void }).unref?.()
+    }
+    const nodeSignal = node.budgetMs > 0 ? AbortSignal.any([signal, limit.signal]) : signal
+    try {
+      const batch: BatchOutput = await runBatch(
+        runner,
+        { criteria: [...criteria], calls, order: node.order },
+        agent,
+        nodeSignal,
+        respectConcurrencySafety,
+        rootCallId,
+        overrides,
+        repair,
+      )
+      const failed = batch.results.filter(item => !item.ok)
+      const note = spent
+        ? `${String.fromCharCode(10)}${String.fromCharCode(10)}[the time budget of ${node.budgetMs}ms `
+          + 'was reached: calls still running were stopped, the ones that finished are above]'
+        : ''
+      return {
+        id: node.id,
+        kind: node.kind,
+        ok: failed.length === 0,
+        output: renderBatch(batch) + note,
+        error: failed.length === 0 ? '' : failed.map(item => `${item.name}: ${item.error}`).join('; '),
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 
