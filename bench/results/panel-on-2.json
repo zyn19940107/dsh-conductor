@@ -1,0 +1,49 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 426567,
+  "timedOut": false,
+  "sessionId": "session-2fc2517f-44a6-461d-98ba-0f186fdbd3ed",
+  "stderr": "",
+  "steps": 8,
+  "toolCalls": 7,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 75058,
+    "outputTokens": 23239,
+    "cacheReadTokens": 291584,
+    "totalTokens": 389881
+  },
+  "formation": {
+    "agents": 4,
+    "input": 340205,
+    "output": 99300,
+    "cacheRead": 3830400,
+    "total": 4269905,
+    "steps": 61
+  },
+  "mainPrompt": 99299,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 43404,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the plugin at `D:\\code\\vibedsh-refine-loop` — wait, the path is odd: \"D:codeibedsh-refine-loop\" — likely `D:\\code\\vibe\\dsh-refine-loop` given the working directory is `D:\\code\\vibe`. Let me check.\n\nThe user asks for read-only review. I need to:\n1. Read relevant source code with evidence line numbers.\n2. Organize three mutually independent reviews (each doesn't know the others' conclusions).\n3. Each judges: (a) over-constraining the model / forcing extra planning; (b) whether it can be bypassed (can the model get a conclusion without submitting a diagram?); (c) conflict with harness native capabilities (subagent / plan mode / tool concurrency).\n4. Final summary: where the three agree, where they disagree.\n\nPer the system prompt, the first message of the round IS the plan, handed ov",
+  "finalText": "# 三方独立评审 · `dsh-refine-loop`「核心规则」\n\n**被评规则**：① 每轮必须交一张图；② 交完图只能判断能不能给结论；③ 派发只能走图里的节点。\n**被评对象**：`D:\\code\\vibe\\dsh-refine-loop`（插件源 `src/*.ts`），对照 harness 源 `D:\\code\\vibe\\deepseek-harness\\packages/**`。\n**纪律**：全程只读（read / grep / 只读 pwsh / git 只读查询），**未修改任何文件**。\n\n## 0. 评审是怎么组织的（独立性说明）\n\n- 三份评审是同一轮里并行的三个 `worker` 节点，各自只继承本对话（用户请求 + 仓库定位），**互不继承对方任何输出**，结果同时回传；\n- 三方分工：①A = 源码事实核对派；②B = 对抗/模型行为派；③C = harness 集成派；三方都被要求覆盖全部三问并给 `file:line`；\n- 第四个节点只产出 harness 事实清单（无观点），之后我用两轮只读核验把三方引用过的关键行逐条读回，**只采信能落到代码的断言**。\n- 一个天然条件：**本次评审本身就跑在被评审的插件里**——三方是 `refine_plan` 的 worker 节点，我的工具表里 `subagent`/`subagent_fork` 的描述已被插件改写（`rounds.ts:330-333` 原文），`list_agents`/`send_message`/`interrupt_agent` 不在表里而 `job_list`/`job_output`/`job_kill`/`workflow` 在表里——这既是活证据，也意味着三方观察带\"身处其中\"的偏差。\n\n---\n\n## 1. 三份评审原意\n\n### 评审 A（源码事实核对派）\n\n> **总判定：这条规则实际是「一句真强制 + 一句半强制 + 一句纯提示」。**\n> 「交完图只能判断」= 机制级真强制；「派发只能走图里的节点」= 半强制；「每轮必须交一张图」= 没有机制，只有提示。\n\n- **Q1 部分过度限制**，且过度点只在\"判断阶段\"：图跑完后模型自发工具调用全被拒，唯一出口是再交一张整图——只想补一次 `read` 也得写 criteria + 整张图（节点上限 8）。教条每轮重念（harness 的 step 每轮从 1 重数）。作者自测成本：`README.md:240`（coverage +74% 耗时）、`README.md:402-403`（输出 token +40%、主上下文 +28%）。\n- **Q2 高风险、可绕过，四条路径**：①首图之前 `plans.waiting` 为真即放行一切，且插件**没挂** harness 的 `agent/turn-stopping` 回拉钩子；②让图失败（参数非法/超节点上限直接抛错）→ `onPlanFinished` 不执行 → 闸门永不闭合；③**图内派发**：嵌套调用 `callId ≠ rootCallId`，所以\"直调即拒\"对它无效，`tools` 节点可写任意工具名 → 可直接调 harness 的 `subagent`/`subagent_fork`；④harness 原生 `workflow` 工具完全未被覆盖，自带扇出与并发上限。\n- **Q3 真冲突 5 处**：①**plan 模式**：插件把自己的指引塞进 harness 的 `PLAN_POLICY` 槽，原生 plan-mode 的策略段用同一槽，且另有 `exit_plan_mode` 工具；②**工具表手术**：摘掉 `list_agents`/`send_message`/`interrupt_agent`，但当前后台作业面 `job_list`/`job_output`/`job_kill` 不在摘除名单内 → 摘除面与现实不一致；摘工具改请求头，与插件自己\"保持请求头不变以命中 KV cache\"的说法同一根弦；③**工具并发**：插件自建并发判定覆盖 harness 的 `executionMode`，`respectConcurrencySafety=false` 时无视 harness 独占声明，节点级\"写同一文件不并行\"又是一套靠模型申报的更弱安全；④**子代理运行时**：插件绕过 harness 的 subagent provider 自己起孩子 → harness 的子代理限额/模型选择/provider 全部不生效；且为继承前缀的缓存命中刻意不裁剪孩子工具表；⑤**spill**：插件用带 `value` 的决定主动跳过 harness 的截断策略。\n- **另**：README 与现状两处不符——`README.md:102` 把\"每轮开始就想图\"标成 ✅ 强制（实为提示）；`README.md:112-113` 说有\"7 个 `planned=false` 样本\"，实测该树下更多。\n\n### 评审 B（对抗 / 模型行为派）\n\n> **总判定：规则目前是\"形状\"而不是\"闸门\"。**\n\n- **Q1 成立，且是结构性代价**：规则真实内容是\"每轮必须先交一张参数已定的图\"，而图只有一层、节点间无依赖，tools 节点的调用参数必须事先决定 → \"读 A 再按 A 的结果读 B\"必须拆成两轮，探索型任务被强制多轮。实测代价：输出 token +40%、主上下文 +28%；短任务净亏（coverage +74% 耗时、quixbugs +15%）。教条还要求每个节点都估 `budgetMs`，而模型没有时钟 → 每轮都有一段纯开销的猜时。\n- **Q2 可绕过，而且是最短路径**：代码只强制\"图跑完之后\"的判断阶段；第一张图之前判断守卫直接放行 → 模型可以一个工具一个工具把活干完再写结论，一次图都不交。插件自己承认（`README.md:111-114`、`707-709`，bench 里 `planned=false` 样本有一个走了 83 步）。**附加漏洞**：空图合法，\"交了一张图\"可以被零节点图满足。可用而未用的强制点存在——harness 有 `agent/turn-stopping` 事件，插件没挂。\n- **Q3 三处真冲突 + 一处漂移**：(a)「派发只能走图」有洞：插件只拦 `subagent`/`subagent_fork`，没拦 harness 原生 `workflow` 工具，也没隐藏后台 job 工具；在\"图之前\"的窗口里模型可直接用 `workflow` 派活；(b) **原生 plan 模式会被锁死**：判断守卫拒绝除 `refine_plan` 外的所有根工具调用，而原生 plan mode 的唯一出口是 `exit_plan_mode` → 一旦画过图就再也退不出 plan mode；两边提示还挂在同一 `PLAN_POLICY` 槽位；(c) 插件摘掉了 harness 的 spill 预算（带 `value` 的决定被 spill 策略跳过）→ 报告永不 spill/截断，上下文只涨不封。**漂移**：插件默认 shell 工具名 `ops_bash`，harness 的 shell 工具叫 `pwsh`，全仓无 `ops_bash` → 只读 shell 的并发豁免永不生效，计划里的 `pwsh` 调用被串行化。\n- **建议**：要让它成立，需在 `agent/turn-stopping` 上补\"本轮未交图则拉回\"，并把 `workflow`/job 类派发一并纳入 `DELEGATION_TOOLS`。\n\n### 评审 C（harness 集成派）\n\n> **总评：插件与 harness 原生能力是叠加而非替代，但叠加处有三处硬耦合（plan 模式、工具表手术、并发调度）；\"每轮必须交图\"在代码层根本没有被强制，只有\"图跑完不许再串行调工具\"这一半被强制。**\n\n- **Q1 不完全成立**——被强制的不是\"交图\"，而是\"交完图不许再干活\"：判断守卫只在 `plans.waiting === false`（已跑过图）时才拒绝模型自发工具调用，第一张图之前一律放行；教条只是每轮 step 1 追加的一条提示消息。因此多余规划的来源不是\"必须交图\"，而是把模型锁死在\"写结论 or 再交一张图\"——这恰好废掉了 harness 原生的多轮串行工具循环。\n- **Q2 完全可绕过，且是设计上的**（README 自述\"必须交图\"已被删）：守卫是单调拒绝语义，只在图跑完后生效；`/dsh-refine-loop off` 一条命令把工具与规则一起摘掉；插件只改写 `subagent`/`subagent_fork` 两个直调工具，harness 原生 `workflow` 同样能内部起子代理，可绕过\"派发只能走图\"。\n- **Q3 打三处，都是\"插件盖住原生机制\"**：①**plan 模式**（最硬）：原生 `exit_plan_mode` 是模型可调用的工具，而图跑完后只放行 `refine_plan` → 原生 plan 模式的\"呈报计划→用户批准→退出\"审批门被 `refine_plan` 的\"立即执行\"架空；两者提示段还挂在同一 `PLAN_POLICY` 槽位。②**工具表手术**：对**每个** agent 做 `restrict({ deny: HIDDEN_TOOLS })`；`restrict` 对未知名**直接抛错** → "
+}

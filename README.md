@@ -1,4 +1,6 @@
-# dsh-refine-loop
+# dsh-conductor
+
+> **公司工作流** —— 把公司里「领导派活、执行者干活」的组织方式搬进 agent。
 
 **把「想一步、做一步、再看一步」的串行链，换成「每一轮：想图 → 交图 → 跑图 → 判断」。**
 
@@ -368,7 +370,7 @@ v2.1 加了两件事：单次工具结果超过 5k 字符就截成头+尾、`ref
 | profile | bundles | 用途 |
 |---|---|---|
 | `bench-off` | `dsh-base` + `dsh-headless` | 不带插件 |
-| `bench-on` | 同上 + `@zyn19940107/dsh-refine-loop` | 带插件 |
+| `bench-on` | 同上 + `@zyn19940107/dsh-conductor` | 带插件 |
 
 两个 profile 只差一个 bundle —— 这是「带插件 / 不带插件」唯一可测的差别。
 `bench-on` 里的插件是**没被改过的原版**，只配了部署参数：`enabled: true`、
@@ -669,7 +671,7 @@ v2.0: 236s/ 714k/12 of 12     398s/1140k/11 of 12
 ```yaml
 - insert:
     - id: refine-loop
-      name: '@zyn19940107/dsh-refine-loop'
+      name: '@zyn19940107/dsh-conductor'
       config:
         enabled: true                    # 整个插件挂不挂
         maxBatchSize: 8                  # 一张图最多几个节点
@@ -709,11 +711,11 @@ v2.0: 236s/ 714k/12 of 12     398s/1140k/11 of 12
 ## 装上
 
 ```sh
-dsh plugin add /path/to/dsh-refine-loop
+dsh plugin add /path/to/dsh-conductor
 
 # 或打包
 pnpm pack
-dsh plugin add ./zyn19940107-dsh-refine-loop-2.3.0.tgz
+dsh plugin add ./zyn19940107-dsh-conductor-2.4.0.tgz
 ```
 
 装完请开一个新会话 —— 已开着的会话不会刷新模型看到的工具表。

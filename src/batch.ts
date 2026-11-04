@@ -14,7 +14,7 @@
  * still inside the same batch. Every result comes back in one tool result, so
  * the agent writes the conclusions of all the items in one reply.
  *
- * @module @zyn19940107/dsh-refine-loop/batch
+ * @module @zyn19940107/dsh-conductor/batch
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'

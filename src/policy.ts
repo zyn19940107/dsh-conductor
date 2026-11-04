@@ -2,10 +2,10 @@
  * Turning the plugin on and off inside one conversation.
  *
  * The plugin is mounted for a whole deployment, but a conversation may opt out
- * of it. `/dsh-refine-loop off` takes the plugin out of the conversation that
+ * of it. `/dsh-conductor off` takes the plugin out of the conversation that
  * ran it: the batch tool disappears from the model's tool table, the guidance
  * leaves the system prompt with it, and the rule stops being enforced.
- * `/dsh-refine-loop on` puts it back.
+ * `/dsh-conductor on` puts it back.
  *
  * The state is per conversation. One conversation opting out changes no other
  * conversation, and a new conversation starts with the plugin's normal
@@ -13,7 +13,7 @@
  *
  * The command is a human command: the UI runs it and the model never sees it.
  *
- * @module @zyn19940107/dsh-refine-loop/policy
+ * @module @zyn19940107/dsh-conductor/policy
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -26,7 +26,7 @@ import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 import { PLAN_TOOL } from './tool.js'
 
 /** The command that turns the plugin on and off inside one conversation. */
-export const POLICY_COMMAND = 'dsh-refine-loop'
+export const POLICY_COMMAND = 'dsh-conductor'
 
 /**
  * The tools a conversation loses when it opts out.

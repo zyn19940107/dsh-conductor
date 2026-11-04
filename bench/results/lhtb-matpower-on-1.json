@@ -1,0 +1,49 @@
+{
+  "task": "lhtb-matpower",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 549236,
+  "timedOut": false,
+  "sessionId": "session-2343f347-d4bf-4016-8981-e9104f7f5ca3",
+  "stderr": "",
+  "steps": 7,
+  "toolCalls": 6,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 90072,
+    "outputTokens": 50870,
+    "cacheReadTokens": 270068,
+    "totalTokens": 411010
+  },
+  "formation": {
+    "agents": 2,
+    "input": 217517,
+    "output": 130941,
+    "cacheRead": 3076207,
+    "total": 3424665,
+    "steps": 43
+  },
+  "mainPrompt": 104399,
+  "correctness": {
+    "passed": 11,
+    "total": 12,
+    "missing": [
+      "11/12 个判据测试通过"
+    ],
+    "score": 0.9167
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 42031,
+  "thinkingPreview": "Let me start by exploring the workspace to understand what's there.\n\nThe task: implement `src/power_audit/audit.py` in the workspace `D:\\code\\vibe\\dsh-sandbox\\bench-workspace-on-lhtbmatpower`. Let me look at the existing repo structure first.\n\nLet me plan the first round: explore the workspace (glob files), read existing files.\n\nPer the runtime context, my first message should be a plan handed over via refine_plan. Let me do that.\n\nActually, I can make independent tool calls in a tools node. Let me first design the plan:\n\nRound 1 nodes:\n1. tools node \"explore\": glob the workspace files, read key files (audit.py stub, configs/public_manifest.yml, pyproject, existing cli, experiments/run_opf_suite.py). Actually reading many files — better as tools calls with glob + read.\n\nHmm, but reads need to be sequential after glob (dependencies). Actually I can guess file paths: `src/power_audit/audit",
+  "finalText": "## 交付完成\n\n### 实现思路\n\n`src/power_audit/audit.py`（753 行，唯一被改动的源文件）实现完整管线：\n\n1. **用例解析**：PYPOWER 5.1.21 的 `__init__.py` 是空的（不导出任何符号），所以按名解析官方用例函数走 `importlib.import_module(\"pypower.<name>\")`，并带 `getattr(pypower, name)` 与全包扫描兜底——隐藏 manifest 里换任何 `case9/14/30/57/118` 变体都能取到。\n2. **manifest 修饰**：`load_scale` 乘 bus `PD/QD`；`branch_rate_scale` 只对 `RATE_A>0` 的支路乘；`gen_pmax_scale` 乘 `PMAX`；全部在求解前施加。\n3. **求解**：`runpf` / `rundcopf` / `runopf`，`ppoption(VERBOSE=0, OUT_ALL=0)` 静默 + stdout/stderr 重定向。踩到三个 PYPOWER 坑并已修：`runpf` 返回**元组** `(results, success)` 而 `runopf/rundcopf` 返回 dict；`ppoption` 键是**大写**（小写 `verbose` 被静默忽略）；`ext2int` **原地改写** case dict，所以每次求解喂深拷贝。\n4. **列布局**：一律用 `pypower.idx_bus/idx_gen/idx_brch` 常量（PYPOWER 内部布局 PD=2/VM=7/VMAX=11/VMIN=12、RATE_A=5、PF=13），不写死数字——这是最容易整表读错位的地方，已用 case9 载荷 315 MW、电压落在 0.9–1.1校验。\n5. **三张明细表全部取自 AC OPF 解**；AC OPF 失败的 case **不产出任何明细行**，目标值/电压字段置 `null`。\n6. **确定性**：pandas 固定列序 + `lineterminator=\"\\n\"` + JSON `indent=2`；重跑与 `experiments/run_opf_suite.py` 产出**逐字节相同**（已用 SHA256 对比 7 个文件，全部 True）。\n\n### 每个 case 状态（公开 manifest，10/10 全通）\n\n| case_id | pf/dcopf/acopf | dcopf_obj | acopf_obj | load MW/MVAr | 最大支路负载 |\n|---|---|---|---|---|---|\n| case9_base | true/true/true | 5216.03 | 5296.69 | 315 / 115 | 0.5386 |\n| case14_base | true/true/true | 7642.59 | 8081.53 | 259 / 73.5 | 0.0131 |\n| case30_base | true/true/true | 565.21 | 576.89 | 189.2 / 107.2 | 1.0000（绑定） |\n| case57_base | true/true/true | 41006.74 | 41737.79 | 1250.8 / 336.4 | 0.0193 |\n| case118_base | true/true/true | 125947.87 | 129660.69 | 4242 / 1438 | 0.0418 |\n| case14_load_110 | true/true/true | 8672.48 | 9127.98 | 284.9 / 80.85 | 0.0133 |\n| case30_load_102 | true/true/true | 579.59 | 597.74 | 192.984 / 109.344 | 1.0000001 |\n| case57_load_105 | true/true/true | 43620.77 | 44439.76 | 1313.34 / 353.22 | 0.0204 |\n| case118_load_102 | true/true/true | 129305.43 | 133027.87 | 4326.84 / 1466.76 | 0.0420 |\n| case30_gen_110 | true/true/true | 565.21 | 576.89 | 189.2 / 107.2 | 1.0000 |\n\n`violations.csv` 仅表头（0 条违规），`overall_pass=true`，明细行数 bus 477 / generator 153 / branch 704。\n\n另用一个**隐藏风格**的合成 manifest 压过失败路径：`case30 load×1.5` → dcopf/acopf 失败、`case118 load×2.5` → 三解全败，此时目标值/电压为 `null`、该 case 无明细行、`violations.csv` 出现 `component=solver, severity=fatal` 行、`overall_pass=false`；`branch_rate_scale=0.8`（负载比 1.25×）与 `gen_pmax_scale=1.1`（PMAX 88/55/60.5…）均确认生效。\n\n### 两个需要你知道的判断口径\n\n- **容差 1e-6**：binding/overloaded 都用 `TOL=1e-6`。`case30_load_102` 的最大负载是 1.0000001（超限 1e-7，纯数值噪声），因此判为「绑定但未超限」→ 公开 manifest 零违规。若评测方按严格 `>1.0` 判超限，这一行会翻成违规（violations.csv 多1 行、`overall_pass` 变 false）。这是全局唯一一处口径可能分歧的字段。\n- **`status` 列写原始 MATPOWER 值1/0**（非布尔），`binding_*`/`overloaded` 写布尔（CSV 里 `True/False`，md 状态行按规范用小写 `true/false`）；`case_table.csv` 的 `generator_pg_mw` 用 JSON 数组字符串以便机器解析。\n\n### 最终文件清单\n\n```\nbench-workspace-on-lhtbmatpower/\n├─ src/power_audit/audit.py        25,852 B   ← 本次唯一新增/修改的源文件\n├─ src/power_audit/{cli.py,__init__.py} （未改动）\n├─ configs/public_manifest.yml                （未改动）\n├─ experiments/run_opf_suite.py               （未改动，已验证与 CLI 字节一致）\n├─ pyproject.toml                             （未改动）\n└─ outputs/\n ├─ opf_report.json        10,590 B\n   ├─ grid_summary.md         2,809 B   （五个标题、每 case 状态行、detail_rows/binding_totals）\n   ├─ case_table.csv          5,207 B\n   ├─ violations.csv             54 B   （仅表头）\n   ├─ bus_voltage_table.csv   50,573 B\n   ├─ generator_dispatch.csv  20,352 B\n   └─ branch_loading.csv     125,072 B\n```\n\n机械契约审计（表头逐列、JSON 键集与顺序、md 标题与状态行、margin/loading 公式、manifest 顺序、行数对账）**全部通过**。临时脚本与重复输出目录已清理，工作区只剩上述文件；`D:\\code\\vibe\\dsh-refine-loop` 未被触碰。"
+}

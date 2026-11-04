@@ -17,7 +17,7 @@
  * decides what is still missing. Work that belongs together belongs in one
  * node — in a worker, which can take its own steps as it goes.
  *
- * @module @zyn19940107/dsh-refine-loop/plan
+ * @module @zyn19940107/dsh-conductor/plan
  */
 
 /** The kinds of node a plan may hold. */

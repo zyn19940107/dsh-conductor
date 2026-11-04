@@ -1,0 +1,48 @@
+{
+  "task": "lhtb-2048",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 557693,
+  "timedOut": false,
+  "sessionId": "session-3ae0953d-8ee3-41c1-81e6-6d4a3c6d7cf2",
+  "stderr": "",
+  "steps": 5,
+  "toolCalls": 4,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 15731,
+    "outputTokens": 17490,
+    "cacheReadTokens": 127603,
+    "totalTokens": 160824
+  },
+  "formation": {
+    "agents": 4,
+    "input": 151134,
+    "output": 130605,
+    "cacheRead": 2697086,
+    "total": 2978825,
+    "steps": 59
+  },
+  "mainPrompt": 41964,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 400 步"
+    ],
+    "score": 4.7852,
+    "moves": 400
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 19581,
+  "thinkingPreview": "Let me understand the task. I need to play 2048 with a deterministic engine. The key insight: the engine is deterministic (seeded splitmix64), and `slide_board` is a pure function. The verifier replays my move log in a fresh engine.\n\nCritically: since spawn positions depend on the PRNG state which advances only when a move changes the board, I can simulate the game offline in Python — I can write my own solver script that imports game2048_engine (without modifying it), simulates games, and searches for a move sequence that reaches a high tile. Then I write the moves into moves.log.\n\nBut wait — the constraint says \"不要修改 g2048.py 和 game2048_engine.py\" — I can create NEW files (a solver script). That's allowed: \"如果你自己写了对局程序来出招,就把走法按这个格式写进同一个文件\".\n\nKey approach: Write an expectimax/greedy solver that operates on the real engine (import Game2048), plays many simulated games with the same seed,",
+  "finalText": "## 报告\n\n**策略**：引擎是完全确定性的——spawn 位置与数值只由 (seed, 走法序列) 决定（PRNG 只在棋盘真正变化时前进），所以我把这一局当成一棵确定的搜索树来解，而不是靠试错：在引擎原语（slide + splitmix64 spawn）之上做**束搜索（beam 8000–20000，深度 400）**，局面打分用「蛇形单调权重和 + 空格奖励 + 可合并潜力 + 平滑度 + 角落奖励」，并让最大 tile 本身占高权重以逼出更大的合并。走法只取「棋盘真的会变」的方向，不产生废步；生成后用**全新 `Game2048()` 逐字重放**自检，确认预测与引擎实际 bit-for-bit 一致，再写进 `moves.log`。\n\n**总步数**：400 步（`moves.log` 恰好 400 行，全部为 U/D/L/R，无 RESET、无废步）。\n\n**结果与上限证明**：最大 tile = **512（band 4）**，连续分峰值 **4.7852**。两条独立路径都指向同一个结论：这颗种子在 400 步预算内的**理论上限就是 512**——每个 spawn 恰好消耗两次 PRNG 输出，故 tile 数值序列与走法无关，合并又守恒总点数，400 次有效移动后棋盘总点数最多 914；而要出现 1024 至少需要两块 512，即总点数 ≥ 1024（需 ~451 步）。现在这一局在峰值处已把 914 点材料**全部**握在手里（512 + 402 点余料），所以 4.785 = 4 + (914−512)/512 也是可取到的最大值——束搜索在 13 组权重 × 2 个角落、共 4 万宽度级别的全量扫掠中全部收敛到同一块终局盘 (512, 256, 64, 64 / 4, 4, 8 / 2)，无可改进解。\n\n**最后一次 `python g2048.py status` 完整输出**：\n\n```\nscore=6332  max_tile=512  band=4  best_band=4  moves=400  empty=8  game_over=False\nboard (4x4, .=empty, row 0 = top):\n     .     2     .     .\n     .     .     .     .\n     .     4     4     8 512   256    64    64\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\n`best_band=4` 是 CLI 自己用全新同种子引擎重放 `moves.log` 算出来的——分数无法伪造，只有真实合并出来的 tile 才算数。`g2048.py` 与 `game2048_engine.py` 时间戳仍是原始的 `2026/11/3 3:34:50 / 3:34:42`（未改动）；工作区里额外留下了 `solver.py` / `solver_b.py` / `ceiling.py` 及若干候选序列文件作为过程证据，`dsh-refine-loop` 仓库本身未触碰。"
+}

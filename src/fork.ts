@@ -13,7 +13,7 @@
  * get synthetic error results, an open step ends, the open turn ends. The
  * transcript the child starts with is therefore balanced and readable.
  *
- * @module @zyn19940107/dsh-refine-loop/fork
+ * @module @zyn19940107/dsh-conductor/fork
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'

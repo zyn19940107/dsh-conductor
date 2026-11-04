@@ -12,7 +12,7 @@
  * should have been, call the tool again with that answer. Only the failing call
  * goes to the model; the rest of the plan is untouched.
  *
- * @module @zyn19940107/dsh-refine-loop/repair
+ * @module @zyn19940107/dsh-conductor/repair
  */
 
 import type { LlmCallConfig, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'

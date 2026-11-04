@@ -22,7 +22,7 @@
  * - The per-conversation switch takes the whole plugin out of one conversation
  *   without touching the deployment.
  *
- * @module @local/dsh-refine-loop
+ * @module @local/dsh-conductor
  */
 
 import type { Context, Volatile } from '@deepseek-ai/cordis'
