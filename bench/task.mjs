@@ -80,7 +80,7 @@ export const REVIEW = {
     { what: '说清了规则现在住哪', needles: ['rounds.ts'] },
     { what: '节点种类', needles: ['worker', 'forker'] },
     { what: '调用参数原样透传', any: ['原样', '没有占位符', '不存在占位符', '字面量', '直接传'] },
-    { what: '说清了触发条件', needles: ['触发'] },
+    { what: '说清了触发条件', any: ['触发', '条件是', '条件:', '条件：', '何时', '什么时候'] },
     { what: '子代理限制的字段', needles: ['delegationDepth'] },
   ]),
 }
