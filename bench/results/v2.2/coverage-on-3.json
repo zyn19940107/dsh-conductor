@@ -1,0 +1,42 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 117409,
+  "timedOut": false,
+  "sessionId": "session-9958b106-326d-42c9-a5a2-1b569f60dd23",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 12416,
+    "outputTokens": 4943,
+    "cacheReadTokens": 38400,
+    "totalTokens": 55759
+  },
+  "formation": {
+    "agents": 3,
+    "input": 104893,
+    "output": 25233,
+    "cacheRead": 775680,
+    "total": 905806,
+    "steps": 26
+  },
+  "mainPrompt": 26283,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 10216,
+  "thinkingPreview": "Let me start by planning. The task: read-only exploration of D:\\code\\vibe\\dsh-refine-loop\\verify (spec files) and D:\\code\\vibe\\dsh-refine-loop\\src (8 modules).\n\nPlan: I need to:\n1. List files in verify dir and src dir.\n2. Read each .spec.ts to determine which entry function it tests.\n3. Compare src modules with specs.\n4. Count lines of each module.\n\nLet me hand over a plan with refine_plan. But first message IS the plan. Let me do the glob and pwsh calls in one refine_plan node... Actually I can make a plan with a tools node doing glob + line counts, and worker nodes reading spec files. But reading spec files depends on knowing which files exist. However I can use glob with pattern to find all .spec.ts and then read them in parallel — but the read arguments need to be decided upfront.\n\nSimplest: Round 1: tools node with glob on verify/**/*.spec.ts and src/**, plus a pwsh to count lines. ",
+  "finalText": "三问都已查实。两个独立 worker 分别核过,结论一致(行数逐个吻合)。全程只读,未改任何文件。\n\n先纠正两个前提:`src` 下现在是 **9 个 `.ts`,不是 8 个**;`verify` 下是 **8 个 spec**。\"8 个模块\"这个说法出自 `bench/scenarios.mjs` 的 `COVERAGE` 判据(里面写死了 batch/concurrency/index/plan/policy/repair/rounds/tool 与 \"six specs\"),那是加进 `fork.ts`、`fork.spec.ts`、`retain.spec.ts` 之前的老文本,已过时。9 个 `.ts` 全部被 git 跟踪。\n\n## 1. 每个 `.spec.ts` 实际测的入口函数\n\n| spec | 实际被测的入口 | 来源模块 |\n|---|---|---|\n| `batch.spec.ts` | `runBatch`(主),兼 `capOutput` / `MAX_CALL_OUTPUT_CHARS` | `src/batch.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand`(主)、`mayRunTogether`、`buildOverrides`,借 `runBatch` 验批内顺序 | `src/concurrency.ts` + `batch.ts` |\n| `plan.spec.ts` | `parsePlanArgs`、`buildGroups` + `runPlan`、`renderPlan` | `src/plan.ts` + `src/tool.ts` |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch` + `parsePolicyCommand` | `src/batch.ts` + `src/policy.ts` |\n| `repair.spec.ts` | `runBatch` 的 repair 路径 + `parseRepair` | `src/batch.ts` + `src/repair.ts` |\n| `retain.spec.ts` | `applyReportRetention`(主)+ 常量 `PLAN_TOOL` | `src/index.ts` + `src/tool.ts` |\n| `rounds.spec.ts` | `Rounds`、`Workers`、`isWorkerConversation`、`applyTurnDoctrine`、`applyWorkerRule` + `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN` | `src/rounds.ts` + `plan.ts` |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers` | `src/fork.ts` |\n\n要点:多数 spec 打的是纯函数/辅助层,不是模块主入口。\n\n## 2. 没有对应 spec 的模块\n\n按\"有没有同名 `.spec.ts`\":缺 **3 个 —— `policy.ts`、`index.ts`、`tool.ts`**。(`refine.spec.ts`、`retain.spec.ts` 是跨模块组合 spec,不对应任何同名模块。)\n\n按\"模块自己的主入口有没有被测\",缺口更大,9 个里有 6 个主入口没被测:\n- `index.ts` — 插件入口 `apply()` 未测(只测了 `applyReportRetention`)\n- `tool.ts` — 注册入口 `applyPlanTool()` 未测(只测了 `runPlan`/`renderPlan`)\n- `policy.ts` — `SessionPolicy`/`applyPolicyCommand`/`applyPolicyMessage` 未测(只测解析器 `parsePolicyCommand`)\n- `repair.ts` — 修复主流程未测(只测了 `parseRepair`)\n- `fork.ts` — `spawnForkedChild` 未测(只测 seed 助手)\n- `rounds.ts` — `Plans`/`applyRounds`/`applyJudgementGuard`/`applyDelegationRule` 未测\n\n真正被完整覆盖的只有 3 个:`batch.ts`、`concurrency.ts`、`plan.ts`。\n\n## 3. 行数最多的是 `src/tool.ts`\n\n**621 行**(物理行,含空行与注释);去掉空行 **599 行**。\n\n| 模块 | 物理行 | 非空行 |\n|---|---:|---:|\n| **tool.ts** | **621** | **599** |\n| batch.ts | 409 | 383 |\n| rounds.ts | 385 | 356 |\n| fork.ts | 372 | 350 |\n| index.ts | 351 | 323 |\n| policy.ts | 241 | 228 |\n| concurrency.ts | 234 | 224 |\n| plan.ts | 215 | 198 |\n| repair.ts | 173 | 162 |\n\n## 顺带查出的一个真问题\n\n`verify/repair.spec.ts` **不在 `verify/run-specs.mjs` 的 spec 列表里**(该文件只列了 refine/batch/concurrency/plan/rounds/fork/retain 共 7 个),所以 `npm run specs` 从来不跑它 —— 8 个 spec 里只有 7 个会被执行。"
+}

@@ -1,0 +1,41 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 67690,
+  "timedOut": false,
+  "sessionId": "session-c02fcf4c-03b2-4c93-8ff3-c4a437a415d8",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 2819,
+    "outputTokens": 3011,
+    "cacheReadTokens": 21735,
+    "totalTokens": 27565
+  },
+  "formation": {
+    "agents": 4,
+    "input": 101341,
+    "output": 14994,
+    "cacheRead": 712669,
+    "total": 829004,
+    "steps": 30
+  },
+  "mainPrompt": 13880,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 1134,
+  "thinkingPreview": "The three reviews are done and answer the request. I should now write the conclusion. Let me verify a couple of key facts myself? The criteria said conclusions need file path + line number basis — the worker outputs have that. The request: three separate conclusions + a summary paragraph. Read-only, no file modification — nothing was modified.\n\nLet me write the final answer.\n\nI should be careful about accuracy — I'm relying on worker reports. Let me do a quick spot-check of a couple of key claims with grep/read to make sure the line numbers are right? That would be another round. The criteria are met: each conclusion has file path + line numbers. I think a light verification is worthwhile but the loop says judge: results answer the request → write conclusion. I'll do a quick verification read of plan.ts key sections to make sure the summary is right... Actually, that's a new round which ",
+  "finalText": "三部分独立审查完成，均为只读，未修改任何文件。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**纯数据层**：类型定义 + 解析归一化 + 并行分组，不含执行逻辑。\n\n**数据结构（扁平，无嵌套树/无依赖边）**\n- `PlanArgs`（plan.ts:87-92）= `{ criteria: string[], nodes: PlanNode[] }`，只有这两项。\n- `PlanNode`（plan.ts:71-84）= `{ id, kind, calls, task, order, writes }`——tools 节点与 agent 节点**共用同一个 interface**，靠 `kind` 区分，不适用的字段留空（tools 的 `task=''`，agent 的 `calls=[]`，plan.ts:160/166）。\n- `PlanToolCall`（plan.ts:63-68）= `{ name: string; arguments: unknown }`。\n\n**四种节点（plan.ts:24/27/35）**\n| kind | 语义 |\n|---|---|\n| `tools` | 参数已定的一批调用 |\n| `worker` | 带本对话启动，自己干活，**不画计划** |\n| `spawner` | 空白启动，自己在循环里画计划 |\n| `forker` | 带本对话启动，自己在循环里画计划 |\n\n反直觉点：`NODE_AGENT_TOOL`（plan.ts:46-50）把 **worker 和 forker 都映射到 `subagent_fork`**，只有 spawner 映射 `subagent`——\"会不会画计划\"由提示词区分，不由工具区分。`WORKER_MARKER = '[refine-loop worker]'`（plan.ts:103）是 worker 对话的唯一标记，用来让\"必须画计划\"的教条不落到 worker 身上。\n\n**调用参数的处理**\n- `arguments` 类型是 `unknown`，**不做形状校验**，原样透传给批量执行器（tool.ts:218-221）。\n- 归一化全在 `parsePlanArgs`（plan.ts:115-173）：criteria 过滤空串并 trim，空则拒；节点 `id` 必须非空且全局唯一；`kind` 只认四个枚举值；`order` 只认 `'sequential'`，**任何其它值静默降级为 `'parallel'`**（plan.ts:141）；tools 节点要求 `calls` 非空且每项有非空 `name`，`arguments` 缺失补 `{}`；agent 节点要求 `task` 非空。\n- **全有全无**：任一节点不合规即整个 plan 被拒；例外是空 plan 被显式允许（plan.ts:168-170）。\n- 小不一致：schema 把 `arguments` 标 `required: true`（tool.ts:511），解析层却补 `{}`。\n\n**并行分组（`buildGroups`，plan.ts:190-215）**：按声明顺序贪心放入第一个能容纳的组（首次匹配，非最优装箱），组内保序。唯一隔离条件是**两节点声明了相同 `writes` 路径**；`writes` 为空的节点一律照单全收（plan.ts:208，取信声明，不检查真实副作用）。\n\n---\n\n## 2. 插件强制的那条规则\n\n**规则本体只有一条：「一个回合 = 一个计划」**——回合的第一动作是把计划交给 `refine_plan`，计划跑完这一回合就结束（权威表述 `src/index.ts:19-21`）。\n\n**实现分软硬两层**\n- **软层（纯提示词）**：`ROUND_LOOP`（rounds.ts:23-36）作为每回合模型开口前读到的最后一条消息注入（rounds.ts:184-208），worker 会话被跳过；系统提示里的 `REFINE_GUIDANCE`（index.ts:54-79）描述计划形状。\n- **硬层（真拦截）**：\n  - `applyJudgementGuard`（rounds.ts:376-385）——当前请求已跑过计划（`Plans.waiting(sessionId)` 为 false）、且是模型自己发起的顶层调用（`callId === rootCallId`）、且工具不是 `refine_plan` 时，直接拒掉并回 `JUDGE_ONLY`（rounds.ts:348-350）。\n  - `applyDelegationRule`（rounds.ts:313-339）——顶层直调 `subagent`/`subagent_fork` 抛 `DELEGATE_IN_GRAPH`，嵌在计划下的调用原样放行；`list_agents/send_message/interrupt_agent` 从工具表 `restrict` 掉（rounds.ts:315、69-73）。\n  - `applyWorkerRule`（rounds.ts:291-300）——worker 调 `refine_plan` 被 `WORKER_NO_PLAN` 拒绝。\n  - 计划跑完 `exec.concludeTurn()`（tool.ts:609-611）真的结束回合。\n\n**触发条件**：状态位 `Plans`（rounds.ts:120-151）在**出现新 user 消息**时置为\"等待计划\"（`applyRounds`，rounds.ts:162-174），在**计划跑完**时清掉（index.ts:266 `plans.done`）。所以\"跑完计划后不许再一个个调工具\"是被硬拦的；但**\"回合的第一个调用必须是计划\"代码没有拦**——首个计划之前直接调普通工具仍放行（rounds.ts:382 在 waiting 时返回 `undefined`），只有 doctrine 文案约束。\n\n**关掉路径**：`/dsh-refine-loop off` 把 `refine_plan` 从工具表 `restrict` 掉（policy.ts:68-74），工具消失连带 guidance 一并消失（index.ts:242），规则随之失效；`on` 恢复。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n**执行流程**\n`refine_plan`（tool.ts:46）是唯一入口：`execute` 先用 `parsePlanArgs` 校验（tool.ts:569-572），再按 `maxBatchSize` 卡节点数（默认 8，index.ts:98），然后进 `runPlan`（tool.ts:354-393）。`runPlan` 用 `buildGroups` 分组，**每组用 `Promise.all` 一次跑完**（tool.ts:371-384）——同一层所有节点同时启动；结果进 Map 后按**计划原顺序**输出（tool.ts:385-391）。`tools` 节点转交 `runBatch`（batch.ts:313-382），批次内部按工具自身并发安全性切波（对 glob/grep/ops_bash 的只读放行见 concurrency.ts:176-207），失败调用最多修 2 次、用**对话自己的模型**修（batch.ts:229，index.ts:274）。跑完后 `onPlanFinished` 决定是否排队下一轮，`exec.concludeTurn()` 结束本轮（tool.ts:609-611，index.ts:264-273）。\n\n**子代理的限制**\n- **深度**：`delegationDepth >= maxAgentDepth`（默认 3）时该节点直接判失败，不起子代理（tool.ts:242-252，index.ts:113）。\n- **时间预算**：每个代理节点独立计时 `agentNodeTimeoutMs`（默认 540s），超时 abort 该节点记为失败，其余节点照跑（tool.ts:135-154、288-313，index.ts:122）。\n- **上下文来源**：`worker`/`forker` 必须有对话上下文（否则节点失败，tool.ts:258-266），经 `spawnForkedChild` 从当前日志种子继承**本轮在内**的完整对话（fork.ts:230、309）；`spawner` 空上下文起步，走 harness 的 `subagent` 工具（tool.ts:301）。全部同步执行（`run_in_background: false`，tool.ts:305）。\n- **工具集与模型**：子代理**不做工具裁剪**，直接继承父的工具表和 options——刻意为之，为请求头与父一致、命中缓存前缀（fork.ts:325-329）。限制改为\"调用时拒绝\"：worker 看得见计划工具但调用被 guard 挡回 `WORKER_NO_PLAN`；模型直接调 `subagent`/`subagent_fork` 被 `DELEGATE_IN_GRAPH` 拒绝，插件内部嵌套调用放行。\n- **提示词**：固定结构 = task + criteria + 硬契约\"只给"
+}
