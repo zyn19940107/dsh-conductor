@@ -192,23 +192,36 @@ export type RepairCall = (
 ) => Promise<{ name: string, arguments: unknown } | undefined>
 
 /**
- * Compress one call's output before it enters the batch's own text.
+ * How much of one call's output the plan report carries.
  *
- * A plan report carries every call's output. A result the harness had to spill
- * is compressed here instead, so one heavy call cannot push the report past the
- * point where the harness truncates it — and truncating the report is what
- * loses whole nodes.
- *
- * @param call - the call as the plan wrote it.
- * @param output - the output the call produced.
- * @param signal - the plan's cancellation signal.
- * @returns the text to report for that call.
+ * A plan report is the concatenation of every call's output, and it decides
+ * whether the agent can judge at all. A single unbounded result — a recursive
+ * listing, a spilled read — can be most of that report on its own, so each one
+ * is capped: the head, the tail and a marker that says how much was left out.
+ * The dropped middle is recoverable on purpose, with `read` and its offset or a
+ * narrower `grep`, which is a cheaper follow-up than a summarising model call.
  */
-export type CompressCall = (
-  call: BatchCall,
-  output: string,
-  signal: AbortSignal,
-) => Promise<string>
+export const MAX_CALL_OUTPUT_CHARS = 5000
+
+/** How much of the head survives the cap; the tail gets the rest. */
+const OUTPUT_HEAD_CHARS = 3000
+const OUTPUT_TAIL_CHARS = MAX_CALL_OUTPUT_CHARS - OUTPUT_HEAD_CHARS
+
+/**
+ * Cap one call's output, keeping its head and its tail.
+ *
+ * @param output - the output the call produced.
+ * @returns the output, or its capped form with a marker saying what was cut.
+ */
+export function capOutput(output: string): string {
+  if (output.length <= MAX_CALL_OUTPUT_CHARS) return output
+  const head = output.slice(0, OUTPUT_HEAD_CHARS)
+  const tail = output.slice(-OUTPUT_TAIL_CHARS)
+  const removed = output.length - MAX_CALL_OUTPUT_CHARS
+  const note = `[... ${removed} characters of this ${output.length}-character result were left out; `
+    + 'read it with offset/limit, or grep for the part you need ...]'
+  return `${head}\n\n${note}\n\n${tail}`
+}
 
 /**
  * How many times one failed call may be repaired.
@@ -241,7 +254,6 @@ async function runOne(
   scheduled: BatchSchedule,
   rootCallId: ToolCallId,
   repair: RepairCall | undefined,
-  compress: CompressCall | undefined,
 ): Promise<BatchItemResult> {
   let name = call.name
   let args = call.arguments
@@ -260,8 +272,7 @@ async function runOne(
       })
       output = contentToText(result.content, result.value)
       if (!result.isError) {
-        const reported = compress === undefined ? output : await compress(call, output, signal)
-        return { name: call.name, ok: true, scheduled, output: reported, error: '' }
+        return { name: call.name, ok: true, scheduled, output: capOutput(output), error: '' }
       }
       error = result.error?.message ?? 'the call failed'
     } catch (caught: unknown) {
@@ -297,7 +308,6 @@ async function runOne(
  * @param rootCallId - the call the plan itself runs under.
  * @param overrides - per-tool concurrency overrides.
  * @param repair - how a failed call is repaired, when it may be.
- * @param compress - how one call's output is compressed before it is reported.
  * @returns the batch output.
  */
 export async function runBatch(
@@ -309,7 +319,6 @@ export async function runBatch(
   rootCallId: ToolCallId,
   overrides: Readonly<Record<string, ConcurrencyOverride>> = {},
   repair?: RepairCall,
-  compress?: CompressCall,
 ): Promise<BatchOutput> {
   const calls = args.calls
   const results: BatchItemResult[] = new Array(calls.length)
@@ -324,7 +333,7 @@ export async function runBatch(
   // which calls may share a moment.
   if (args.order === 'sequential') {
     for (const [index, call] of calls.entries()) {
-      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair, compress)
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair)
     }
     return { criteria: args.criteria, schedule: 'serial', results: results.filter(item => item !== undefined) }
   }
@@ -353,14 +362,14 @@ export async function runBatch(
       await Promise.all(wave.indexes.map(async (index) => {
         const call = calls[index]
         if (call === undefined) return
-        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId, repair, compress)
+        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId, repair)
       }))
       continue
     }
     for (const index of wave.indexes) {
       const call = calls[index]
       if (call === undefined) continue
-      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair, compress)
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair)
     }
   }
 

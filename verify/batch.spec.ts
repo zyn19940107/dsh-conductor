@@ -6,7 +6,7 @@
  * look at the overlap rather than at a summary.
  */
 
-import { runBatch, type BatchRunner } from '../src/batch.js'
+import { capOutput, MAX_CALL_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
 
 let failures = 0
 
@@ -157,6 +157,18 @@ console.log('a call that fails is reported, not thrown')
   check('the bad call failed', output.results[1]?.ok === false)
   check('the failure carries its message', output.results[1]?.error === 'the call failed')
   check('the failure carries its output', output.results[1]?.output === 'it failed')
+}
+
+// The report is the concatenation of every call's output, so one unbounded
+// result is capped: head, tail, and a marker that says how much is missing.
+{
+  const big = 'H'.repeat(3000) + 'M'.repeat(20000) + 'T'.repeat(2000)
+  const capped = capOutput(big)
+  check('a large result is capped', capped.length <= MAX_CALL_OUTPUT_CHARS + 200, String(capped.length))
+  check('the cap keeps the head', capped.startsWith('HHHH'))
+  check('the cap keeps the tail', capped.endsWith('TTTT'))
+  check('the cap says what it dropped', capped.includes('characters of this 25000-character result were left out'))
+  check('a small result is untouched', capOutput('short') === 'short')
 }
 
 if (failures > 0) {
