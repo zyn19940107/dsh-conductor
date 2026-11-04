@@ -201,10 +201,10 @@ export type RepairCall = (
  * The dropped middle is recoverable on purpose, with `read` and its offset or a
  * narrower `grep`, which is a cheaper follow-up than a summarising model call.
  */
-export const MAX_CALL_OUTPUT_CHARS = 5000
+export const MAX_CALL_OUTPUT_CHARS = 10000
 
 /** How much of the head survives the cap; the tail gets the rest. */
-const OUTPUT_HEAD_CHARS = 3000
+const OUTPUT_HEAD_CHARS = 6000
 const OUTPUT_TAIL_CHARS = MAX_CALL_OUTPUT_CHARS - OUTPUT_HEAD_CHARS
 
 /**

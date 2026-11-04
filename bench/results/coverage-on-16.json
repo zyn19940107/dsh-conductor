@@ -1,0 +1,50 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 16,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 103470,
+  "timedOut": false,
+  "sessionId": "session-5bee4d32-8aa1-4ac7-9ae1-cd6f06d11cf9",
+  "stderr": "",
+  "steps": 6,
+  "toolCalls": 7,
+  "tools": [
+    "pwsh",
+    "glob",
+    "refine_plan",
+    "glob",
+    "grep",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 26356,
+    "outputTokens": 5261,
+    "cacheReadTokens": 112512,
+    "totalTokens": 144129
+  },
+  "formation": {
+    "agents": 4,
+    "input": 113651,
+    "output": 27625,
+    "cacheRead": 681088,
+    "total": 822364,
+    "steps": 31
+  },
+  "mainPrompt": 30047,
+  "correctness": {
+    "passed": 3,
+    "total": 5,
+    "missing": [
+      "src 的八个模块(缺:concurrency.ts)",
+      "行数最多的模块(tool.ts)(缺:562/618/620/639/640)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 9718,
+  "thinkingPreview": "Let me explore the workspace structure first.\n\nThe user asks about D:\\code\\vibe\\dsh-refine-loop\\verify and D:\\code\\vibe\\dsh-refine-loop\\src. Let me look.\n\nThis is a read-only task. Let me plan with refine_plan. First, I could do a quick exploration myself with tools, but the instructions say each round is: design plan → refine_plan → judge. I can call tools while designing the plan.\n\nLet me start by exploring directly to understand structure, then delegate. Actually, let's just use refine_plan with worker nodes.\n\nBut first I need to know what's there. Let me do a quick glob/read myself in this round — that's allowed (\"You may call tools while you design the plan\").\n\nLet me list files.\nNow I have the structure:\n- src has 8 modules: batch.ts, concurrency.ts, fork.ts, index.ts, plan.ts, policy.ts, repair.ts, rounds.ts, tool.ts — wait that's 9. Let me count: batch, concurrency, fork, index, ",
+  "finalText": "三个问题都已核实，结论如下。全程只读，未修改任何文件。\n\n---\n\n## 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n| spec 文件 | import 证据 | 实际被测的入口函数 |\n|---|---|---|\n| `batch.spec.ts` (178行) | L9 `import { capOutput, MAX_CALL_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'` | **`runBatch`** (batch.ts:313) 为主；末段单独测 `capOutput` (batch.ts:216) |\n| `concurrency.spec.ts` (123行) | L6 `runBatch`←batch.js；L7-11 `buildOverrides, isReadOnlyCommand, mayRunTogether`←concurrency.js | **`isReadOnlyCommand`**(138)、**`mayRunTogether`**(222)、**`buildOverrides`**(195)；末段借 `runBatch` 验证串行顺序 |\n| `fork.spec.ts` (122行) | L10 `import { buildSeedFromNow, openTurnClosers, type SessionEventLike } from '../src/fork.ts'` | **`buildSeedFromNow`**(fork.ts:230) 为主，**`openTurnClosers`**(180) 次之 |\n| `plan.spec.ts` (353行) | L8 `runPlan, renderPlan`←tool.js；L12-17 `WORKER_MARKER, buildGroups, parsePlanArgs`←plan.js | **`runPlan`**(tool.ts:354) + **`renderPlan`**(tool.ts:401) 才是入口——跑 plan 的代码在 `tool.ts` 不在 `plan.ts`；`parsePlanArgs`(115)、`buildGroups`(190) 为辅 |\n| `refine.spec.ts` (81行) | L6 `parseBatchArgs, renderBatch`←batch.js；L8 `parsePolicyCommand`←policy.js | 名字不对应任何模块（无 `src/refine.ts`）；实测 **`parseBatchArgs`**(batch.ts:95)、**`renderBatch`**(394)、**`parsePolicyCommand`**(policy.ts:145) |\n| `repair.spec.ts` (162行) | L10 `runBatch`←batch.js；L11 `parseRepair`←repair.js | **`parseRepair`**(repair.ts:139)，配 `runBatch` 的 repair 分支当 harness |\n| `retain.spec.ts` (102行) | L11 `applyReportRetention`←index.js；L12 `PLAN_TOOL`←tool.js | **`applyReportRetention`**(index.ts:306) + 常量 `PLAN_TOOL`(tool.ts:46) |\n| `rounds.spec.ts` (169行) | L9-18 `Rounds, NEXT_ROUND, ROUND_LOOP, WORKER_NO_PLAN, Workers, applyTurnDoctrine, applyWorkerRule, isWorkerConversation`←rounds.ts；L19 `WORKER_MARKER`←plan.ts | **`Rounds`**(78)、**`Workers`**(219)、**`applyTurnDoctrine`**(184)、**`applyWorkerRule`**(291)、**`isWorkerConversation`**(254) |\n\n## 2. 没有对应 spec 的模块\n\n`src/` 实际有 **9 个** `.ts`：其中 `index.ts` 不是 barrel，而是插件入口本身（`name`/`inject`/`apply`/`Config`），排除后正好是 **8 个模块**：`batch, concurrency, fork, plan, policy, repair, rounds, tool`。\n\n**没有同名 spec 的是 `policy.ts` 和 `tool.ts`。**\n\n- `policy.ts` — 无 `policy.spec.ts`；只有 `parsePolicyCommand` 被 `refine.spec.ts` 顺带测了 6 条，`runPolicyCommand`/`SessionPolicy`/`policyConfirmation`/`applyPolicyMessage`/`applyPolicyCommand` 全无覆盖。\n- `tool.ts` — 无 `tool.spec.ts`；`runPlan`/`renderPlan` 被 `plan.spec.ts` 用、`PLAN_TOOL` 被 `retain.spec.ts` 用，但真正的入口 **`applyPlanTool`**(tool.ts:426) 从未被任何 spec 调用。\n\n> 附带一条（已核实）：`verify/run-specs.mjs:21` 的 specs 数组只有 7 项，**漏了 `repair.spec.ts`** —— `pnpm specs` 根本不跑它。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts` —— 622 行**（非空 601 行，22883 字节）。\n\n完整行数：tool 622 / batch 409 / rounds 385 / fork 372 / index 351 / policy 241 / concurrency 234 / plan 215 / repair 173。\n\n若「这些模块」特指第 2 问里那两个没有 spec 的模块，答案同样是 `tool.ts` 622 行。"
+}

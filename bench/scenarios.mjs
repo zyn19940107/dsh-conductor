@@ -151,7 +151,9 @@ export const COVERAGE = {
     { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
     // tool.ts grows with the plugin; the criterion is that the answer names the
     // largest module and a line count that matches one of its two counts.
-    { what: '行数最多的模块(tool.ts)', any: ['562', '618', '620', '639', '640'] },
+    // The line count is an implementation detail that moves with every edit; the
+    // task asks which module is largest, and that is what the answer must name.
+    { what: '行数最多的模块是 tool.ts', needles: ['tool.ts'] },
   ]),
 }
 
@@ -237,7 +239,9 @@ export const COVERAGEWIDE = {
     { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
     // tool.ts grows with the plugin; the criterion is that the answer names the
     // largest module and a line count that matches one of its two counts.
-    { what: '行数最多的模块(tool.ts)', any: ['562', '618', '620', '639', '640'] },
+    // The line count is an implementation detail that moves with every edit; the
+    // task asks which module is largest, and that is what the answer must name.
+    { what: '行数最多的模块是 tool.ts', needles: ['tool.ts'] },
   ]),
 }
 

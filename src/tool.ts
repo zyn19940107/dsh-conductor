@@ -466,6 +466,7 @@ export function applyPlanTool(
       + '"worker" (a child that starts with this conversation and does the work itself, without drawing a '
       + 'plan of its own), "spawner" (a child that starts empty and plans through this loop), '
       + '"forker" (a child that starts with this conversation and plans through this loop). '
+
       + 'Keep it small: a node task is one sentence, one or two criteria decide the round, and a child that '
       + 'inherits this conversation already sees it, so its task says what to do rather than what the '
       + 'conversation says. Shape of a plan: {"criteria": ["...", "..."], "nodes": ['

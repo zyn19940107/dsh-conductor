@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 14,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 351209,
+  "timedOut": false,
+  "sessionId": "session-6ff417df-6cca-494a-b165-cdd7c9e8cf39",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 13157,
+    "outputTokens": 1371,
+    "cacheReadTokens": 11136,
+    "totalTokens": 25664
+  },
+  "formation": {
+    "agents": 3,
+    "input": 216677,
+    "output": 35546,
+    "cacheRead": 1171584,
+    "total": 1423807,
+    "steps": 34
+  },
+  "mainPrompt": 13513,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 208,
+  "thinkingPreview": "Both nodes agree. The results answer all three questions. Let me write the conclusion. No more tool calls needed — the two workers independently agree on the key facts.\n\nLet me present the conclusion clearly.",
+  "finalText": "两个独立节点（分别从 spec 侧和 src 侧调查）结论一致，问题已答完。\n\n---\n\n## 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n`verify/` 不是测试框架，是自写的 `check()` 脚本，由 `verify/run-specs.mjs` 用 esbuild 打包后逐个 spawn。\n\n| spec 文件 | 实际被测的入口函数 | 来源模块 |\n|---|---|---|\n| `batch.spec.ts` | **`runBatch`**（主）+ `capOutput` / `MAX_CALL_OUTPUT_CHARS` | `src/batch.ts` |\n| `concurrency.spec.ts` | **`isReadOnlyCommand`**、**`mayRunTogether`**、**`buildOverrides`**；末节借 `runBatch` 验批内顺序 | `src/concurrency.ts` ＋ `src/batch.ts` |\n| `fork.spec.ts` | **`buildSeedFromNow`**（主）+ `openTurnClosers` | `src/fork.ts` |\n| `plan.spec.ts` | **`runPlan`**、**`renderPlan`**；`parsePlanArgs`、`buildGroups`、`WORKER_MARKER` | `src/tool.ts` ＋ `src/plan.ts` |\n| `refine.spec.ts` | **`parseBatchArgs`**、**`renderBatch`** + **`parsePolicyCommand`** | `src/batch.ts` ＋ `src/policy.ts` |\n| `repair.spec.ts` | **`parseRepair`**；`runBatch` 带 repair 回调的分支 | `src/repair.ts` ＋ `src/batch.ts` |\n| `retain.spec.ts` | **`applyReportRetention`**；常量 `PLAN_TOOL` | `src/index.ts` ＋ `src/tool.ts` |\n| `rounds.spec.ts` | **`Rounds`**、**`Workers`**、**`applyTurnDoctrine`**、**`applyWorkerRule`**、**`isWorkerConversation`**（+ `ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN`） | `src/rounds.ts` ＋ `src/plan.ts` |\n\n三个文件名有误导性：`refine.spec.ts` 没有同名模块（无 `src/refine.ts`），`retain.spec.ts` 没有同名模块（无 `src/retain.ts`），`plan.spec.ts` 的主入口其实在 `tool.ts` 而不是 `plan.ts`。\n\n**额外发现（比问题本身更要紧）**：`verify/repair.spec.ts` 在磁盘上存在，但 `verify/run-specs.mjs:21` 的 spec 清单里**没有它**——`pnpm specs` 实际只跑 7 个 spec，`repair.ts` 的测试从未执行。\n\n## 2. 没有对应 spec 的模块\n\n前提修正：`src/` 下实际有 **9 个 `.ts`**。`index.ts` 是插件装配入口（`package.json` 的 `main → lib/index.js`），去掉它剩下的正好是你说的 8 个：`batch, concurrency, fork, plan, policy, repair, rounds, tool`。\n\n- **按「同名专属 spec」口径：只有 `policy.ts` 和 `tool.ts` 没有**（`index.ts` 也没有同名 spec，被 `retain.spec.ts` 覆盖）。\n- **按「是否被任何 spec 真正测到」口径：8 个全都被碰到，但都是部分覆盖**：\n  - `policy.ts` — 只有 `parsePolicyCommand` 被测（8 个导出中 1 个），`runPolicyCommand` / `policyConfirmation` / `SessionPolicy` / `applyPolicyCommand` / `applyPolicyMessage` 全未测。\n  - `tool.ts` — 只有 `runPlan` / `renderPlan` / `PLAN_TOOL` 被测；最核心的 **`applyPlanTool`（工具注册与参数 schema）完全没测**。\n  - `repair.ts` — 只有 `parseRepair` 被测，而它所在的 spec 不在 runner 清单里，等于**实际执行覆盖为零**。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，624 行**（603 非空行）。这是工作区当前值；HEAD 上是 620 行，差异来自那 4 行未提交的改动——README 里若写「tool.ts 行数」是旧值，别再当 620 用。\n\n其余依次：batch.ts 409 / rounds.ts 386 / fork.ts 372 / index.ts 351 / policy.ts 241 / concurrency.ts 234 / plan.ts 215 / repair.ts 173。即使把 `index.ts` 也算进来，`tool.ts` 仍是第一。\n\n---\n\n全程只读，未修改任何文件（`git status` 显示的 `src/rounds.ts`、`src/tool.ts` 改动及未跟踪的 bench results 是进场前就存在的）。"
+}
