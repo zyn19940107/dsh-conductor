@@ -29,6 +29,7 @@ import {
   type RepairCall,
 } from './batch.js'
 import { mayRunTogether, type ConcurrencyOverride } from './concurrency.js'
+import type { CompressCall } from './batch.js'
 import { spawnForkedChild, type SpawnResult } from './fork.js'
 import {
   AGENT_NODE_KINDS,
@@ -212,6 +213,7 @@ async function runNode(
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
   repair: RepairCall | undefined,
+  compress: CompressCall | undefined,
   fork: PlanForkOptions | undefined,
 ): Promise<PlanNodeResult> {
   if (node.kind === 'tools') {
@@ -228,6 +230,7 @@ async function runNode(
       rootCallId,
       overrides,
       repair,
+      compress,
     )
     const failed = batch.results.filter(item => !item.ok)
     return {
@@ -362,6 +365,7 @@ export async function runPlan(
   maxAgentDepth: number,
   agentNodeTimeoutMs: number,
   repair?: RepairCall,
+  compress?: CompressCall,
   fork?: PlanForkOptions,
 ): Promise<PlanOutput> {
   const groups = buildGroups(plan.nodes)
@@ -380,6 +384,7 @@ export async function runPlan(
       maxAgentDepth,
       agentNodeTimeoutMs,
       repair,
+      compress,
       fork,
     )))
     for (const result of settled) results.set(result.id, result)
@@ -446,6 +451,16 @@ export function applyPlanTool(
     onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
     /** Build the repair for one conversation, from its own call configuration. */
     repair?: (config: LlmCallConfig) => RepairCall
+    /**
+     * Compress one oversized tool result, on the conversation's own route, so the
+     * report the harness sees stays under its truncation budget.
+     */
+    compress?: (
+      config: LlmCallConfig,
+      tool: string,
+      output: string,
+      signal: AbortSignal,
+    ) => Promise<string>
     /**
      * Called when a plan has run, before the tool returns.
      *
@@ -582,6 +597,9 @@ export function applyPlanTool(
       const repair = options.repair === undefined || ownConfig === undefined
         ? undefined
         : options.repair(ownConfig)
+      const compress: CompressCall | undefined = options.compress === undefined || ownConfig === undefined
+        ? undefined
+        : (call, output, signal) => options.compress!(ownConfig, call.name, output, signal)
       // Workers and forkers inherit this conversation, this round included, so
       // they are started here rather than through the harness's own fork tool.
       const fork: PlanForkOptions | undefined = options.host === undefined
@@ -601,6 +619,7 @@ export function applyPlanTool(
         options.maxAgentDepth(),
         options.agentNodeTimeoutMs(),
         repair,
+        compress,
         fork,
       )
       // The plan has run. If the loop has a round left, the next one is already

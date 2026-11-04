@@ -192,6 +192,25 @@ export type RepairCall = (
 ) => Promise<{ name: string, arguments: unknown } | undefined>
 
 /**
+ * Compress one call's output before it enters the batch's own text.
+ *
+ * A plan report carries every call's output. A result the harness had to spill
+ * is compressed here instead, so one heavy call cannot push the report past the
+ * point where the harness truncates it — and truncating the report is what
+ * loses whole nodes.
+ *
+ * @param call - the call as the plan wrote it.
+ * @param output - the output the call produced.
+ * @param signal - the plan's cancellation signal.
+ * @returns the text to report for that call.
+ */
+export type CompressCall = (
+  call: BatchCall,
+  output: string,
+  signal: AbortSignal,
+) => Promise<string>
+
+/**
  * How many times one failed call may be repaired.
  */
 export const MAX_REPAIRS = 2
@@ -222,6 +241,7 @@ async function runOne(
   scheduled: BatchSchedule,
   rootCallId: ToolCallId,
   repair: RepairCall | undefined,
+  compress: CompressCall | undefined,
 ): Promise<BatchItemResult> {
   let name = call.name
   let args = call.arguments
@@ -240,7 +260,8 @@ async function runOne(
       })
       output = contentToText(result.content, result.value)
       if (!result.isError) {
-        return { name: call.name, ok: true, scheduled, output, error: '' }
+        const reported = compress === undefined ? output : await compress(call, output, signal)
+        return { name: call.name, ok: true, scheduled, output: reported, error: '' }
       }
       error = result.error?.message ?? 'the call failed'
     } catch (caught: unknown) {
@@ -274,6 +295,9 @@ async function runOne(
  * @param signal - the abort signal of the batch.
  * @param respectConcurrencySafety - whether a tool's own exclusivity is honoured.
  * @param rootCallId - the call the plan itself runs under.
+ * @param overrides - per-tool concurrency overrides.
+ * @param repair - how a failed call is repaired, when it may be.
+ * @param compress - how one call's output is compressed before it is reported.
  * @returns the batch output.
  */
 export async function runBatch(
@@ -285,6 +309,7 @@ export async function runBatch(
   rootCallId: ToolCallId,
   overrides: Readonly<Record<string, ConcurrencyOverride>> = {},
   repair?: RepairCall,
+  compress?: CompressCall,
 ): Promise<BatchOutput> {
   const calls = args.calls
   const results: BatchItemResult[] = new Array(calls.length)
@@ -299,7 +324,7 @@ export async function runBatch(
   // which calls may share a moment.
   if (args.order === 'sequential') {
     for (const [index, call] of calls.entries()) {
-      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair)
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair, compress)
     }
     return { criteria: args.criteria, schedule: 'serial', results: results.filter(item => item !== undefined) }
   }
@@ -328,14 +353,14 @@ export async function runBatch(
       await Promise.all(wave.indexes.map(async (index) => {
         const call = calls[index]
         if (call === undefined) return
-        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId, repair)
+        results[index] = await runOne(runner, call, agent, signal, 'concurrent', rootCallId, repair, compress)
       }))
       continue
     }
     for (const index of wave.indexes) {
       const call = calls[index]
       if (call === undefined) continue
-      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair)
+      results[index] = await runOne(runner, call, agent, signal, 'serial', rootCallId, repair, compress)
     }
   }
 

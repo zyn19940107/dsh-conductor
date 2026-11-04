@@ -31,6 +31,7 @@ import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
 import { applyDelegationRule, applyJudgementGuard, applyRounds, applyTurnDoctrine, applyWorkerRule, NEXT_ROUND, Plans, Rounds, Workers } from './rounds.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
+import { compressToolOutput, needsCompression } from './compress.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -256,6 +257,19 @@ export function apply(ctx: Context, config: Config): void {
     // A worker or a forker inherits this conversation, this round included.
     // The host context is what can start such a child; the sink is how the loop
     // learns which conversations are workers.
+    // A plan report carries every call's output, and the harness truncates a
+    // report that is too large — keeping the head and the tail, dropping the
+    // middle, which loses whole nodes. A tool result that is too large is
+    // compressed here, with the model, before it enters the report.
+    compress: async (route, tool, output, signal) => {
+      if (!needsCompression(output)) return output
+      try {
+        return await compressToolOutput(ctx, route, tool, output, signal)
+      } catch (error: unknown) {
+        ctx.logger?.warn?.(`refine-loop: compression failed, reporting the raw result: ${String(error)}`)
+        return output
+      }
+    },
     host: () => ctx as unknown as Record<string, unknown>,
     onWorker: (sessionId: string) => workers.mark(sessionId),
     // One round is a plan and its execution. When the plan has run and the loop
