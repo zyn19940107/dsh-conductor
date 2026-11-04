@@ -98,17 +98,17 @@ export const REVIEW = {
  */
 export const BUDGET_PROBE = {
   text: [
-    '这是一个机制验证任务，只做一件事：验证 nodes 里的 budgetMs 到点后会停下还没跑完的调用。',
+    '这是一个机制验证任务，只做一件事：验证 spawner 节点的 budgetMs 到点后会被停下并要求报告现状。',
     '',
-    '请交一张图，criteria 写「sleep 节点在 20 秒预算用尽时停掉了还在跑的调用」，nodes 原样照抄：',
-    '{"id": "sleep", "kind": "tools", "budgetMs": 20000,',
-    ' "calls": [{"name": "pwsh", "arguments": {"command": "python -c \\"import time; time.sleep(300)\\""}}]}',
+    '请交一张图，criteria 写「spawner 节点在 20 秒预算用尽时被停下并报告了现状」，nodes 原样照抄：',
+    '{"id": "sleep", "kind": "spawner", "budgetMs": 20000,',
+    ' "task": "用 pwsh 跑一条会阻塞 300 秒的命令：python -c \\"import time; time.sleep(300)\\"，命令结束后告诉我它的输出。"}',
     '',
     '等它回来之后，把 refine_plan 报告里 sleep 节点的 output 原样复述给我，',
-    '并说明这次图是按时结束的还是被预算停下的。',
+    '并说明它是按时结束的还是被预算停下的。',
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
-    { what: '说清了预算到点停了调用', any: ['budget', '预算', '超时', 'time budget', 'stopped'] },
+    { what: '说清了预算到点停了节点', any: ['budget', '预算', '超时', 'time budget', '现状'] },
   ]),
 }
 

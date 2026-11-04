@@ -382,6 +382,72 @@ export async function spawnForkedChild(
     onCreated?: (sessionId: string) => void
   },
 ): Promise<SpawnResult> {
+  return await spawnChild(host, parent, prompt, options, true)
+}
+
+/**
+ * Start a child that begins empty and plans through this loop.
+ *
+ * A spawner has nothing to inherit, so it starts the same way a forked child
+ * does: by this plugin, through the agent factory, rather than through the
+ * harness's delegation tool. The reason to do it here is the handle — with it
+ * the node's budget can stop the child and ask it for its state, which the
+ * harness tool never exposes.
+ *
+ * @param host - the host context carrying the agent factory.
+ * @param parent - the conversation the node belongs to.
+ * @param prompt - what the child is asked to do.
+ * @param options - the ceiling and the node's own budget.
+ * @returns what the child produced.
+ */
+export async function spawnEmptyChild(
+  host: Record<string, unknown>,
+  parent: Agent,
+  prompt: string,
+  options: {
+    /** The ceiling: the child never runs longer than this. */
+    timeoutMs: number
+    /** What the node itself said it would take. */
+    budgetMs?: number
+    /** The signal that cancels the child. */
+    signal: AbortSignal
+  },
+): Promise<SpawnResult> {
+  return await spawnChild(host, parent, prompt, options, false)
+}
+
+/**
+ * The shared spawn: seeded or empty, with the budget handled the same way.
+ *
+ * @param host - the host context carrying the agent factory.
+ * @param parent - the conversation the node belongs to.
+ * @param prompt - what the child is asked to do.
+ * @param options - the ceiling, the node's own budget and the cancellation.
+ * @param seeded - whether the child inherits this conversation.
+ * @returns what the child produced.
+ */
+async function spawnChild(
+  host: Record<string, unknown>,
+  parent: Agent,
+  prompt: string,
+  options: {
+    /** The ceiling: the child never runs longer than this. */
+    timeoutMs: number
+    /**
+     * What the node itself said it would take.
+     *
+     * It is not a kill switch. When it is spent the child is stopped and then
+     * asked to look at where it got to and decide: finish by the shortest path,
+     * or report its state and stop. The ceiling still bounds the whole thing.
+     */
+    budgetMs?: number
+    /** The signal that cancels the child. */
+    signal: AbortSignal
+    /** Told the child's session id as soon as the child exists. */
+    onCreated?: (sessionId: string) => void
+  },
+  seeded: boolean,
+): Promise<SpawnResult> {
   const agentLoop = host['agentLoop'] as
     | { createAgent: (owner: unknown, options: Record<string, unknown>) => Promise<ChildHandle> }
     | undefined
@@ -392,7 +458,7 @@ export async function spawnForkedChild(
     header: Record<string, unknown>
     snapshotEvents: () => SessionEventLike[]
   }
-  const seed = buildSeedFromNow(session.snapshotEvents())
+  const seed = seeded ? buildSeedFromNow(session.snapshotEvents()) : []
   const depth = Number(session.header.delegationDepth ?? 0) + 1
 
   const sessionId = `refine-loop-child-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`

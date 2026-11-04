@@ -1,0 +1,42 @@
+{
+  "task": "budgetprobe",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 60489,
+  "timedOut": false,
+  "sessionId": "session-00e64024-4123-4fa1-be53-badbcb3dc1db",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "job_list"
+  ],
+  "usage": {
+    "inputTokens": 12736,
+    "outputTokens": 1630,
+    "cacheReadTokens": 22784,
+    "totalTokens": 37150
+  },
+  "formation": {
+    "agents": 2,
+    "input": 16016,
+    "output": 3409,
+    "cacheRead": 74109,
+    "total": 93534,
+    "steps": 8
+  },
+  "mainPrompt": 12509,
+  "correctness": {
+    "passed": 1,
+    "total": 1,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 3242,
+  "thinkingPreview": "The user wants a mechanism verification task: submit a plan with a spawner node with budgetMs 20000, and the task as given. Then wait for it to come back, and report the sleep node's output verbatim, and explain whether it ended on time or was stopped by the budget.\n\nThis is a straightforward single-round plan. Let me just call refine_plan with exactly the nodes given.\n\nThe plan: criteria: [\"spawner 节点在 20 秒预算用尽时被停下并报告了现状\"], nodes: [{\"id\": \"sleep\", \"kind\": \"spawner\", \"budgetMs\": 20000, \"task\": \"...\"}].\n\nLet me submit it.\n\nNote: I must hand over the plan first as my first message with no tool call before it. Actually I can just call refine_plan directly since it is the plan handover.\n\nLet me do it.\nThe user asked: report the sleep node's output verbatim, and explain whether it ended on time or was stopped by the budget.\n\nThe answer: it was stopped by the budget — the node itself states \"m",
+  "finalText": "## 结论\n\n**判定：是被预算停下的，不是按时结束的。** spawner 节点在 20 秒预算用尽时中断了等待，转而报告现状 —— 机制验证通过。\n\n### sleep 节点的 output（原样复述）\n\n> **Status: command is running, not finished — the 300 s block cannot complete inside my remaining window.**\n>\n> **What is done and confirmed**\n> - The command was started as a harness background job: `pwsh-1` → `python -c 'import time; time.sleep(300)'`.\n> - `job_output(pwsh-1, wait=true, timeout_ms=8000)` returned `status: running` with no stdout/stderr yet, so Python is present on PATH and is inside the sleep — not failed at launch (a launch error would have exited immediately with a message).\n>\n> **What is still missing**\n> - The command's final output. It needs ~300 s of wall clock from its start; my node's 20 s budget was already spent and only ~45 s remained, so I stopped waiting instead of starting anything else.\n>\n> **Expected result (for the parent to confirm, not yet observed)**\n> - `python -c 'import time; time.sleep(300)'` writes nothing to stdout or stderr and exits 0. The final output should therefore be an empty stdout/stderr with exit code 0 after roughly five minutes.\n>\n> **How the parent finishes this**\n> - Call `job_output(job_id=\"pwsh-1\", wait=true)` (repeat with a fresh `wait` call as needed) to pick up the finished job; the job id `pwsh-1` is also visible via `job_list`. If the job was already collected, its stored output is the same empty stdout/stderr, exit code 0.\n\n### 为什么是\"被预算停下\"\n\n1. **命令本身没有完成**：300 秒的阻塞在 20 秒预算内不可能跑完，节点自己也写明 \"command is running, not finished\"。\n2. **节点自述预算已耗尽**：\"my node's 20 s budget was already spent and only ~45 s remained, so I stopped waiting instead of starting anything else.\" —— 这是预算触发停止的原始痕迹，而不是命令自行结束。\n3. **停止后交付了现状而不是沉默**：报告给出了已确认的部分（命令已以 `pwsh-1` 启动、`job_output` 返回 `status: running`、无 stdout/stderr）、缺失的部分（最终输出）、以及父节点如何收尾（用 job id `pwsh-1` 继续等）。这正是 \"预算让慢节点变得有用而不是变成黑箱\" 的预期行为。\n4. **唯一没拿到的东西恰恰证明是预算而非超时**：最终输出属于\"预期结果（待父节点确认，尚未观测）\"，节点没有谎称已观察到。\n\n补充一点实测上的限制：`pwsh-1` 这个后台 job 是在子节点自己的上下文里创建的，我这一层用 `job_list` 收不到它，所以报告里说的\"父节点用 `job_output(job_id=\"pwsh-1\")` 收尾\"这条路径在本次验证中并未走通 —— 但这不影响本次要验证的那条机制（预算到期 → 停止 → 报告现状）。\n\ncriteria「spawner 节点在 20 秒预算用尽时被停下并报告了现状」已满足。"
+}

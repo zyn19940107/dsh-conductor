@@ -35,19 +35,13 @@ export const AGENT_NODE_KINDS: readonly PlanNodeKind[] = ['worker', 'spawner', '
 export const WORKER_NODE_KINDS: readonly PlanNodeKind[] = ['worker']
 
 /**
- * The harness tool each agent node runs through.
+ * The node kinds that start a child this plugin spawns itself.
  *
- * The node kinds are named for what the child does, not for the tool that
- * starts it: a plan node is not a tool call, and two of the three child kinds
- * share one tool. A `worker` starts with this conversation and works; a
- * `spawner` starts empty and plans; a `forker` starts with this conversation
- * and plans.
+ * Every agent node goes through the plugin's own spawn, not through the
+ * harness's delegation tools: a node is not a tool call, and the plugin needs
+ * the child's handle to stop it at the node's budget and ask it for its state.
  */
-export const NODE_AGENT_TOOL: Readonly<Record<'worker' | 'spawner' | 'forker', string>> = {
-  worker: 'subagent_fork',
-  spawner: 'subagent',
-  forker: 'subagent_fork',
-}
+export const NODE_AGENT_KINDS: readonly PlanNodeKind[] = ['worker', 'spawner', 'forker']
 
 /**
  * How the calls of a tools node run.

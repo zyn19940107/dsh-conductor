@@ -64,6 +64,51 @@ function node(id: string, writes: string[] = []): PlanNode {
   return { id, kind: 'tools', calls: [{ name: 'echo', arguments: {} }], task: '', order: 'parallel', writes }
 }
 
+/**
+ * The agent factory the plan tool spawns children through.
+ *
+ * Every agent node is started by the plugin itself now, so the fake is an
+ * `agentLoop` rather than a delegation tool on the runner: the checks look at
+ * what the children were told, not at which harness tool was called.
+ *
+ * @param prompts - receives every message a child is sent.
+ * @param behavior - whether a child answers, or never goes idle.
+ * @returns the plan tool's fork options.
+ */
+function fakeFork(prompts: string[], behavior: 'answer' | 'never' = 'answer') {
+  let created = 0
+  const agentLoop = {
+    async createAgent(_owner: unknown, _options: Record<string, unknown>) {
+      created += 1
+      const id = `child-${created}`
+      const events: Array<Record<string, unknown>> = []
+      const child = {
+        session: {
+          id,
+          header: { delegationDepth: 2, cwd: '/tmp' },
+          snapshotEvents: () => events,
+        },
+        followup(message: { content?: Array<{ text?: string }> }) {
+          const text = (message.content ?? []).map(block => block.text ?? '').join('')
+          prompts.push(text)
+          if (behavior === 'answer') {
+            events.push({
+              type: 'assistant/message',
+              seq: events.length + 1,
+              time: 1,
+              data: { message: { content: [{ type: 'text', text: `done by ${id}` }] } },
+            })
+          }
+        },
+        whenIdle: () => behavior === 'never' ? new Promise<void>(() => {}) : Promise.resolve(),
+        cancel: () => {},
+      }
+      return { agent: child as unknown as Agent, dispose: async () => {} }
+    },
+  }
+  return { host: { agentLoop }, onWorker: undefined }
+}
+
 console.log('parsePlanArgs')
 {
   const parsed = parsePlanArgs({
@@ -185,15 +230,16 @@ console.log('runPlan')
     {},
     1,
     300000,
+    undefined,
+    fakeFork(prompts),
   )
 
   check('every node ran', output.nodes.length === 3)
   check('the results keep the plan order', output.nodes[0]?.id === 'read')
   check('the plan ran in one group', output.groups === 1)
   check('the tool node ran its call', calls.includes('glob'))
-  check('the child node ran', calls.includes('subagent'))
-  check('a worker runs through the fork tool', calls.filter(name => name === 'subagent_fork').length === 1)
-  check('a spawner runs through the subagent tool', calls.filter(name => name === 'subagent').length === 1)
+  check('both agent children were started by the plugin', prompts.length === 2)
+  check('the tools node never went through a child', calls.length === 1)
   check('the worker prompt is marked',
     prompts.some(prompt => prompt.startsWith(WORKER_MARKER)))
   check('the worker is told not to plan',
@@ -307,6 +353,8 @@ console.log('a plan may not start an agent from inside a child')
     {},
     1,
     300000,
+    undefined,
+    fakeFork([]),
   )
   check('the agent node was refused', output.nodes[0]?.ok === false)
   check('the refusal says why', (output.nodes[0]?.error ?? '').includes('delegated child'))
@@ -314,6 +362,9 @@ console.log('a plan may not start an agent from inside a child')
 
 console.log('a node that runs out of time is reported, and the plan carries on')
 {
+  // The plugin's own budget timers are unref'd, so in a harness they never hold
+  // the process open. This spec is the whole process, so it holds it open itself.
+  const keepAlive = setTimeout(() => {}, 2000)
   const runner: BatchRunner = {
     executionMode: () => ({ kind: 'parallel' }),
     async execute(exec) {
@@ -339,11 +390,14 @@ console.log('a node that runs out of time is reported, and the plan carries on')
     {},
     1,
     120,
+    undefined,
+    fakeFork([], 'never'),
   )
   check('the slow node failed', output.nodes[0]?.ok === false)
-  check('the failure says it ran out of time',
-    (output.nodes[0]?.error ?? '').includes('ran out of its'))
+  check('the failure says the budget was spent',
+    (output.nodes[0]?.error ?? '').toLowerCase().includes('budget'))
   check('the other node still ran', output.nodes[1]?.ok === true)
+  clearTimeout(keepAlive)
 }
 
 if (failures > 0) {

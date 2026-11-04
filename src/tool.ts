@@ -29,10 +29,9 @@ import {
   type RepairCall,
 } from './batch.js'
 import { mayRunTogether, type ConcurrencyOverride } from './concurrency.js'
-import { spawnForkedChild, type SpawnResult } from './fork.js'
+import { spawnEmptyChild, spawnForkedChild, type SpawnResult } from './fork.js'
 import {
   AGENT_NODE_KINDS,
-  NODE_AGENT_TOOL,
   WORKER_MARKER,
   WORKER_NODE_KINDS,
   buildGroups,
@@ -88,70 +87,8 @@ export type PlanOutput = {
  */
 let planSequence = 0
 
-/**
- * One call id for a call inside a plan.
- *
- * @returns the id.
- */
-function nextPlanCallId(): ToolCallId {
-  planSequence += 1
-  return ToolCallId(`refine-loop:plan:${process.pid}:${planSequence}`)
-}
 
-/**
- * The text of a tool result.
- *
- * @param content - the result's content blocks.
- * @param value - the result's value, used when the content carries no text.
- * @returns the text.
- */
-function resultText(content: readonly { type: string, text?: string }[], value: unknown): string {
-  const text = content
-    .filter((block): block is { type: 'text', text: string } => block.type === 'text')
-    .map(block => block.text)
-    .join('\n')
-  if (text.trim() !== '') return text
-  if (value === undefined) return ''
-  try {
-    return JSON.stringify(value, null, 2) ?? ''
-  } catch {
-    return String(value)
-  }
-}
 
-/**
- * Run one call with a deadline of its own.
- *
- * A plan that waits for a child that never comes loses the results of the
- * nodes that already succeeded. A node that runs out of its budget is
- * reported as failed, and the plan carries on with the rest.
- *
- * @param run - the call to run.
- * @param timeoutMs - the node's budget, in milliseconds.
- * @param id - the node's name, for the message.
- * @param controller - the controller that stops the call when the budget runs out.
- * @returns what the call produced.
- */
-async function runWithDeadline<T>(
-  run: () => Promise<T>,
-  timeoutMs: number,
-  id: string,
-  controller: AbortController,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort()
-      reject(new Error(`the node "${id}" ran out of its ${timeoutMs}ms budget`))
-    }, timeoutMs)
-    if (typeof timer.unref === 'function') timer.unref()
-  })
-  try {
-    return await Promise.race([run(), expired])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
-}
 
 /**
  * The task an agent node hands to its child.
@@ -308,55 +245,34 @@ async function runNode(
     }
   }
 
-  try {
-    const deadline = new AbortController()
-    const onPlanAbort = (): void => deadline.abort()
-    signal.addEventListener('abort', onPlanAbort, { once: true })
-    let result
-    try {
-      result = await runWithDeadline(
-        () => runner.execute({
-          callId: nextPlanCallId(),
-          rootCallId,
-          // The node kind says what the child does; the tool says how it is
-          // started. A worker starts from this conversation without the loop,
-          // so it runs through the fork tool and the plugin keeps the doctrine
-          // and the plan tool away from it.
-          name: NODE_AGENT_TOOL[node.kind as 'worker' | 'spawner' | 'forker'],
-          arguments: {
-            description: node.id,
-            prompt: buildAgentPrompt(node, criteria),
-            run_in_background: false,
-          },
-          ...(agent === undefined ? {} : { agent }),
-          signal: deadline.signal,
-        }),
-        node.budgetMs > 0 ? Math.min(node.budgetMs, agentNodeTimeoutMs) : agentNodeTimeoutMs,
-        node.id,
-        deadline,
-      )
-    } finally {
-      signal.removeEventListener('abort', onPlanAbort)
-    }
-    const output = resultText(result.content, result.value)
-    if (result.isError) {
-      return {
-        id: node.id,
-        kind: node.kind,
-        ok: false,
-        output,
-        error: result.error?.message ?? 'the delegation failed',
-      }
-    }
-    return { id: node.id, kind: node.kind, ok: true, output, error: '' }
-  } catch (error: unknown) {
+  // A spawner starts empty and plans through this loop. It is started here, by
+  // this plugin, for the same reason a forked child is: the handle is what lets
+  // the node's budget stop it and ask it for its state instead of killing it.
+  if (agent === undefined || fork === undefined) {
     return {
       id: node.id,
       kind: node.kind,
       ok: false,
       output: '',
-      error: error instanceof Error ? error.message : String(error),
+      error: 'a plan outside a conversation cannot start an agent node',
     }
+  }
+  const result: SpawnResult = await spawnEmptyChild(
+    fork.host,
+    agent,
+    buildAgentPrompt(node, criteria),
+    {
+      timeoutMs: agentNodeTimeoutMs,
+      ...(node.budgetMs > 0 ? { budgetMs: node.budgetMs } : {}),
+      signal,
+    },
+  )
+  return {
+    id: node.id,
+    kind: node.kind,
+    ok: result.error === undefined,
+    output: result.output,
+    error: result.error ?? '',
   }
 }
 
