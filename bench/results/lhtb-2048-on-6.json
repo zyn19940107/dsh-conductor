@@ -1,0 +1,47 @@
+{
+  "task": "lhtb-2048",
+  "condition": "on",
+  "index": 6,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 745960,
+  "timedOut": false,
+  "sessionId": "session-977c5b8e-b917-4f49-b1b6-3789fea241d2",
+  "stderr": "",
+  "steps": 4,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 34283,
+    "outputTokens": 23146,
+    "cacheReadTokens": 77835,
+    "totalTokens": 135264
+  },
+  "formation": {
+    "agents": 2,
+    "input": 106892,
+    "output": 71010,
+    "cacheRead": 1774166,
+    "total": 1952068,
+    "steps": 36
+  },
+  "mainPrompt": 45677,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 400 步"
+    ],
+    "score": 4.7852,
+    "moves": 400
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 20055,
+  "thinkingPreview": "Let me start by looking at the workspace to understand the task.\n\nThe task: play 2048 with a fixed seed engine, produce moves in moves.log, maximize largest tile within 15 min time budget and 400 steps.\n\nLet me first explore the workspace.\n\nPer instructions, the first message of a round IS the plan — I should hand it over via refine_plan before calling anything else. But I need to know what files exist. Actually the plan can include reading files as tool nodes. Let me design the plan.\n\nPlan round 1:\n- node \"read-engine\": tools node reading g2048.py, game2048_engine.py, and listing directory, plus running `python g2048.py status`.\n- Then next round: write a solver program.\n\nActually, let me think about what's needed. The key insight: the engine is deterministic with a fixed seed. A scorer replays the move sequence on a fresh engine with the same seed. So I need to find a move sequence tha",
+  "finalText": "复核全部通过,结果已锁定在**理论最优**。\n\n## 报告\n\n**策略(两三句)**\n\n引擎是完全确定性的(splitmix64 只在棋盘真正变化的移动后推进,每次 spawn 固定消耗两次抽取),所以整局是走法序列的纯函数 —— 我没有用概率近似,而是在 beam search 的每条分支上**携带精确 PRNG state**,让每个候选局面都是引擎真会产生的真实局面。启发式是蛇形权重(最大 tile 锁左下角)+ (log2 v)² 加权 + 空格子/可合并邻居/单调性 +  judge's 连续分,并按 judge 的全程峰值 value 选路;搜索只用\"棋盘真正变化\"的移动(无效方向白耗步数预算),走法全部先用未改动的引擎类重放做 parity 校验(max_tile/score/peak_value 三项逐位一致)才写入 `moves.log`。\n\n**这局为什么已经到顶(可验证的数学上限)**:每次有效移动恰好 spawn 一颗 tile,合并不改变总和,所以走满 400 步后棋盘总和 `S(400)` 是**与策略无关的常数**——独立算得 **914**。而 judge 的分值是 `band + (sum − max)/max`,要出现 1024 至少需要 1024 点材料,914 < 1024 ⇒ **1024 在 400 步内数学上不可达,512 就是 band 上限**;在此之上 value 上限 = `4 + (914−512)/512 = 4.785156`。实际重放得到的 peak_value 正是 **4.785156**,两个约束(材料攒满、512 存活)同时饱和,已无改进空间。\n\n**总步数:400步**(moves.log 恰好 400 行,每行一个 U/D/L/R:U=9 D=188 L=86 R=117,未使用 RESET;400步全部为\"棋盘变化\"的移动,故材料攒满)\n\n**独立复核**(全新同种子引擎重放 moves.log):`max_tile=512  score=6192  engine_moves=400  board_sum=914  peak_value=4.785156`,与 CLI 的 `best_band=4` 一致 —— 进度是真合并出来的。\n\n**最后一次 `python g2048.py status` 完整输出**:\n\n```\nscore=6192  max_tile=512  band=4  best_band=4  moves=400  empty=6  game_over=False\nboard (4x4, .=empty, row 0 = top):\n     .     .     2     .\n     .     .     2     2\n     .     4     4     4\n   512   128   128   128\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\n**得分:band 4(最大 tile 512),连续分 4.785 / 4.999。**\n\n**合规说明**:`g2048.py`、`game2048_engine.py` 的 mtime 仍是 2026/11/3 3:34(未改);`D:\\code\\vibe\\dsh-refine-loop` 未触碰;工作区新增的 `solver.py` / `sweep.py` / `finalize.py` / `res_*.json` 只是我的求解器与结果留档,评分器只读 `moves.log`,不影响判定。"
+}
