@@ -10,7 +10,7 @@
 # ends up running settings that no longer match its code.
 
 - insert:
-    - id: refine-loop
-      name: '@zyn19940107/dsh-refine-loop'
+    - id: conductor
+      name: '@zyn19940107/dsh-conductor'
       config:
         enabled: true
