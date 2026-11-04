@@ -36,8 +36,7 @@ const MAX_SPILL_BYTES = 4 * 1024 * 1024
  *
  * Past this the call itself becomes the expensive part: compressing a 400 KB
  * listing means feeding the model more than the plan report would ever have
- * cost. The retained text is compressed instead — the harness already dropped
- * the middle, and paying a long model call to recover it is the worse trade.
+ * cost. The retained text is compressed instead.
  */
 const MAX_COMPRESS_INPUT_CHARS = 150_000
 

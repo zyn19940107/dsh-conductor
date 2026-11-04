@@ -297,9 +297,31 @@ export function apply(ctx: Context, config: Config): void {
   applyJudgementGuard(ctx, plans)
   applyWorkerRule(ctx, workers)
   applyDelegationRule(ctx)
+  applyReportRetention(ctx)
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)
+}
+
+/**
+ * Keep the plan report whole.
+ *
+ * The harness mounts a spill policy on `tools/post-execute`: a result past its
+ * budget is replaced by its head, its tail, and a path to the rest. That is a
+ * good default for a tool the agent called itself. The plan report is the one
+ * result the loop cannot afford to shorten — the agent judges from it, and a
+ * report with its middle cut out is a report of nodes that silently disappeared.
+ *
+ * A result that carries a `value` instead of a `content` skips that policy, so
+ * the report is handed over by value and rendered whole.
+ *
+ * @param ctx - the plugin context supplying the tool registry.
+ */
+export function applyReportRetention(ctx: Context): void {
+  ctx.on('tools/post-execute', async (exec, result, next) => {
+    if (exec.name !== PLAN_TOOL) return await next()
+    return { kind: 'accept', value: result.value as never }
+  }, { prepend: true })
 }
 
 /**
