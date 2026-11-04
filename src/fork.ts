@@ -280,18 +280,35 @@ const STATUS_WINDOW_MS = 45_000
 /**
  * What the child is told when its budget runs out.
  *
- * It is not told to stop and it is not told to keep going: it is told to look at
- * what exists and decide, which is the one judgement it is in a position to make.
+ * It is not told to stop and it is not told to keep going. It is told the one
+ * thing only it can weigh — how much work is left against how much time is left
+ * — and what the two outcomes would be. Asked to "look at the status" without
+ * those numbers it can only guess, and guessing is what the budget exists to
+ * stop.
  *
- * @param extensionMs - how long the second look may take.
+ * @param budgetMs - the budget the node declared, now spent.
+ * @param extensionMs - how much time this second look may take.
  * @returns the message.
  */
-function statusPrompt(extensionMs: number): string {
-  return 'Your time budget for this node is spent, and the work in flight was just stopped. '
-    + 'Look at what you have, then decide: either finish by the shortest path and report the result, '
-    + 'or summarize where you got to — what exists, where it is, what is still missing — and stop. '
-    + 'Do not start anything long. '
-    + `You have about ${Math.round(extensionMs / 1000)} seconds for that, and then you must answer.`
+function statusPrompt(budgetMs: number, extensionMs: number): string {
+  const spent = Math.round(budgetMs / 1000)
+  const left = Math.round(extensionMs / 1000)
+  return `Your node's time budget of ${spent} seconds is spent, and the work in flight was just stopped. `
+    + `You now have at most ${left} seconds more. It is a window to finish or to report, not to start `
+    + 'anything new.'
+    + String.fromCharCode(10) + String.fromCharCode(10)
+    + 'Decide from what you can actually see:'
+    + String.fromCharCode(10)
+    + `- If the remaining work needs longer than ${left} seconds, stop now. Report what already exists and `
+    + 'where, what is done and confirmed, and what is still missing.'
+    + String.fromCharCode(10)
+    + `- If the remaining work fits inside ${left} seconds, finish it by the shortest path and report the `
+    + 'result — artifact, command output, and the conclusion.'
+    + String.fromCharCode(10)
+    + String.fromCharCode(10)
+    + `When the window ends the node is stopped again, whether or not you answered, so start nothing you `
+    + 'cannot finish inside it. The parent only sees what you report: a clear status with wrong-looking '
+    + 'numbers beats an unfinished attempt.'
 }
 
 /**
@@ -433,7 +450,7 @@ export async function spawnForkedChild(
     // extension is what bounds that second look.
     child.cancel({ kind: 'hook', reason: 'the node used its time budget' })
     child.followup(createUserMessage({
-      content: [{ type: 'text', text: statusPrompt(extension) }],
+      content: [{ type: 'text', text: statusPrompt(budget, extension) }],
       source: { kind: 'user' },
     }))
     const second = await waitForIdle(child, extension, options.signal)

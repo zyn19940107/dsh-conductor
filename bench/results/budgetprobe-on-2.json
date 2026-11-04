@@ -1,0 +1,41 @@
+{
+  "task": "budgetprobe",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 36330,
+  "timedOut": false,
+  "sessionId": "session-ea5b3364-da90-4c59-8751-63f65d629bed",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 866,
+    "outputTokens": 1154,
+    "cacheReadTokens": 22144,
+    "totalTokens": 24164
+  },
+  "formation": {
+    "agents": 2,
+    "input": 2134,
+    "output": 3314,
+    "cacheRead": 94592,
+    "total": 100040,
+    "steps": 8
+  },
+  "mainPrompt": 12156,
+  "correctness": {
+    "passed": 1,
+    "total": 1,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 1568,
+  "thinkingPreview": "The task is a mechanism verification: run a refine_plan with a single worker node with budgetMs: 20000, whose task is to run a blocking 300-second python sleep command, and check whether the node is stopped at budget expiry and reports its state.\n\nMy first message of the round IS the plan — I hand it over with refine_plan. No tool call comes first. Let me do that.\n\nThe node task needs to be exactly as given by the user: \"用 pwsh 跑一条会阻塞 300 秒的命令：python -c \\\"import time; time.sleep(300)\\\"。命令结束后告诉我它输出的内容。\"\n\nNote: I must not modify the parameters. Let me just call refine_plan with the criteria and node exactly as specified.\n\nThe worker node's task includes running a command with a 300s sleep. The worker's budgetMs is 20000, so it should be stopped at 20s and asked to report where it got to.\n\nLet me hand over the plan. The plan itself is a tool call, and the plan document (my first message) sh",
+  "finalText": "机制验证通过：`sleep` 节点在 20 秒预算用尽时被停下，并交出了现状——不是等命令跑完。\n\n## `sleep` 节点的 output（原样复述）\n\n```\n**结论：命令被我中途停下时仍未结束，输出为空。**\n\n事实（我亲眼看到的两条）：\n\n1. 我按要求用 pwsh 跑了 `python -c \"import time; time.sleep(300)\"`，以后台任务 `pwsh-1` 启动，随后 `job_output(wait: true)` 阻塞等待；这次等待被中止，报错 `Error: wait aborted` —— 中止发生在 20 秒预算用尽时，而 300 秒的 sleep 才过了约 20 秒。\n2. 紧接着非阻塞查看该任务：返回 `(no new output)`、`[status: running]` —— 进程仍在跑，且因为 `time.sleep(300)` 本身不产生任何输出，所以在被停下这一刻，命令输出为**空**。\n\n后续处置：剩余窗口最多 45 秒，装不下剩余约 280 秒的等待，所以我没有再等；已 `job_kill` 掉 `pwsh-1`，避免留下一个孤儿 python 进程。\n\n因此\"命令结束后告诉我它输出的内容\"这一条**没有拿到最终输出**——命令在我被停下时还没跑完，而它的输出恰好为空。\n```\n\n## 结束方式\n\n**被中途停下的，不是按时结束。** 依据来自节点自己的观测：\n\n- 阻塞等待被中止，报 `Error: wait aborted`，中止点恰在 20 秒预算用尽时，而 `time.sleep(300)` 才过了约 20 秒；\n- 停下后立刻非阻塞查看，任务状态仍是 `[status: running]`、`(no new output)`——说明那条命令在节点被收走时**还活着**，没有自然结束；\n- 所以\"命令结束后告诉我它输出的内容\"这一条无法完成（输出为空是因为 `time.sleep` 本身不打印任何东西，不是因为跑完了）。\n\n判据「worker 节点在 20 秒预算用尽后被停下并报告了现状」成立：它被预算打断，并且如实报告了打断时的现场（进程还在跑、输出为空、剩余等待装不进剩余窗口，并主动 `job_kill` 清理了孤儿 python 进程）。"
+}
