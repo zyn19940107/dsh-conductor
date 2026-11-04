@@ -1,0 +1,67 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 68997,
+  "timedOut": false,
+  "sessionId": "session-f0d3c018-382a-4783-ac06-38fa6e826561",
+  "stderr": "",
+  "steps": 13,
+  "toolCalls": 25,
+  "tools": [
+    "glob",
+    "glob",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "pwsh",
+    "grep",
+    "grep",
+    "pwsh",
+    "glob",
+    "read",
+    "read",
+    "grep",
+    "pwsh",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 24488,
+    "outputTokens": 6712,
+    "cacheReadTokens": 284416,
+    "totalTokens": 315616
+  },
+  "formation": {
+    "agents": 1,
+    "input": 24488,
+    "output": 6712,
+    "cacheRead": 284416,
+    "total": 315616,
+    "steps": 13
+  },
+  "mainPrompt": 39067,
+  "correctness": {
+    "passed": 4,
+    "total": 5,
+    "missing": [
+      "行数最多的模块(tool.ts 562 行)(缺:562)"
+    ]
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 16508,
+  "thinkingPreview": "The user asks about D:\\code\\vibes\\h-refine-loop\\verify and D:\\code\\vibes\\h-refine-loop\\src. Let me explore.\n\nLet me plan: read-only investigation. Use glob/grep/read tools.\n\nLet me start by listing files.\nThe path may be different. Let's list D:\\code\\vibes.\nPath doesn't exist. Let's check D:\\code.\nThe path is D:\\code\\vibe\\dsh-refine-loop. The user's path had \\v interpreted... Actually \"D:codeibedsh-refine-loop\" — the user's text lost backslashes and \"v\" became \"ib\"? It seems \"vibe\\dsh\" → \"vibedsh\" hmm. Anyway, target is D:\\code\\vibe\\dsh-refine-loop.\n\nLet me explore.\nNow I need to look at each spec file to determine the entry function actually tested (the function imported from src and invoked).\n\nLet me read all 7 spec files and the src files' exports. Let me read the specs.\nNow read the remaining specs: fork.spec.ts, rounds.spec.ts, plan.spec.ts.\nNow I have the spec contents. Question 1:",
+  "finalText": "已按只读方式查完（路径解析为 `D:\\code\\vibe\\dsh-refine-loop`，你给的串里丢了反斜杠和 `v`）。未修改任何文件。\n\n---\n\n## 1. 每个 spec 实际测的入口函数\n\n| spec | 实际被调用的入口（从 `../src/*` 导入的符号） | 源模块 |\n|---|---|---|\n| `batch.spec.ts` | **`runBatch`** —— 唯一入口，4 组场景（并行/exclusive 串行/不信任工具/失败上报）全部走它 | `src/batch.ts` |\n| `concurrency.spec.ts` | **`isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`**；末尾另用 `runBatch` 验批内顺序 | `src/concurrency.ts`（+`batch.ts`） |\n| `refine.spec.ts` | **`parseBatchArgs`、`renderBatch`、`parsePolicyCommand`** | `src/batch.ts` + `src/policy.ts` |\n| `repair.spec.ts` | **`runBatch`（注入修复回调的重试分支）** + `parseRepair` | `src/batch.ts` + `src/repair.ts` |\n| `fork.spec.ts` | **`buildSeedFromNow`、`openTurnClosers`** | `src/fork.ts` |\n| `rounds.spec.ts` | **`Rounds`（used/bump/reset）、`Workers`（mark）、`applyTurnDoctrine`、`applyWorkerRule`、`isWorkerConversation`**，外加常量 `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN`；`WORKER_MARKER` 取自 `plan.ts` | `src/rounds.ts` + `src/plan.ts` |\n| `plan.spec.ts` | **`parsePlanArgs`、`buildGroups`**（`plan.ts`）+ **`runPlan`、`renderPlan`**（`tool.ts`） | `src/plan.ts` + `src/tool.ts` |\n\n两点值得注意：\n\n- **没有 spec 触到\"插件装配层\"的入口**：`applyPlanTool`（tool.ts）、`apply()`/`Config`（index.ts）、`applyPolicyMessage`/`applyPolicyCommand`（policy.ts）、`applyRounds`/`applyDelegationRule`/`applyJudgementGuard`（rounds.ts）、`spawnForkedChild`（fork.ts）、`askForRepair`/`repairSystem`/`describeFailure`（repair.ts）—— grep 全 verify 目录零命中。specs 测的是纯函数与调度逻辑，不是 DSH 接线。\n- **`repair.spec.ts` 不会被 `pnpm specs` 执行**：`verify/run-specs.mjs:21` 的白名单只有 `refine / batch / concurrency / plan / rounds / fork` 六个，漏了 `repair.spec.ts`。文件在，但默认跑不到。\n\n## 2. 没有对应 spec 的模块\n\n`src` 下实为 **9 个 .ts 文件**（`batch / concurrency / fork / index / plan / policy / repair / rounds / tool`）。把 `index.ts`（插件入口 + 配置装配）当作出身不算\"模块\"，正好 8 个：batch、concurrency、fork、plan、policy、repair、rounds、tool。\n\n- **按\"被任一 spec 导入过\"**：8 个**全部有覆盖**，没有一个是完全孤儿。\n- **按\"有同名 spec 文件\"**：`policy.ts` 和 `tool.ts` 没有自己的 spec——policy 被 `refine.spec.ts` 测（只测 `parsePolicyCommand`），tool 被 `plan.spec.ts` 测（测 `runPlan`/`renderPlan`，不测 `applyPlanTool`）。\n- **若把 `index.ts` 也算进去**：它是唯一完全没有任何 spec 引用的模块。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，620 行**（物理行数，文件末尾带换行；其中非空行 599）。\n\n全量排名：tool 620 > rounds 384 > batch 375 > fork 372 > index 329 > policy 241 > concurrency 234 > plan 215 > repair 173。\n\n（行数由 `\\n` 计数交叉验证过，与 `Get-Content` 一致。）"
+}

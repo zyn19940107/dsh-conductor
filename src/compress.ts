@@ -28,6 +28,15 @@ export const SPILL_NOTICE = 'Full formatted result stored at: '
 /** How much of one tool result the compressor is asked to keep. */
 export const COMPRESS_TARGET_CHARS = 3000
 
+/**
+ * The size at which a single tool result is worth a compression call.
+ *
+ * This is the harness's own retention budget: results below it are what the
+ * agent asked for and what it gets; results above it are already being cut, and
+ * a cut result inside a plan report is how a node's findings go missing.
+ */
+export const COMPRESS_ABOVE_CHARS = 50_000
+
 /** The largest spill file the compressor will read back. */
 const MAX_SPILL_BYTES = 4 * 1024 * 1024
 
@@ -98,6 +107,7 @@ export async function compressToolOutput(
   output: string,
   signal: AbortSignal,
 ): Promise<string> {
+  if (!needsCompression(output)) return output
   const spilled = spilledText(output)
   const whole = spilled?.text ?? output
   const full = whole.length > MAX_COMPRESS_INPUT_CHARS ? output : whole
@@ -131,13 +141,16 @@ export async function compressToolOutput(
 /**
  * Whether a result is large enough to be worth a compression call.
  *
- * A result the harness spilled is always worth it: it is already truncated, and
- * its middle is the part nobody can see.
+ * Only a single result past {@link COMPRESS_ABOVE_CHARS} is compressed — and so
+ * is any result the harness spilled, since a spilled result is already the part
+ * of something bigger that it could keep. Everything below that is handed over
+ * as it came: a plan of ten medium reads is a big report, and paying a model
+ * call to shrink each of them would cost more than the report does.
  *
  * @param output - the result as the tool returned it.
  * @returns true when the result should be compressed.
  */
 export function needsCompression(output: string): boolean {
   if (output.includes(SPILL_NOTICE)) return true
-  return output.length > COMPRESS_TARGET_CHARS * 2
+  return output.length > COMPRESS_ABOVE_CHARS
 }

@@ -1,0 +1,52 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 109331,
+  "timedOut": false,
+  "sessionId": "session-e703dc9b-b862-4447-941f-4dce9dd639a3",
+  "stderr": "",
+  "steps": 8,
+  "toolCalls": 12,
+  "tools": [
+    "glob",
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "refine_plan",
+    "grep",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 46556,
+    "outputTokens": 8232,
+    "cacheReadTokens": 232960,
+    "totalTokens": 287748
+  },
+  "formation": {
+    "agents": 4,
+    "input": 212391,
+    "output": 29446,
+    "cacheRead": 1352192,
+    "total": 1594029,
+    "steps": 39
+  },
+  "mainPrompt": 57275,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 14995,
+  "thinkingPreview": "Let me read the key files. The user asked for three independent reviews:\n1. src/plan.ts — data structure, node kinds, how call arguments are handled\n2. The plugin's enforced rule — what is it, how is it implemented in current code, trigger conditions\n3. src/tool.ts — how the plan is executed, what restrictions subagents get\n\nLet me first look at the overall repo structure (non-node_modules) and then read the files.\n\nLet me plan: I can delegate three worker nodes for independent reviews. But first let me get an overview myself to write good task descriptions. Actually, the guidance says workers inherit this conversation. Let me do a quick scan first.\n\nLet me read the files directly — they're probably not too big. But the workflow guidance says to use refine_plan with one layer of nodes. Given the three parts are independent, three worker nodes make sense. But I need to give them enough co",
+  "finalText": "三份独立审查已完成(未修改任何文件)。有一个顺带的实证:`refine_plan` 跑完之后,我再直接调 `grep` 就被这条插件自己装的规则挡了回来——\"The graph has run — every result is above.\" 下面第 2 部分讲的正是这条规则。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构、节点种类、调用参数处理\n\n**数据结构**(纯接口,无运行时类):\n\n| 类型 | 字段 | 位置 |\n|---|---|---|\n| `PlanArgs` | `criteria: string[]`, `nodes: PlanNode[]` | plan.ts:87-92 |\n| `PlanNode` | `id: string`, `kind: PlanNodeKind`, `calls: PlanToolCall[]`, `task: string`, `order: PlanNodeOrder`, `writes: string[]` | plan.ts:71-84 |\n| `PlanToolCall` | `name: string`, `arguments: unknown` | plan.ts:63-68 |\n\n`calls` 与 `task` 互斥:tools 节点的 `task` 恒为 `''`,agent 节点的 `calls` 恒为 `[]`。\n\n**四种节点**(`PlanNodeKind`,plan.ts:24),由 `NODE_AGENT_TOOL`(plan.ts:46-50)映射到启动工具:\n\n- `tools` —— 参数已定的调用批次,不启动 agent,走 `runBatch`\n- `worker` —— 继承本对话、自己干活、**不画自己的计划**,走 `subagent_fork`\n- `spawner` —— 空白起步、按本插件循环画计划,走 `subagent`\n- `forker` —— 继承本对话、并按本插件循环画计划,走 `subagent_fork`\n\n两个派生常量:`AGENT_NODE_KINDS = ['worker','spawner','forker']`(会启动 agent 的三种)、`WORKER_NODE_KINDS = ['worker']`(启动一个不画计划的子对话)。注意 `worker` 与 `forker` 共用同一个工具名——节点名说的是子代理**做什么**,工具名说的是**怎么启动它**。\n\n**调用参数怎么处理**(`parsePlanArgs`,plan.ts:115-173):全有或全无,任何一处不合规整体返回 `undefined`,调用方 tool.ts:583-586 抛 `'refine_plan needs criteria, and nodes that each have an id and a kind'`。\n\n- `criteria` 必须是数组,非字符串/空串项被过滤,过滤后为空则拒绝\n- `nodes` **允许为空**(plan.ts:168-172:模型自己决定空计划是否合适)\n- 节点:`id` 必须非空字符串且**不得重复**(`seen` 集合);`kind` 必须是四个枚举值之一,否则拒绝\n- `order`:只有恰好 `'sequential'` 才保留,其余一律降级为 `'parallel'`——未知值是降级不是报错\n- `writes`:是数组就保留非空字符串,不是数组就当空数组\n- tools 节点:`calls` 必须是**非空**数组;每个 call 的 `name` 必须非空字符串;**`arguments` 唯一的一次规范化是 `undefined → {}`**(plan.ts:158)\n- agent 节点:`task` 必须非空字符串\n\n**`arguments` 的实际命运**:`unknown` 原样透传。plan 层不校验内容,只改 `undefined` 这一种情况;然后 `runNode`(tool.ts:219-223)原封不动交给 `runBatch`,再交给 `runner.execute`,合法性最终由目标工具自己的 schema 判定(工具边界上声明为 `{type:'json', required:true}`,tool.ts:525)。**参数写错表现为该 call 失败,而不是整个计划被拒。**\n\n附带:分组逻辑 `buildGroups` / `canRunTogether`(plan.ts:190-215)按声明的 `writes` 切组——`writes` 为空的节点被\"说到做到\",可直接并入任何组;两个节点声明同一路径则拆到不同组。这是唯一能把\"一层\"拆开的东西。\n\n---\n\n## 二、插件强制的那条规则,及其实现与触发条件\n\n**规则只有一条:「一个 turn 就是一个 plan」。** 一次请求的工作必须由一次 `refine_plan` 表达;plan 跑完后那个 turn 只剩\"下判断\"(写结论,或交下一张图),不允许再直接调工具。插件自己的措辞:`index.ts:19-21` 的 `'The rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over'`;`policy.ts:117-118` 的 `'the rule that makes a turn one plan is not enforced'`。\n\n**硬执行点只有一处**:`applyJudgementGuard(ctx, plans)`(rounds.ts:375-383),一个 `ctx.tools.guard`——返回字符串即拒绝执行,返回 `undefined` 即放行。拒绝理由是 `JUDGE_ONLY`(rounds.ts:347-349)。\n\n**触发条件(四条同时成立)**:\n\n1. `execution.agent` 存在\n2. `isModelCall(execution)`——即 `callId === rootCallId`,模型**自己**发起的调用(rounds.ts:359-364)\n3. `execution.name !== 'refine_plan'`\n4. `plans.waiting(session.id) === false`——本次请求已跑过至少一个 plan\n\n**不触发**:plan 内部的嵌套调用(嵌套时 `rootCallId` 是 plan 自己的 call id,故放行);`refine_plan` 本身;**本次请求的第一个 plan 跑之前**(`applyRounds` 在每条 user 消息上 `plans.expect()`,`onPlanFinished` 里 `plans.done()`,所以\"设计 plan 时模型仍可直接调工具\"是合法的);以及 worker 会话。\n\n**配套的四道约束**:\n\n- `applyTurnDoctrine`(rounds.ts:183-207):`payload.step === 1` 时把 `ROUND_LOOP` 作为**最后一条消息**注入(worker 会话按 `workers.has()` 或 `isWorkerConversation()` 跳过)\n- `applyDelegationRule`(rounds.ts:312-338):在 `agent/created` 上重注册 `subagent`/`subagent_fork`,根级调用抛 `DELEGATE_IN_GRAPH`,嵌套调用放行;同时 `restrict({deny: HIDDEN_TOOLS})` 藏掉 `list_agents`/`send_message`/`interrupt_agent`\n- `applyWorkerRule`(rounds.ts:290-299):worker 会话里 `refine_plan` 被 `WORKER_NO_PLAN` 拒绝——工具**故意留在表里**(为的是 request header 与父一致、继承前缀命中缓存),改的是调用时的答复\n- 轮次预算:`onPlanFinished` 里 `rounds.bump()`,超过 `maxRounds`(默认 16)就停\n\n**开关**(`policy.ts`):`/dsh-refine-loop off` 走 `agent.ctx.tools.restrict({deny:['refine_plan']})`;工具离开 scope 后,`index.ts:243` 的 systemPrompt 回调 `ctx.tools.get(PLAN_TOOL, scope) === undefined` 返回 `''`,`REFINE_GUIDANCE` 随之从系统提示里消失。`on` 则全部恢复。\n\n**两个值得上报的发现**(都已对照源码核实):\n\n1. **\"off\" 只摘掉了一半。** `applyTurnDoctrine`、`applyDelegationRule`、`applyJudgementGuard` 在 `index.ts:295-300` 的注册**都不接受 `policy` 参数**。所以关掉后:模型仍"
+}

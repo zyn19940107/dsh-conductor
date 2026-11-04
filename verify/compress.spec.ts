@@ -94,12 +94,18 @@ try {
 
   // 3. A result without a spill is compressed from what was returned.
   const { ctx: ctx2, prompts: prompts2 } = fakeContext('SHORT')
-  const long = 'y'.repeat(20000)
+  const long = 'y'.repeat(60000)
   const out2 = await compressToolOutput(ctx2 as never, route, 'read', long, signal)
   check('plain long result is compressed', out2.startsWith('SHORT'))
   check('plain long result reached the model', prompts2[0]?.includes('y'.repeat(100)) === true)
 
-  // 4. The model producing nothing leaves the result alone.
+  // 4. A medium result is not worth a model call.
+  const { ctx: ctx3, prompts: prompts3 } = fakeContext('SHOULD NOT RUN')
+  const medium = await compressToolOutput(ctx3 as never, route, 'read', 'm'.repeat(20000), signal)
+  check('medium result is left alone', medium === 'm'.repeat(20000))
+  check('medium result: no model call', prompts3.length === 0)
+
+  // 5. The model producing nothing leaves the result alone.
   const silent = {
     llm: {
       stream: () => (async function* () {

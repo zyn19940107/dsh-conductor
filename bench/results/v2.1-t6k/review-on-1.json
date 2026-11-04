@@ -1,0 +1,49 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 137997,
+  "timedOut": false,
+  "sessionId": "session-f6444698-2518-498e-a481-9847cb68d1ac",
+  "stderr": "",
+  "steps": 7,
+  "toolCalls": 9,
+  "tools": [
+    "glob",
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 37940,
+    "outputTokens": 8016,
+    "cacheReadTokens": 144384,
+    "totalTokens": 190340
+  },
+  "formation": {
+    "agents": 4,
+    "input": 175386,
+    "output": 27303,
+    "cacheRead": 938496,
+    "total": 1141185,
+    "steps": 37
+  },
+  "mainPrompt": 38469,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 15285,
+  "thinkingPreview": "The user wants me to review three parts of D:\\code\\vibe\\dsh-refine-loop independently:\n1. src/plan.ts — plan data structure, node kinds, how call arguments are handled\n2. The rule the plugin enforces — how it's implemented in current code, trigger conditions\n3. src/tool.ts — how the plan is executed, what limits subagents get\n\nThen summarize all three conclusions into one paragraph. Read-only, no modification.\n\nLet me first explore the directory structure.\n\nNote the AGENTS.md says to call `dsh-plugin-sandbox` skill before modifying/debugging any DSH plugin. But this is a read-only review, not modification. Hmm, \"改/调任何 DSH 插件前先调用它\" — before changing/tuning. This is purely reading. I don't think I need the skill. But to be safe... Actually the task is a read-only review, no changes. The skill is about development/verification workflow. I'll skip it — actually, let me consider: the skill mi",
+  "finalText": "三部分已分别独立审查完毕并交叉核对源码,全程只读,未修改任何文件。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构、节点种类、调用参数处理\n\n**数据结构**:`PlanArgs = { criteria: string[]; nodes: PlanNode[] }`(`plan.ts:87-92`),`criteria` 是判定本轮成败的可观察标准。`PlanNode` 有六个字段(`plan.ts:71-84`):`id`(节点名,全计划唯一)、`kind`、`calls`(tools 节点的调用)、`task`(agent 节点的提示词)、`order`(`'parallel' | 'sequential'`,`plan.ts:60`)、`writes`(该节点要写的文件,用于避免同文件并发写)。`PlanToolCall` 只有 `{ name: string; arguments: unknown }`(`plan.ts:63-68`)——`arguments` 刻意保持 `unknown`。\n\n**节点四种**(`plan.ts:24`):`tools`(参数已定好的调用)、`worker`(子代理带着本对话开场,自己干活,永不画自己的计划)、`spawner`(子代理从空白开始,走本插件的循环去画计划)、`forker`(带着本对话开场,再走本插件的循环)。其中三个 agent 种由 `AGENT_NODE_KINDS` 标出(`plan.ts:27`),且 **worker 与 forker 共用同一个 harness 工具 `subagent_fork`,spawner 用 `subagent`**(`NODE_AGENT_TOOL`,`plan.ts:46-50`)——种类命名的是子代理\"做什么\",不是\"用哪个工具启动\"。整个计划只有一层:没有 `after`、没有依赖边,组内并发、组间按声明顺序串行(`buildGroups`,`plan.ts:190-215`)。\n\n**调用参数的处理**(`parsePlanArgs`,`plan.ts:115-173`)严格二分:\n- **整体拒收**(返回 `undefined`,不抢救):`criteria`/`nodes` 不是数组(117-119);节点不是对象、`id` 缺失或空白、`kind` 非字符串或不在四种之内、`id` 重复(128-139);tools 节点没有 `calls` 或 `calls` 为空、某次调用不是对象或 `name` 空白(148-156);agent 节点 `task` 缺失或空白(164-165)。\n- **强转/默认**(继续跑):`order` 只有精确的 `'sequential'` 才生效,其余(含缺失、乱值)一律变 `parallel`(141);`writes` 非数组则变 `[]`,空白项过滤、路径 trim(142-146);tools 节点的 `task` 被丢弃强制为 `''`,agent 节点的 `calls` 被强制为 `[]`(160/166);节点和调用上的多余未知字段被静默丢弃;`criteria` 里的非字符串/空白项被过滤,过滤后为空才拒收(120-123)。\n- **参数载荷本身不在 `plan.ts` 里校验**:`arguments` 原样透传,只做 `undefined → {}` 的归一化(157-158),`null`/字符串/数组等一律照收;真正的校验发生在后面工具注册表那一层,甚至连工具名和参数都可能被插件的 repair 钩子改写。\n- 计划**允许为空**(`nodes: []`),但 `criteria` 必须非空(168-172)。\n- 写冲突只按**去空白后的路径字符串精确相等**判定(`plan.ts:207-214`),不做路径规范化,`./a.ts` 与 `a.ts` 不算同一个文件;没声明 `writes` 的节点\"按其所述\"直接放行。\n\n---\n\n## 2. 这个插件强制的那条规则\n\n**规则原文**(`src/index.ts:19-21`):\"The rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over — what the plan did not settle belongs to the next round.\"(**一轮一个计划:一轮的第一个调用就是计划,计划跑完这轮就结束;计划没解决的下轮再说**)。只有后半句是机器强制的,前半句只是教义。\n\n**实现方式是代码级工具守卫,不是提示词:**\n- `applyJudgementGuard`(`rounds.ts:375-383`)装了一个 `ctx.tools.guard`:在\"本请求已经跑过计划\"的会话里,模型发起**顶层**调用(`isModelCall` = `callId === rootCallId`,`rounds.ts:359-364`)且工具名不是 `refine_plan`,一律以 `JUDGE_ONLY` 拒掉(`rounds.ts:347-349`);计划内部发起的嵌套调用(`callId != rootCallId`)不受影响。\n- `applyDelegationRule`(`rounds.ts:312-338`)重新注册 `subagent`/`subagent_fork`,模型直接调用就抛 `DELEGATE_IN_GRAPH`(`rounds.ts:331`),嵌套在计划里的调用正常执行——这正是 worker/spawner/forker 能跑起来的原因;同一钩子用 `tools.restrict` 直接隐藏 `list_agents`/`send_message`/`interrupt_agent`(`rounds.ts:314`)。\n- `applyWorkerRule`(`rounds.ts:290-299`):worker 对话里调 `refine_plan` 会被 `WORKER_NO_PLAN` 拒掉;工具**故意留在 worker 的表里**(为了保住父请求头的缓存前缀),只拒调用。\n- 纯提示词层:`applyTurnDoctrine`(`rounds.ts:183-207`)只在 `step === 1` 且不在 worker 里时,把 `ROUND_LOOP` 教义作为最后一条消息追加。\n\n**触发条件**:状态是按请求走的——每条新用户消息触发 `plans.expect(sessionId)` 并重置轮次计数(`rounds.ts:169` 附近);计划工具返回的瞬间 `plans.done(sessionId)` 触发(`src/index.ts:280`),守卫由此**上膛**,下一个人类消息即解除。**不触发**的情形:本请求第一个计划之前(教义明确允许\"设计计划时可以先调工具\")、嵌套调用、worker 对话、以及 `/dsh-refine-loop off` 之后(`policy.ts:72` 在 agent 作用域里禁掉计划工具,`done` 永不发生)。另有 `maxRounds`(16,`index.ts:165/281`)的阀门,在轮次耗尽时不再排下一轮。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**执行路径**:工具名 `PLAN_TOOL = 'refine_plan'`(`tool.ts:47`)。`execute` 先 `parsePlanArgs`,失败抛 `refine_plan needs criteria, and nodes that each have an id and a kind`;再查节点数上限 `maxBatchSize`(默认 8),超了抛\"This plan has N nodes and the limit is M…\";然后通知 `onPlanStarted`,用 agent 自己的 `requestHeader().config` 搭出 repair/compress 助手;最后调 `runPlan(...)`。`runPlan`(`tool.ts:357-391`)用 `buildGroups` 分组,**组内 `Promise.all` 并发、组间按声明顺序串行**,所有 settled 结果都保留,返回 `{ criteria, groups, nodes }`;`tools` 节点走 `runBatch`,带上该节点的 `order`(parallel/sequential)与并发安全豁免(`concurrency.ts:176-229`)。跑完后 `onPlanFinished` 排队下一轮,若返回 true 则调 `exec.concludeTurn()`。渲染文案:`Plan finished — N node(s) in M group(s), run in parallel.`\n\n**派出去的子代理受到的限制**:\n- **深度上限**:当会话本身已是委派子代理且 `delegationDepth >= maxAgentDepth`(默认 3,`index.ts:114`),该节点直接失败并给出提示\"keep the work in the"
+}
