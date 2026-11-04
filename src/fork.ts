@@ -274,6 +274,67 @@ function lastAssistantText(events: readonly SessionEventLike[]): string {
   return ''
 }
 
+/** How long a child gets to look at its state after its budget is spent. */
+const STATUS_WINDOW_MS = 45_000
+
+/**
+ * What the child is told when its budget runs out.
+ *
+ * It is not told to stop and it is not told to keep going: it is told to look at
+ * what exists and decide, which is the one judgement it is in a position to make.
+ *
+ * @param extensionMs - how long the second look may take.
+ * @returns the message.
+ */
+function statusPrompt(extensionMs: number): string {
+  return 'Your time budget for this node is spent, and the work in flight was just stopped. '
+    + 'Look at what you have, then decide: either finish by the shortest path and report the result, '
+    + 'or summarize where you got to — what exists, where it is, what is still missing — and stop. '
+    + 'Do not start anything long. '
+    + `You have about ${Math.round(extensionMs / 1000)} seconds for that, and then you must answer.`
+}
+
+/**
+ * Wait for the child to go idle, its window, or the plan's cancellation.
+ *
+ * @param child - the child to wait for.
+ * @param ms - how long to wait.
+ * @param signal - the plan's cancellation signal.
+ * @returns which of the three happened.
+ */
+async function waitForIdle(
+  child: Agent,
+  ms: number,
+  signal: AbortSignal,
+): Promise<'idle' | 'timeout' | 'cancelled'> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      child.whenIdle().then((): 'idle' => 'idle'),
+      new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), ms)
+        ;(timer as { unref?: () => void }).unref?.()
+      }),
+      new Promise<'cancelled'>((resolve) => {
+        signal.addEventListener('abort', () => resolve('cancelled'), { once: true })
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/**
+ * The child's latest text, whether or not its turn finished.
+ *
+ * @param child - the child to read.
+ * @returns the text, or an empty string.
+ */
+function snapshotText(child: Agent): string {
+  const events = (child.session as unknown as { snapshotEvents: () => SessionEventLike[] }).snapshotEvents()
+  return lastAssistantText(events)
+}
+
 /**
  * Start a child seeded with this conversation and wait for its answer.
  *
@@ -288,8 +349,16 @@ export async function spawnForkedChild(
   parent: Agent,
   prompt: string,
   options: {
-    /** The child's budget, in milliseconds. */
+    /** The ceiling: the child never runs longer than this. */
     timeoutMs: number
+    /**
+     * What the node itself said it would take.
+     *
+     * It is not a kill switch. When it is spent the child is stopped and then
+     * asked to look at where it got to and decide: finish by the shortest path,
+     * or report its state and stop. The ceiling still bounds the whole thing.
+     */
+    budgetMs?: number
     /** The signal that cancels the child. */
     signal: AbortSignal
     /** Told the child's session id as soon as the child exists. */
@@ -339,27 +408,46 @@ export async function spawnForkedChild(
   }
 
   const child = handle.agent
+  const budget = options.budgetMs !== undefined && options.budgetMs > 0
+    ? Math.min(options.budgetMs, options.timeoutMs)
+    : options.timeoutMs
+  const extension = Math.min(Math.max(STATUS_WINDOW_MS, Math.round(budget / 4)), options.timeoutMs)
   try {
     child.followup(createUserMessage({
       content: [{ type: 'text', text: prompt }],
       source: { kind: 'user' },
     }))
-    await Promise.race([
-      child.whenIdle(),
-      new Promise<never>((_resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error(`the child ran out of its ${options.timeoutMs}ms budget`)), options.timeoutMs)
-        if (typeof timer.unref === 'function') timer.unref()
-        options.signal.addEventListener('abort', () => {
-          clearTimeout(timer)
-          reject(new Error('the plan was cancelled'))
-        }, { once: true })
-      }),
-    ])
-    const events = (child.session as unknown as { snapshotEvents: () => SessionEventLike[] }).snapshotEvents()
-    const output = lastAssistantText(events)
-    return { output, error: output.trim() === '' ? 'the child produced no answer' : undefined }
+    const first = await waitForIdle(child, budget, options.signal)
+    if (first !== 'timeout') {
+      const output = snapshotText(child)
+      return {
+        output,
+        error: first === 'cancelled'
+          ? 'the plan was cancelled'
+          : (output.trim() === '' ? 'the child produced no answer' : undefined),
+      }
+    }
+    // The budget is spent. Stop what is running — the in-flight tool included —
+    // and hand the decision back to the child: it knows what it has, the parent
+    // does not. It finishes by the shortest path or reports its state, and the
+    // extension is what bounds that second look.
+    child.cancel({ kind: 'hook', reason: 'the node used its time budget' })
+    child.followup(createUserMessage({
+      content: [{ type: 'text', text: statusPrompt(extension) }],
+      source: { kind: 'user' },
+    }))
+    const second = await waitForIdle(child, extension, options.signal)
+    const output = snapshotText(child)
+    if (second === 'cancelled') return { output, error: 'the plan was cancelled' }
+    if (output.trim() === '') {
+      return { output, error: `the child used its ${budget}ms budget and produced no answer` }
+    }
+    return {
+      output,
+      error: second === 'idle' ? undefined : `the child used its ${budget}ms budget; this is where it got to`,
+    }
   } catch (error: unknown) {
-    return { output: '', error: error instanceof Error ? error.message : String(error) }
+    return { output: snapshotText(child), error: error instanceof Error ? error.message : String(error) }
   } finally {
     try {
       await handle.dispose()

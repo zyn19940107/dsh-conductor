@@ -271,6 +271,7 @@ async function runNode(
       buildAgentPrompt(node, criteria),
       {
         timeoutMs: agentNodeTimeoutMs,
+        ...(node.budgetMs > 0 ? { budgetMs: node.budgetMs } : {}),
         signal,
         ...(node.kind === 'worker' && fork.onWorker !== undefined ? { onCreated: fork.onWorker } : {}),
       },
@@ -307,7 +308,7 @@ async function runNode(
           ...(agent === undefined ? {} : { agent }),
           signal: deadline.signal,
         }),
-        agentNodeTimeoutMs,
+        node.budgetMs > 0 ? Math.min(node.budgetMs, agentNodeTimeoutMs) : agentNodeTimeoutMs,
         node.id,
         deadline,
       )
@@ -498,7 +499,8 @@ export function applyPlanTool(
               required: true,
               description: '"tools" runs a batch of calls together. "worker" is a child that starts with '
                 + 'this conversation and does the work itself, and never draws a plan of its own. "spawner" '
-                + 'is a child that starts empty and plans. "forker" is a child that starts with this '
+                + 'is a child that starts empty and plans. A node may declare a "budgetMs": when it is spent the '
+      + 'node is stopped and asked to report where it got to rather than being killed without a word. "forker" is a child that starts with this '
                 + 'conversation and plans.',
             },
             calls: {
@@ -529,6 +531,14 @@ export function applyPlanTool(
               items: { type: 'string' },
               description: 'The files this node writes. Two nodes that write the same file do not run '
                 + 'together, because the second write would land on the result of the first one.',
+            },
+            budgetMs: {
+              type: 'number',
+              description: 'How long you expect this node to take, in milliseconds. When it is spent the '
+                + 'node is stopped mid-work and asked to look at where it got to and either finish by the '
+                + 'shortest path or report its state and stop, so the parent still gets something. Declare '
+                + 'one on every node that could run long: a node that declares nothing runs until the '
+                + "runner's own ceiling.",
             },
           },
         },

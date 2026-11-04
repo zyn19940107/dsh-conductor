@@ -88,7 +88,32 @@ export const REVIEW = {
 /**
  * Every task, keyed by the name the runner takes.
  */
-export const TASKS = { survey: SURVEY, chain: CHAIN, review: REVIEW, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
+/**
+ * A mechanism probe: does a node stop at its declared budget and report its state?
+ *
+ * The worker is asked to block for five minutes with a budget of twenty seconds.
+ * If the mechanism works, the plan returns in well under a minute, the node's
+ * output is the child's status report rather than a timeout with nothing in it,
+ * and the blocked process is gone.
+ */
+export const BUDGET_PROBE = {
+  text: [
+    '这是一个机制验证任务，只做一件事：验证节点的 budgetMs 到点后会被停下并要求报告现状。',
+    '',
+    '请交一张图，criteria 写「worker 节点在 20 秒预算用尽后被停下并报告了现状」，nodes 写成下面这个（原样照抄参数）：',
+    '{"id": "sleep", "kind": "worker", "budgetMs": 20000,',
+    ' "task": "用 pwsh 跑一条会阻塞 300 秒的命令：python -c \\"import time; time.sleep(300)\\"。命令结束后告诉我它输出的内容。"}',
+    '',
+    '等它回来之后，把 refine_plan 报告里 sleep 这个节点的 output 原样复述给我，',
+    '并说明它是按时结束的还是被中途停下的。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '说清了节点是被预算停下的', any: ['budget', '预算', '超时', 'time budget', '现状'] },
+  ]),
+}
+
+export const TASKS = {
+  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

@@ -81,7 +81,19 @@ export interface PlanNode {
   order: PlanNodeOrder
   /** The files a node writes, so two nodes that write the same one do not run together. */
   writes: string[]
+  /**
+   * How long the model expected this node to take, in milliseconds.
+   *
+   * Zero means it declared none. When it is set and spent, the node's child is
+   * stopped and asked to look at where it got to and decide whether to finish or
+   * report its state — it is not killed without a word. The runner's ceiling
+   * still bounds the node.
+   */
+  budgetMs: number
 }
+
+/** The largest budget a node may declare, so one typo cannot park a child for a day. */
+export const MAX_NODE_BUDGET_MS = 3_600_000
 
 /** The plan a call carries. */
 export interface PlanArgs {
@@ -138,6 +150,10 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
     if (seen.has(nodeId)) return undefined
     seen.add(nodeId)
 
+    const rawBudget = item.budgetMs
+    const budgetMs = typeof rawBudget === 'number' && Number.isFinite(rawBudget) && rawBudget > 0
+      ? Math.min(Math.round(rawBudget), MAX_NODE_BUDGET_MS)
+      : 0
     const order: PlanNodeOrder = item.order === 'sequential' ? 'sequential' : 'parallel'
     const writes = Array.isArray(item.writes)
       ? item.writes
@@ -157,13 +173,13 @@ export function parsePlanArgs(value: unknown): PlanArgs | undefined {
         const args = callItem.arguments
         parsedCalls.push({ name: name.trim(), arguments: args === undefined ? {} : args })
       }
-      parsedNodes.push({ id: nodeId, kind, calls: parsedCalls, task: '', order, writes })
+      parsedNodes.push({ id: nodeId, kind, calls: parsedCalls, task: '', order, writes, budgetMs })
       continue
     }
 
     const task = item.task
     if (typeof task !== 'string' || task.trim() === '') return undefined
-    parsedNodes.push({ id: nodeId, kind, calls: [], task: task.trim(), order, writes })
+    parsedNodes.push({ id: nodeId, kind, calls: [], task: task.trim(), order, writes, budgetMs })
   }
   // An empty plan is allowed and the model decides when it is right: a turn that
   // already has what it needs hands over nothing to run and goes to the
