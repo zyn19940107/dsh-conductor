@@ -49,10 +49,10 @@ console.log('parseBatchArgs')
 
 console.log('parsePolicyCommand')
 {
-  check('reads the off command', parsePolicyCommand('/dsh-refine-loop off') === 'off')
-  check('reads the on command', parsePolicyCommand('/dsh-refine-loop on') === 'on')
+  check('reads the off command', parsePolicyCommand('/dsh-conductor off') === 'off')
+  check('reads the on command', parsePolicyCommand('/dsh-conductor on') === 'on')
   check('ignores another command', parsePolicyCommand('/dsh-some-other-policy off') === undefined)
-  check('ignores the command without a mode', parsePolicyCommand('/dsh-refine-loop') === undefined)
+  check('ignores the command without a mode', parsePolicyCommand('/dsh-conductor') === undefined)
   check('ignores a command that is not the first line', parsePolicyCommand('hello\n/dsh-refine-loop off') === undefined)
   check('ignores an ordinary message', parsePolicyCommand('please batch these') === undefined)
 }
