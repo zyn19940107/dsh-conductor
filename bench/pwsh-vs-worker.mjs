@@ -19,6 +19,7 @@ const HOME = 'D:/code/vibe/dsh-sandbox/home'
 const ROOT = join(HOME, 'sessions')
 const LF = String.fromCharCode(10)
 const runs = Number(process.argv[2] ?? '2')
+const only = process.argv[3]
 
 const COMMAND = "Get-ChildItem -Path 'D:\\code\\vibe\\dsh-refine-loop' -Recurse -File -Force | Sort-Object FullName | Select-Object FullName, Length"
 const FIRST = '.git' + String.fromCharCode(92) + 'COMMIT_EDITMSG'
@@ -80,6 +81,8 @@ async function run(label, task, index) {
   let mainContext = 0
   let steps = 0
   let biggest = 0
+  let report = 0
+  let reportTruncated = false
   for (const candidate of candidates.slice(0, 3)) {
     const events = []
     for (const name of candidate.files) {
@@ -110,6 +113,10 @@ async function run(label, task, index) {
         const name = open.get(String(event.data?.message?.toolCallId ?? ''))
         const text = (event.data?.message?.content ?? []).map(block => block.text ?? '').join('')
         biggest = Math.max(biggest, text.length)
+        if (text.includes('Plan finished')) {
+          report = text.length
+          reportTruncated = text.includes('Omitted')
+        }
         void name
       }
     }
@@ -123,25 +130,27 @@ async function run(label, task, index) {
   console.log(`${label.padEnd(6)} #${index}  ${(wall / 1000).toFixed(0).padStart(4)}s  `
     + `nodes=${kinds.padEnd(8)} 主步=${String(steps).padStart(2)}  `
     + `主 agent 输出=${String(mainTokens).padStart(4)}tok  上下文累计=${(mainContext / 1000).toFixed(0).padStart(4)}k  `
-    + `最大单条结果=${(biggest / 1000).toFixed(0).padStart(3)}k  答对=${correct ? '✅' : '❌'}`)
-  return { label, index, wall, kinds, steps, mainTokens, mainContext, biggest, correct, plan, final }
+    + `最大单条结果=${(biggest / 1000).toFixed(0).padStart(3)}k  `
+    + `报告=${(report / 1000).toFixed(1)}k${reportTruncated ? ' 截断✗' : ' 完整✅'}  答对=${correct ? '✅' : '❌'}`)
+  return { label, index, wall, kinds, steps, mainTokens, mainContext, biggest, report, reportTruncated, correct, plan, final }
 }
 
 const results = []
 for (let index = 1; index <= runs; index += 1) {
-  results.push(await run('tools', TOOLS_TASK, index))
-  results.push(await run('worker', WORKER_TASK, index))
+  if (only !== 'worker') results.push(await run('tools', TOOLS_TASK, index))
+  if (only !== 'tools') results.push(await run('worker', WORKER_TASK, index))
 }
 
 const avg = (items, pick) => items.reduce((sum, item) => sum + pick(item), 0) / Math.max(1, items.length)
 console.log()
-for (const label of ['tools', 'worker']) {
+for (const label of only === 'worker' ? ['worker'] : only === 'tools' ? ['tools'] : ['tools', 'worker']) {
   const group = results.filter(item => item.label === label)
   const matched = group.filter(item => item.kinds !== '?' )
   console.log(`${label.padEnd(6)} 平均 ${(avg(group, item => item.wall) / 1000).toFixed(0)}s  `
     + `主 agent 输出 ${avg(group, item => item.mainTokens).toFixed(0)}tok  `
     + `上下文累计 ${avg(group, item => item.mainContext) / 1000 | 0}k  `
     + `最大单条结果 ${avg(group, item => item.biggest) / 1000 | 0}k  `
+    + `报告完整 ${group.filter(item => !item.reportTruncated).length}/${group.length}  `
     + `答对 ${group.filter(item => item.correct).length}/${group.length}  `
     + `形状 ${matched.map(item => item.kinds).join(' / ') || '—'}`)
 }
