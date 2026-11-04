@@ -309,10 +309,17 @@ export async function spawnForkedChild(
   const seed = buildSeedFromNow(session.snapshotEvents())
   const depth = Number(session.header.delegationDepth ?? 0) + 1
 
+  const sessionId = `refine-loop-child-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  // Register before the child exists, not after: the child may speak before
+  // createAgent resolves, and a worker's very first call must already hit the
+  // rule that refuses the plan tool. Registering afterwards let each worker's
+  // first plan through — 285 of 285 in the benchmark did exactly that.
+  options.onCreated?.(sessionId)
+
   let handle: ChildHandle
   try {
     handle = await agentLoop.createAgent(parent.ctx, {
-      sessionId: `refine-loop-child-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      sessionId,
       parentAgent: parent,
       meta: {
         cwd: session.header.cwd,
@@ -332,7 +339,6 @@ export async function spawnForkedChild(
   }
 
   const child = handle.agent
-  options.onCreated?.(String((child.session as unknown as { id: string }).id))
   try {
     child.followup(createUserMessage({
       content: [{ type: 'text', text: prompt }],

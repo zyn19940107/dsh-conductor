@@ -1,0 +1,45 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 226950,
+  "timedOut": false,
+  "sessionId": "session-48c42be9-a677-42d8-81ae-a7ed639dc0b1",
+  "stderr": "",
+  "steps": 5,
+  "toolCalls": 5,
+  "tools": [
+    "glob",
+    "pwsh",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 90164,
+    "outputTokens": 9423,
+    "cacheReadTokens": 180352,
+    "totalTokens": 279939
+  },
+  "formation": {
+    "agents": 1,
+    "input": 90164,
+    "output": 9423,
+    "cacheRead": 180352,
+    "total": 279939,
+    "steps": 5
+  },
+  "mainPrompt": 93417,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 22137,
+  "thinkingPreview": "Let me explore the directory structure first.\n\nThe user asks: In D:\\code\\vibe\\dsh-refine-loop\\verify, what entry function does each .spec.ts actually test? And in D:\\code\\vibe\\dsh-refine-loop\\src, of 8 modules, which have no corresponding spec? And which module has the most lines, how many?\n\nRead-only. Let me plan: I need to list files, read specs, read src modules.\n\nLet me start by discovering the structure.\nNow I know the layout:\n\nsrc/ (10 files): batch.ts, compress.ts, concurrency.ts, fork.ts, index.ts, plan.ts, policy.ts, repair.ts, rounds.ts, tool.ts — that's 10 files. The user says \"8 modules\" — hmm. Maybe index.ts and tool.ts aren't counted as modules, or maybe the \"8 modules\" refers to something else. Let me check. Actually there are 10 .ts files in src. The user says 8 modules. Possibly they consider the non-entry modules: batch, compress, concurrency, fork, plan, policy, repair",
+  "finalText": "## 结论（只读，未修改任何文件）\n\n先纠正一处前提：`src/` 下实际是 **10 个 `.ts`**，不是 8 个 —— `batch, compress, concurrency, fork, index, plan, policy, repair, rounds, tool`。去掉插件入口 `index.ts` 和工具外壳 `tool.ts`，**剩下的正好 8 个功能模块**（这应该就是你说的「8 个模块」）：`batch, compress, concurrency, fork, plan, policy, repair, rounds`。\n\n### 1. 每个 `.spec.ts` 实际测的入口函数\n\n`verify/` 下有 **9 个** `.spec.ts`（`repair.spec.ts` 存在，但没被 runner 执行，见第 2 条）。\n\n| spec | 被测模块 | 实际调用的入口函数 |\n|---|---|---|\n| `refine.spec.ts` | `src/batch.ts` + `src/policy.ts` | `parseBatchArgs`、`renderBatch`（batch）；`parsePolicyCommand`（policy） |\n| `batch.spec.ts` | `src/batch.ts` | **`runBatch`**（唯一入口，4 组场景都用它） |\n| `compress.spec.ts` | `src/compress.ts` | **`compressToolOutput`**（主）、`needsCompression`、`spilledText`、常量 `SPILL_NOTICE` |\n| `concurrency.spec.ts` | `src/concurrency.ts`（+batch 验顺序） | **`isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`**；附带 `runBatch` |\n| `fork.spec.ts` | `src/fork.ts` | **`buildSeedFromNow`**（主）、`openTurnClosers` |\n| `plan.spec.ts` | `src/plan.ts` + `src/tool.ts` | `parsePlanArgs`、`buildGroups`、`WORKER_MARKER`（plan）；**`runPlan`、`renderPlan`**（tool） |\n| `repair.spec.ts` | `src/repair.ts`（+batch） | **`parseRepair`**；另走 `runBatch` 的 repair 回调路径 |\n| `retain.spec.ts` | `src/index.ts` + `src/tool.ts` | **`applyReportRetention`**（index）、常量 `PLAN_TOOL`（tool） |\n| `rounds.spec.ts` | `src/rounds.ts`（+plan 取 `WORKER_MARKER`） | **`Rounds`、`Workers`、`isWorkerConversation`、`applyTurnDoctrine`、`applyWorkerRule`**，加常量 `ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN` |\n\n### 2. 8 个模块里哪些没有对应的 spec\n\n按「有同名专属 spec 文件」这条口径，8 个里只有 **`policy.ts` 没有**（`policy.spec.ts` 不存在）。不过还有两个更要紧的缺口：\n\n- **`repair.ts` 的 spec 是孤儿**：`verify/repair.spec.ts` 存在，但 `verify/run-specs.mjs:21` 的名单只有 8 项（`refine, batch, concurrency, plan, rounds, fork, compress, retain`），**漏了 `repair.spec.ts`**；而 `package.json:41` 的 `\"specs\": \"node verify/run-specs.mjs\"` 就是唯一入口。所以 `pnpm specs` 永远不会跑 repair 那条 —— `repair.ts` 实际处于「有 spec 但不执行」的状态。\n- **`policy.ts` 只被顺带测了一个函数**：`refine.spec.ts` 里只碰 `parsePolicyCommand`；`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全无覆盖。\n- 另外（不在 8 个之列的）`index.ts` 与 `tool.ts` 也没有同名 spec，只分别被 `retain.spec.ts` / `plan.spec.ts` 间接测了 `applyReportRetention` 和 `runPlan`/`renderPlan`；`index.ts` 的 `apply`/`Config`/`REFINE_GUIDANCE`、`tool.ts` 的 `applyPlanTool`、`fork.ts` 的 `spawnForkedChild` 都没有测试。\n- 附带一提：`tsconfig.json` 是 `include: [\"src\"]` + `exclude: [\"verify\"]`，所以 `pnpm typecheck` 也不检查 spec 文件。\n\n### 3. 行数最多的模块\n\n物理行数（`Get-Content` 计数，与换行符计数一致；所有文件都以换行结尾）：\n\n```\ntool.ts 639 · batch.ts 400 · rounds.ts 384 · fork.ts 372 · index.ts 365\npolicy.ts 241 · concurrency.ts 234 · plan.ts 215 · repair.ts 173 · compress.ts 156\n```\n\n- **8 个功能模块里最大的是 `src/batch.ts`，400 行**（次之 `rounds.ts` 384 行）。\n- 若按 `src/` 全量 10 个文件算，最大的是 **`src/tool.ts`，639 行**（`batch.ts` 差得最远）。\n\n一个提醒：`bench/results/` 下的历史快照记录过「9 个 src 文件、7 个 spec、`tool.ts` 620 行、runner 里 6 项」等旧状态，那是旧版本的数据，不能当作当前仓库的事实（当前是 10 文件 / 9 spec / tool.ts 639 行 / runner 8 项）。"
+}

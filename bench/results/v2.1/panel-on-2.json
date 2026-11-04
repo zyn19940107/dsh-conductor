@@ -1,0 +1,68 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 367399,
+  "timedOut": false,
+  "sessionId": "session-19fea7a3-f0fa-4daa-b321-2d0272ad05e0",
+  "stderr": "",
+  "steps": 16,
+  "toolCalls": 26,
+  "tools": [
+    "glob",
+    "glob",
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "grep",
+    "read",
+    "pwsh",
+    "pwsh",
+    "grep",
+    "grep",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "refine_plan",
+    "read",
+    "read",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 92632,
+    "outputTokens": 23712,
+    "cacheReadTokens": 897538,
+    "totalTokens": 1013882
+  },
+  "formation": {
+    "agents": 4,
+    "input": 466964,
+    "output": 95615,
+    "cacheRead": 5027924,
+    "total": 5590503,
+    "steps": 65
+  },
+  "mainPrompt": 103293,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 54598,
+  "thinkingPreview": "The glob results are polluted by node_modules. Let me list the top-level source files excludingnode_modules.\nThe plugin source is in `D:\\code\\vibe\\dsh-refine-loop\\src\\`. Let me read the key source files to find the \"核心规则\" (core rules). Let me read src/rounds.ts, src/policy.ts, src/plan.ts, src/tool.ts, src/index.ts, src/fork.ts, src/concurrency.ts.\n\nLet me first read the README and the mainfiles.\nNow let me read the plan.ts, tool.ts, index.ts, fork.ts, concurrency.ts to understand the enforcement.\nNow let me read tool.ts, fork.ts, concurrency.ts to understand enforcement and how subagent calls are made within a plan.\n\nI should also check how the harness's native subagent tool works (in deepseek-harness dir?) to compare. But first, let me read the plugin's remaining source.\n\nLet me plan the three independent reviews. Each reviewer needs to read the relevant source and give evidence with l",
+  "finalText": "三方评审已全部返回，我另做了两轮独立核验。结论如下。\n\n---\n\n# DSH 插件 `dsh-refine-loop`「核心规则」三方独立评审\n\n## 0. 评审组织方式\n\n三份评审由 `refine_plan` 的三个 `spawner` 节点并行跑完——`spawner` 从空上下文起步，因此三方互相看不到对方的任何结论，也看不到我的判断：\n\n| 节点 | 视角 | 独立焦点 |\n|---|---|---|\n| `review-mechanism` | 机制执行审计 | 「代码实际强制的」vs「文字承诺的」差距 |\n| `review-model` | 模型视角/提示词负担 | 模型每轮被灌多少字、被迫做多少无用规划 |\n| `review-integration` | 运行时集成与并发 | 子代理怎么起、并发怎么判、接管是否干净 |\n\n三方读的是同一批源码（插件 `src/{rounds,plan,tool,fork,batch,concurrency,policy,index}.ts` + `README.md` + `verify/*.spec.ts`；harness `packages/{core/tools,subagent/*,workflow/*,plan/plan-mode,core/system-prompt}`），各自给出行号。全程只读。\n\n---\n\n## 1. 三份评审原意\n\n### 评审 A（机制执行审计）\n\n- **Q1 是** — 每交一张图强制多付一次 round trip：图跑完即 `concludeTurn()` 结束本轮并排队下一轮，模型无法在同一轮写结论；图之后任何直接工具调用都被 guard 拒掉，连补一次 read 都必须重画一图。`tool.ts:608-610`、`index.ts:266-272`、`rounds.ts:380-382`、`plan.ts:123`\n- **Q2 部分** — 直调 `subagent`/`subagent_fork` **被真拦住**（重注册 + `callId===rootCallId` 抛错，`rounds.ts:331-333`），但「本轮必须交图」**没有任何代码拦截**，且派发仍能绕过节点种类。三条路径：A) 首图前 `plans.waiting` 为真，guard 全放行（`rounds.ts:201-204`、`index.ts:231-243`，纯 prompt）；B) `kind:\"tools\"` 的 calls 里直接写 `subagent`，嵌套调用 `rootCallId≠callId`（`batch.ts:233-236`）→ `rounds.ts:331` 判断为假 → 原生 subagent 跑起来，无 criteria 契约、无本轮继承、无节点超时与深度阀（`tool.ts:242-252`）；C) `workflow` 不在 `DELEGATION_TOOLS`(`rounds.ts:58`) 也不在 `HIDDEN_TOOLS`(`rounds.ts:68-72`)。\n- **Q3 部分** — 不改 harness 循环、全走公开扩展点、工具名不冲突；但全局 guard（`core/tools/src/index.ts:1136-1141`）会连原生 `exit_plan_mode` 一起拒（`plan/plan-mode/src/index.ts:67`）；节点强制 `run_in_background:false`（`tool.ts:305`）使原生后台委派不可达；插件自建 wave 调度并把 `glob`/`grep`/只读 `ops_bash` 判为 parallel（`concurrency.ts:176-180, 222-234`），放宽了原生安全声明。\n\n### 评审 B（模型视角审计）\n\n- **Q1 部分** — 教义把「每轮一张图 + 结论另起一轮」写成硬流程；每请求至少 2 次模型往返（`tool.ts:606-609` + `index.ts:264-273`）；每轮固定注入约 3.4k 字符插件文字，其中系统提示词那 2,042 字符每次请求重发（`rounds.ts:23-35`、`index.ts:54-79`）；节点要填 id/kind/calls/task/order/writes（`plan.ts:71-84`），超过 8 节点整个调用失败重画（`index.ts:98`、`tool.ts:572-576`）。**但**多件独立工作时图确实省往返。\n- **Q2 是** — 「必须交图」在代码里没有对应拦截（`rounds.ts:381`），只有提示文字 + 事后封工具；直接派发只拦住 `subagent`/`subagent_fork` 两个工具名（`rounds.ts:58, 330-333`）；`workflow` 的 `agent()` 直接走 `ctx.subagents.start`，压根不经 subagent 工具 → 插件看不见它。\n- **Q3 是** — 同一份系统提示词里并存两套「计划」教义：插件 `REFINE_GUIDANCE`（`index.ts:238`）与原生 `plan:policy`（`plan-mode/src/index.ts:219`）同为 `PLAN_POLICY` 槽（`core/system-prompt/src/index.ts:128` = 500）；判事守卫会把原生 `exit_plan_mode`/`workflow`/job 一起拒；插件全局覆写原生委派工具描述（`rounds.ts:313-334`）抹掉 harness 自己「继承已完成轮次」的语义（`tool-subagent/src/index.ts:255-271`）；对所有 agent deny 掉 `list_agents`/`send_message`/`interrupt_agent`（`rounds.ts:314, 68-72`）。\n\n### 评审 C（运行时集成审计）\n\n- **Q1 部分** — 空图也算一张并吃掉 16 轮预算里的一轮（`plan.ts:171`、`index.ts:267`）；图跑完模型被冻结，补一次信息要重画一图（`tool.ts:609`、`rounds.ts:382`）；失败修复每次再加最多两次**计划外**模型调用，走 `ctx.llm.stream`，不进会话日志、不占轮次（`batch.ts:228`）。\n- **Q2 是** — 规则(1)(2)无强制点（`rounds.ts:381`）；规则(3)可绕：tools 节点的 calls 原样执行，`subagent`/`workflow` 都不在 `DELEGATION_TOOLS`，而深度检查与节点超时**只作用于 agent 节点**（`tool.ts:242`）→ 一个 tools 节点直接调 `subagent` 即可在图外派发，且在 continuable 部署下 `run_in_background` 缺省即 true（`tool-subagent/src/index.ts:303`），子代理在图的 timeout 之外后台跑，而它的回信工具 `send_message` 已被插件隐藏。**README 宣称的「没交图就拽回来（最多 3 次）」在代码里不存在，只剩一个悬空注释。**\n- **Q3 部分** — 接管不干净：用无 scope 的 `ctx.tools.get(name)` 只看得到全局层，preset/agent 层注册的 `subagent`/`subagent_fork` 直接漏掉 → 接管静默失效（`rounds.ts:316`、`core/tools/src/index.ts:1230`）；`restrict` 遇到非全局工具名直接抛错（`core/tools/src/index.ts:1114`）；隐藏了 harness 要求子代理使用的 `send_message`（`subagent/src/continuation-messages.ts:91`）；插件的并发 override 能盖掉工具显式声明的独占（`concurrency.ts:228`）。\n\n---\n\n## 2. 三方一致的地方\n\n**① 「每轮必须交图」是三条里唯一没有被代码强制的**（三票一致，且都指向同一行）\n`rounds.ts:381` 的 `if (plans.waiting(agent.session.id)) return undefined` 意味着：**第一张图交出来之前，模型的所有工具调用一律放行**。guard 只在「已经跑过图之后」才收紧。README:99 把它列进「插件把四条强制做在机制上」的表格，但 `src/index.ts:188` 只剩一行没有对应字段的悬空 JSDoc（「How many times a turn may be pulled back after it handed over its plan.」）——**「拽回来 3 次」这个机制在代码里不存在**（评审 C 独家发现，我已核对 README:99 与 index.ts:188 双向确认）。\n\n**② 规则有真实代价，没有一方认为它「不过度限制」**（Q1 三票都是「是」或「部分」）\n每请求 ≥2 次模型往返（画图轮 + 判断轮，`tool.ts:608-610` + `i"
+}

@@ -161,7 +161,7 @@ const groups = [
   ['off', RESULTS, 'off'],
   ['v1.0', OLD, 'on'],
   ['v2.0', V20, 'on'],
-  ['v2.1', RESULTS, 'on'],
+  ['v2.2', RESULTS, 'on'],
 ]
 
 const table = new Map()
@@ -188,7 +188,7 @@ for (const [label, dir, arm] of groups) {
 console.log(`并行感知的归一（${SPEED} tok/s；每个 node 单独归一、并行取 max）\n`)
 console.log('  场景             版本    实测   归一   父模型  图块(实测)  图块(归一)  编队')
 for (const [scenario, versions] of table) {
-  for (const label of ['off', 'v1.0', 'v2.0', 'v2.1']) {
+  for (const label of ['off', 'v1.0', 'v2.0', 'v2.2']) {
     const runs = versions.get(label)
     if (runs === undefined) continue
     console.log('  ' + scenario.padEnd(16) + label.padEnd(7)
