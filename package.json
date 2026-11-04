@@ -1,6 +1,6 @@
 {
   "name": "@zyn19940107/dsh-refine-loop",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "DeepSeek Harness 插件：把「想→做→看→再想」的串行链换成「规划一次→并行做N件→一次性收N个结论」。",
   "license": "MIT",
   "type": "module",
