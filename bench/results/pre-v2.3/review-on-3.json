@@ -1,0 +1,42 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 88160,
+  "timedOut": false,
+  "sessionId": "session-22c7c29e-a903-4af6-b0f5-8b4f4e2687f8",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 8090,
+    "outputTokens": 4081,
+    "cacheReadTokens": 36874,
+    "totalTokens": 49045
+  },
+  "formation": {
+    "agents": 4,
+    "input": 118077,
+    "output": 21428,
+    "cacheRead": 1088369,
+    "total": 1227874,
+    "steps": 33
+  },
+  "mainPrompt": 19561,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 3095,
+  "thinkingPreview": "All three nodes returned findings with concrete code locations. The request is answered. I should verify a couple of key claims myself? The criteria say each node cites concrete code locations. The findings look detailed and consistent with the tool descriptions I have (plan.ts structure matches the refine_plan tool description in my own tool list: kinds tools/worker/spawner/forker, order parallel/sequential, budgetMs, writes). That's consistent.\n\nLet me do a quick sanity check on a couple of things — actually, the instruction says judge: if the results answer the request, write the conclusion. The results do answer. But should I verify? A quick spot-check would strengthen. Given the strong consistency with my own tool schema (PlanArgs with criteria/nodes, kinds, order, writes, budgetMs, PlanToolCall with name/arguments), and the detailed line citations, I'm fairly confident.\n\nLet me do ",
+  "finalText": "验证通过 —— 关键论断与源码一致。以下是三部分结论。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**形状**：`PlanArgs { criteria: string[]; nodes: PlanNode[] }`（plan.ts:93）\n\n- `PlanNode`（plan.ts:65）：`id` / `kind` / `calls` / `task` / `order` / `writes` / `budgetMs`\n- `PlanToolCall`（plan.ts:57）：`{ name: string; arguments: unknown }`\n\n**节点种类恰好四种**（`PlanNodeKind`, plan.ts:24）：\n\n| kind | 语义 |\n|---|---|\n| `tools` | 参数已定的工具调用 |\n| `worker` | 带着本对话开场、自己干活、**不画自己的计划** |\n| `spawner` | 空白开场，走本插件循环自己规划 |\n| `forker` | 带着本对话开场，走本插件循环自己规划 |\n\n另有 `PlanNodeOrder = 'parallel' | 'sequential'`（plan.ts:54）、`MAX_NODE_BUDGET_MS = 3_600_000`（plan.ts:90）、`WORKER_MARKER = '[refine-loop worker]'`（plan.ts:109）。\n\n**调用参数怎么处理**：唯一入口是 `parsePlanArgs(value)`（plan.ts:121），是**全有或全无**的严格解析 —— `criteria`/`nodes` 必须是数组、criteria 修剪后不能为空、每个节点不能是非对象/空 id/四种 kind 之外的字面量/id重复，任一违例直接返回 `undefined` 整张图拒收，没有部分挽救（`nodes` 为空数组则故意允许）。默认值也在这里填：`budgetMs` 缺省0（有限正数则封顶 1 小时）、`order` 缺省 `parallel`（只有字面量 `sequential` 才算）、`writes` 过滤空串、`arguments` 仅在 `undefined` 时补 `{}`。**关键点：`arguments` 类型是 `unknown`，全程不校验也不 JSON 往返**，按引用原样下传（tool.ts:154 → batch.ts:258 → `runner.execute`），真正校验它的只有目标工具自己的 schema。\n\n---\n\n## 2. 插件强制的那条规则\n\n**规则：\"一轮一图\"** —— 一轮的工作必须是一张图；图跑完后这一轮只剩\"判断\"（写结论）或交下一张图。\n\n它落在两个 guard 上（都在 `src/rounds.ts`，用 `ctx.tools.guard`，返回字符串即拒绝该调用）：\n\n1. **判断阶段不许再直接调工具** —— `applyJudgementGuard`（rounds.ts:379-388）返回 `JUDGE_ONLY`（rounds.ts:351）。触发条件三个同时成立：① 是模型自己发起的根调用（`isModelCall` = `callId === rootCallId`，rounds.ts:363）；② 工具名不是 `refine_plan`（rounds.ts:384）；③ `plans.waiting(sessionId)` 为 false —— 该标志在 `onPlanFinished → plans.done()`（index.ts:266）时翻掉，即\"这一请求已经跑过一张图\"。\n2. **派发只能走图** —— `applyDelegationRule`（rounds.ts:316-342）在 `agent/created` 时重注册 `subagent`/`subagent_fork`，模型直调时抛 `DELEGATE_IN_GRAPH`（rounds.ts:57）。触发条件是 `exec.callId === exec.rootCallId`；图节点内部的嵌套调用照常放行。同一钩子还 `deny` 掉 `list_agents`/`send_message`/`interrupt_agent`。\n\n**必须点明的前提：「必须交图」这半条并没有被强制。** 第一次交图之前 `plans.waiting` 为 true，判断守卫整轮不生效 —— 模型可以完全不交图、直接用工具把活干完（README:109-112 明确写了这点，并指出旧的\"闸门\"已在 `5b6b997` 删除）。每轮开头的\"想图\"教条只是 `applyTurnDoctrine`（rounds.ts:187-211）注入的一条消息，属提示而非拦截。\n\n**相关的独立强制**：`applyWorkerRule`（rounds.ts:294-303）拒绝 worker 会话里的 `refine_plan`（`WORKER_NO_PLAN`, rounds.ts:278）；`applyReportRetention`（index.ts:306-311）让计划报告永不被截断；`SessionPolicy.turnOff`（policy.ts:68-74）把 `refine_plan` 摘出工具表来关掉这一整套。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来 / 子代理限制\n\n**怎么跑**：`refine_plan`（`PLAN_TOOL`, tool.ts:45）由 `applyPlanTool`（tool.ts:366）注册。`execute`（tool.ts:517）流程：`parsePlanArgs` → 节点数上限（`maxBatchSize`，默认 8，index.ts:98）→ `onPlanStarted` → 从对话自身的 `requestHeader().config` 造修复闭包 → `runPlan`（tool.ts:294）→ 返回后 `onPlanFinished` 可 `exec.concludeTurn()` 并排下一轮（index.ts:264-273）。`runPlan` 先 `buildGroups`（plan.ts:200）——**只为把声明了相同 `writes` 路径的节点分开**，组内 `Promise.all` 跑 `runNode`（tool.ts:140），**组与组之间是串行 await**。输出 `PlanOutput` 由 `renderPlan`（tool.ts:341）渲染。\n\n派发分派：`tools` 节点 → `runBatch`（batch.ts:313），按节点 `order` 和 `criteria` 跑，每次调用最多修 `MAX_REPAIRS = 2`（batch.ts:229）；`worker`/`forker` → `spawnForkedChild`（fork.ts:364），`spawner` → `spawnEmptyChild`（fork.ts:403）—— 两者都走**插件自己的 agent 工厂**，不经过 harness 的委派工具，插件因此握得住句柄、能在预算到点时停下来问它到哪了。\n\n**派出去的子代理受到的限制**：\n\n1. **输出契约** —— `buildAgentPrompt`（tool.ts:100）给每个 agent 节点追加：计划的 criteria，然后\"给出你的结论……不要引用源码、不要写报告、不要做引用链，即使上面任务要求也别做；父代理来组最终答案\"。\n2. **worker 开场白** —— 只有 worker 节点额外得到 `[refine-loop worker]` + \"自己干……别画计划、别委派\"（tool.ts:117）。\n3. **深度上限** —— `delegationDepth >= maxAgentDepth`（默认 3，index.ts:113）时节点直接失败而不是派发（tool.ts:202-203）。\n4. **上下文前置条件** —— worker/forker 需要活着的 agent（\"脱离对话的计划没法启动继承它的子代理\"，tool.ts:218）；spawner 还需要 host（tool.ts:251）。\n5. **预算** —— `budgetMs`（封顶 1 小时）到点子代理被停并拿到一个\"收尾或汇报状态\"的窗口（fork.ts:293-312，45 秒或 budget/4），再由 `agentNodeTimeoutMs`（默认 540 秒，index.ts:122）兜底。\n6. **worker 不许画计划** —— `applyWorkerRule`（rounds.ts:294）拒绝 worker 里的 `refine_plan`；worker 会话在子代理存在**之前**就登记好（fork.ts:466-469），所以它第一次想画图就已经被拒；轮次教条也不会注入给它（rounds.ts:187）。\n7. **继承而不收窄** —— 子代理继承当时的对话（`buildSeedFromNow`, fork.ts:230）和父级的 `agentOptions`，**故意不做工具限制**，为的是让请求头一致、复用缓存前缀（fork.ts:484-487）；但直"
+}

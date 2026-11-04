@@ -4,39 +4,42 @@
   "index": 2,
   "profile": "bench-on",
   "exitCode": 0,
-  "wallMs": 81628,
+  "wallMs": 106251,
   "timedOut": false,
-  "sessionId": "session-9c5df55c-23d2-4279-8829-3aa4f7b707a4",
+  "sessionId": "session-29b20b85-41d4-4298-9312-6e68073cf5f2",
   "stderr": "",
-  "steps": 3,
-  "toolCalls": 2,
+  "steps": 4,
+  "toolCalls": 3,
   "tools": [
+    "refine_plan",
     "refine_plan",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 29912,
-    "outputTokens": 6835,
-    "cacheReadTokens": 49224,
-    "totalTokens": 85971
+    "inputTokens": 45256,
+    "outputTokens": 10037,
+    "cacheReadTokens": 98022,
+    "totalTokens": 153315
   },
   "formation": {
     "agents": 4,
-    "input": 139372,
-    "output": 24681,
-    "cacheRead": 706243,
-    "total": 870296,
-    "steps": 24
+    "input": 140349,
+    "output": 28879,
+    "cacheRead": 622966,
+    "total": 792194,
+    "steps": 27
   },
-  "mainPrompt": 42819,
+  "mainPrompt": 58192,
   "correctness": {
-    "passed": 6,
+    "passed": 5,
     "total": 6,
-    "missing": []
+    "missing": [
+      "调用参数原样透传(缺:原样/没有占位符/不存在占位符/字面量/直接传)"
+    ]
   },
   "planned": true,
-  "planAgentNodes": 0,
-  "thinkingChars": 12652,
-  "thinkingPreview": "The user wants me to review three parts of D:\\code\\vibe\\dsh-refine-loop independently, read-only. Let me plan.\n\nFirst, I need to design the plan as my first message. Let me look at the repo structure first? No — the rule says my first message of the round IS the plan, handed over before calling anything else.\n\nBut I need to know file paths. The user mentioned src/plan.ts, src/tool.ts, and \"the rule the plugin enforces\" (which I probably need to find in the plugin files). Let me design a plan that includes a discovery node plus three review nodes... but nodes in one round run in parallel, and discovery output would be needed by later nodes. Actually a worker node inherits this conversation — which currently doesn't include the repo contents. So a discovery step is needed first.\n\nOption: round 1 = one tools node that reads the directory listing (glob) of src/. Then round 2 = parallel worke",
-  "finalText": "三个问题都由独立节点基于源码核验完毕（只读，未改动任何文件）。\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**结构**：`PlanArgs`（L93-98）= `criteria: string[]` + `nodes: PlanNode[]`；`PlanNode`（L65-87）= `id` / `kind` / `calls` / `task` / `order` / `writes` / `budgetMs`；`PlanToolCall`（L57-62）只有 `name: string` 与 `arguments: unknown`。**没有依赖层**——文件头明确写了没有 `after`，节点之间无依赖（需要前一个节点结果的活属于下一轮）。\n\n**节点种类四种**（`PlanNodeKind`，L24）：\n- `tools` —— 参数已定的调用批次；\n- `worker` —— 带本对话起步、自己干活、**不画计划**的子代理；\n- `spawner` —— 空上下文起步、按本插件循环规划；\n- `forker` —— 带本对话起步、按本插件循环规划。\n\n（`AGENT_NODE_KINDS` / `WORKER_NODE_KINDS` / `NODE_AGENT_KINDS` 三个常量分别标出\"会起 agent 的三种\"\"只 worker\"\"由插件自己 spawn 的三种\"。）\n\n**调用参数的处理**全在 `parsePlanArgs`（L121-183）：criteria 必须是数组、过滤空串并 trim、trim 后为空则整份计划被拒；节点 `id` 必须非空且不重复，`kind` 只收四个枚举值；`budgetMs` 必须是有限正数否则记 0，并被 `Math.min` 封顶到 `MAX_NODE_BUDGET_MS = 3_600_000`；`order` 只有 `'sequential'` 才算 sequential，其余一律 parallel；`writes` 过滤非字符串后 trim。**tools 节点的 `arguments` 原样透传**（类型 `unknown`，插件不校验内容），只有 `undefined` 被补成 `{}`；agent 节点则必须有非空 `task`、`calls` 被强制清空。空计划合法。\n分组由 `buildGroups` / `canRunTogether`（L200-224）完成：写集重叠的节点被拆到不同组、组间串行、组内并行；没声明 `writes` 的节点被\"照单全收\"（插件无从知道一次调用动了磁盘）。\n\n## 2. 插件强制的那条规则\n\n**核心规则：一轮 = 一张图**——每轮先交 `refine_plan`，图跑完后这一轮只准\"判断\"（写结论或交下一张图），不准再用工具一件件干活；派发也只能走图里的节点。\n\n它**不是**写在系统提示里靠模型自觉，而是做在扩展点上，全部实现在 `src/rounds.ts`（由 `src/index.ts` 的 `apply()` 挂载）：\n\n| 强制点 | 实现 | 触发条件 |\n|---|---|---|\n| 每轮开始就想图 | `applyTurnDoctrine`：`agent/pre-step` 在 `step === 1` 把 `ROUND_LOOP` 作为**最后一条消息**注入 | 每轮第一步 |\n| 图跑完只能判断 | `applyJudgementGuard`（`tools/guard`）拒绝模型自发的工具调用，返回 `JUDGE_ONLY` | 有 `execution.agent` 且 `isModelCall`（`callId === rootCallId`）且工具名不是 `refine_plan` 且 `plans.waiting(sessionId) === false`（即本请求已跑完过一张图） |\n| 派发只能走图 | `applyDelegationRule`（`agent/created`）：harness 自带的 `subagent` / `subagent_fork` 直调抛 `DELEGATE_IN_GRAPH`；`list_agents`/`send_message`/`interrupt_agent` 被 `tools.restrict` 整个摘掉 | 根调用（`callId === rootCallId`）；图内嵌套调用放行 |\n| worker 不画图 | `applyWorkerRule`（`tools/guard`）对 worker 会话调 `refine_plan` 返回 `WORKER_NO_PLAN`（工具故意留在表里以保住继承前缀的 KV cache） | `workers.has(session.id)`（`onWorker` 登记）或消息里带 `WORKER_MARKER`（`[refine-loop worker]`） |\n\n文字声明在两处：`rounds.ts` 的 `ROUND_LOOP`（回合教条）与 `index.ts` 的 `REFINE_GUIDANCE`（系统提示 `refine-loop:policy` 段）。\n**两个边界**：「必须交图」本身**没有**闸门（README 注明该强制随 v1.0 前的 \"闸门\" 一起删掉，模型完全可以不交图把活干完）；`/dsh-refine-loop off`（`policy.ts` 的 `SessionPolicy.turnOff`）会让整套规则对该会话失效。\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**跑法**：`applyPlanTool`（L366）用 `defineTool` 注册 `refine_plan`，参数 schema 强制 `criteria` + `nodes` 必填。`execute`（L517）：`parsePlanArgs` 失败抛 \"refine_plan needs criteria, and nodes that each have an id and a kind\"；节点数超 `maxBatchSize()`（默认 8）抛错；随后取会话自身 `requestHeader().config` 造 `repair`、取 `options.host()` 造 `fork`，交给 `runPlan`（L294）：`buildGroups` 分组 → 每组 `Promise.all(runNode)` 并发 → 组间串行 → 一次性汇成 `PlanOutput { criteria, groups, nodes }`（按计划书写顺序），由 `renderPlan`（L341）渲染成模型读的文本；跑完 `onPlanFinished` 排队下一轮并 `exec.concludeTurn()` 让 harness 开新一轮。`runNode`（L140）分两路：`tools` 节点把 calls 原样交给 `runBatch`（batch.ts，内部再按 `mayRunTogether` 排波次）；agent 节点走 `spawnForkedChild`（worker/forker，继承含本轮的会话）或 `spawnEmptyChild`（spawner，空种子）。\n\n**子代理的限制（机制层，不只是提示词）**：\n1. **深度** —— `delegationDepth >= maxAgentDepth`（默认 3）时该节点直接失败（不是抛异常，整份计划继续跑）。\n2. **时间** —— `agentNodeTimeoutMs`（默认 540000）是硬顶；节点自报 `budgetMs` 是软预算，取 `min(budgetMs, timeoutMs)`，花光后 `cancel` 当前回合再喂 `statusPrompt`，额外窗口 `min(max(45s, budget/4), timeoutMs)` 让它自己\"收尾或报现状\"，而不是被杀；`tools` 节点到点则中止未完成调用、**保留已完成的结果**并在报告末尾标注。\n3. **产出形态** —— `buildAgentPrompt`（L100）固定三段：worker 开场词（带 `WORKER_MARKER`，\"Do not draw a plan and do not delegate\"）+ task + \"What this plan is judged on\" 判据 + 交付契约（\"结论 + 至多一两条支撑事实，不要报告、不要引用链，即使 task 里要求也不写；父代理自己组织最终答案\"）。\n4. **权限面** —— 子代理**不做工具裁剪**（保持 request header 与父一致以命中 KV cache），改为在调用点拦：worker 调 `refine_plan` 被拒（`WORKER_NO_PLAN`），根调用的 `subagent`/`subagent_fork` 被拒（`DELEGATE_IN_GRAPH`），图内嵌套调用放行。\n5. **调用参数与并发** —— calls 以 `{name, arguments}` 原样下发，`arguments` 缺失补 `{}`；失败调用可由 `repair`（`MAX_REPAIRS = 2`）重写 name/arguments 后重试，其余节点不受影响；并发由 `mayRunTogether"
+  "planAgentNodes": 3,
+  "thinkingChars": 21455,
+  "thinkingPreview": "Let me plan. The user wants a read-only review of three parts of D:\\code\\vibe\\dsh-refine-loop:\n1. src/plan.ts — data structure of plan, node kinds, how call arguments are handled.\n2. The enforced rule — what is it, how implemented, trigger conditions.\n3. src/tool.ts — how the plan is run, what limits subagents have.\nThen summarize.\n\nThe three parts are largely independent — each can be reviewed in parallel. But the \"forced rule\" part might span multiple files (maybe src/plan.ts, src/tool.ts, or a separate rule file). Let me first look at the directory structure to know what's there. Actually, the plan rules say my first message should be the plan hand-over before any tool call. But I need to know file names to write good node tasks. Hmm — but the tools nodes with fixed arguments need me to know paths. The paths given: src/plan.ts, src/tool.ts. The rule might be in src/plan.ts or elsewher",
+  "finalText": "已完成只读审查（`src/plan.ts`、`src/rounds.ts`、`src/index.ts`、`src/tool.ts`、`src/fork.ts`、`src/policy.ts`、`src/batch.ts` 经由源码与子审查交叉验证），**未修改任何文件**。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构\n\n**数据结构（纯数据 + 解析 + 分组，无执行逻辑）**\n\n| 类型 | 位置 | 形状 |\n|---|---|---|\n| `PlanArgs` | L93-98 | `{ criteria: string[]; nodes: PlanNode[] }` —— criteria 是\"判定这一轮成功与否的可观测判据\"，nodes 允许为空数组（空计划是有意允许的，模型自己判断什么时候该收尾） |\n| `PlanNode` | L65-87 | `{ id, kind, calls, task, order, writes, budgetMs }` —— **扁平大对象而非可辨识联合**：tools 节点用 `calls`，agent 节点用 `task`，解析时另一组字段被强制置空（tools → `task:''`，agent → `calls:[]`） |\n| `PlanToolCall` | L57-62 | `{ name: string; arguments: unknown }` |\n| `PlanNodeOrder` | L54 | `'parallel' \\| 'sequential'` |\n\n**节点有四种（`PlanNodeKind`, L24）**\n- `tools`：参数已经定好的调用批次，不起子代理\n- `worker`：**继承当前对话**、自己干活、**不画自己的计划**\n- `spawner`：**空上下文**起步，通过本插件循环画计划\n- `forker`：**继承当前对话**并通过本插件循环画计划\n\n辅助常量：`AGENT_NODE_KINDS`/`WORKER_NODE_KINDS`/`NODE_AGENT_KINDS`（L27/35/44，后两者语义与第一个完全重合，属冗余）、`WORKER_MARKER = '[refine-loop worker]'`（L109，用于识别 worker 会话）、`MAX_NODE_BUDGET_MS = 3_600_000`（L90）。\n\n**调用参数怎么处理 —— 两层把关**\n1. **外层 schema**（`tool.ts` L416-484）：`criteria` 必填字符串数组；`nodes` 必填，节点对象 `additionalProperties:false`，`kind` 用 enum 锁死四种，`order` enum 只有 `parallel`/`sequential`，call 的 `arguments` 声明为 json。\n2. **内层 `parsePlanArgs()`（L121-183）** 是最终关口，任一条不合规**整体返回 undefined**，工具随即抛错 `refine_plan needs criteria, and nodes that each have an id and a kind`。规则：criteria 必须是非空字符串数组（去空白）；节点 id 非空且**不重复**；kind 必须四选一；`budgetMs` 只有有限正数才生效（取整并被 1 小时封顶，否则归 0 表示\"未声明\"）；`order` 默认 parallel；`writes` 过滤空白；tools 节点必须有非空 `calls`，每条 call 要有非空 `name`，`arguments` 缺省补 `{}`；agent 节点必须有非空 `task`。**多余字段被静默忽略**（不算错误）。\n3. **分组** `buildGroups()`（L200-208）+ `canRunTogether()`（L217-225）：按声明顺序分组，只有两个节点声明了**同一个 `writes` 路径**才被拆开；没声明 `writes` 的节点\"按其言相信\"，可与任何节点同组。组是计划里唯一的串行来源。\n\n---\n\n## 二、被强制的那条规则\n\n**一句话：一条请求 = 一个 plan。** 一次 turn 的第一个动作就是把整轮工作的形状用 `refine_plan` 交出去（计划跑之前不零散调工具）；计划跑完后这一轮就变成\"判断轮\"——只准写结论（结束循环）或交下一个 plan，**不准再有模型自己发起的工具调用**。\n\n**提示层（告诉模型）**\n- `REFINE_GUIDANCE`（`index.ts` L54-79）挂在系统提示 section `refine-loop:policy`（顺序位 `PLAN_POLICY`）；它的 `text` 是函数，**当 plan 工具不在 scope 时返回空串** —— 这就是\"按会话 off\"能把这段话从提示里抽走的机制。\n- `ROUND_LOOP`（`rounds.ts` L23-39，\"Every round is the same four steps…your first message of the round IS the plan…\"）由 `applyTurnDoctrine`（L187-211）作为**每轮第 1 步前的最后一条 user 消息**注入；worker 会话被排除（按 `Workers` 集合或 `isWorkerConversation` 识别，L198）。\n- `NEXT_ROUND`（L47-48）在计划跑完后由 `onPlanFinished` 排入 followup。\n\n**强制层（工具拦截，规则真正落地的地方）**\n- `applyJudgementGuard`（L379-388）：`ctx.tools.guard` —— 一旦本请求已经交过 plan（`plans.waiting === false`），模型自己发起的任何调用（`isModelCall`：callId === rootCallId）一律被 `JUDGE_ONLY`（L351-353）拒掉；**豁免** `refine_plan` 本身，以及计划内部的嵌套调用（batch.ts 用 plan 的 callId 作 rootCallId 下发）。\n- `applyDelegationRule`（L316-342）：`agent/created` 时 deny掉 `list_agents/send_message/interrupt_agent`（`HIDDEN_TOOLS` L72-76），并重写 `subagent/subagent_fork` 的 description 与 execute ——根级直接委派抛 `DELEGATE_IN_GRAPH`（L57-59），嵌套在 plan 里的照常放行。\n- `applyWorkerRule`（L294-303）：worker 会话调 `refine_plan` 被 `WORKER_NO_PLAN`（L278-280）拒掉；**工具刻意留在表里**（拿掉会改请求头、破坏继承前缀的 prompt cache 命中），改在调用点拦截。worker 的 session id 在 `createAgent` 之前登记（`fork.ts` L465-469），保证 worker 第一个计划调用就被拒。\n\n**触发条件与状态机**\n- `Plans`（L123-154）按请求记\"还欠一个 plan\"：`expect`/`done`/`waiting`；`applyRounds`（L165-177）在出现 user 消息时 `rounds.reset` + `plans.expect`，所以**封锁是按请求计的，新请求自动解封**。\n- `Rounds`（L81-115）计轮次；`onPlanFinished`（`index.ts` L264-273）`plans.done` → `rounds.bump` 超过 `maxRounds`（默认 16）就停，否则排 `NEXT_ROUND` 并让 `tool.ts` L558-560 调 `exec.concludeTurn()` 结束本轮、开下一轮。\n\n**审查中值得指出的两处缺口（只读发现）**\n1. **\"第一刀必须是 plan\"只是提示层**：在 plan 交出之前 `plans.waiting` 为真，guard 直接放行任意工具调用，模型仍可先零散调工具再交 plan。\n2. **`off` 没有停掉教条和 guard**：`policy.ts` 的 `turnOff` 只做 `tools.restrict({ deny: [PLAN_TOOL] })`（L68-74），而 `applyTurnDoctrine` 与 `applyJudgementGuard` **都不查 `SessionPolicy`** —— 关掉后模型每轮开头仍收到\"用 refine_plan 交计划\"的教条（而工具已不在表里），与命令回执\"the rule that makes a turn one plan is not enforced\"不符。\n\n---\n\n## 三、`src/tool.ts` —— 计划怎么跑起来\n\n**入口**：整个插件只暴露一个工具 `PLAN_TOOL"
 }
