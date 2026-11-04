@@ -1,0 +1,50 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 114436,
+  "timedOut": false,
+  "sessionId": "session-7f4a65aa-72c2-47e9-8c04-0e1f817fe85a",
+  "stderr": "",
+  "steps": 7,
+  "toolCalls": 10,
+  "tools": [
+    "pwsh",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "refine_plan",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 48686,
+    "outputTokens": 8600,
+    "cacheReadTokens": 242432,
+    "totalTokens": 299718
+  },
+  "formation": {
+    "agents": 4,
+    "input": 233672,
+    "output": 31536,
+    "cacheRead": 1901568,
+    "total": 2166776,
+    "steps": 42
+  },
+  "mainPrompt": 60675,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 18224,
+  "thinkingPreview": "The repo has src/plan.ts, src/tool.ts, src/policy.ts, etc. The three parts to review:\n1. src/plan.ts — plan data structure, node kinds, how call arguments are handled\n2. The forced rule — probably in src/policy.ts — one layer rule (no nested plans), how it's implemented, trigger conditions\n3. src/tool.ts — how the plan is executed, what restrictions subagents get\n\nLet me read the files. Let me read src/plan.ts, src/tool.ts, src/policy.ts, README.md, and index.ts.\n\nLet me design a plan: I can delegate to workers in parallel for each of the three parts. But files might be large. Let me first read them myself to get grounding, then delegate. Actually, the instructions say to use refine_plan with nodes. Three independent reviews → three worker nodes, each doing the review. But I need the conclusion quality. Let me first read the core files myself (they're likely not huge), then delegate deep",
+  "finalText": "三个审查已完成。以下是结论。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**结构**（`plan.ts:63-92`）：三层。\n\n```\nPlanArgs  = { criteria: string[]; nodes: PlanNode[] }\nPlanNode  = { id, kind, calls: PlanToolCall[], task, order, writes }\nPlanToolCall = { name: string; arguments: unknown }\n```\n\n`criteria` 是「判定这一轮成没成的可观测判据」；`nodes` 是这一轮的活。\n\n**四种节点**（`plan.ts:24`）：\n\n| kind | 含义 | 跑在哪 |\n|---|---|---|\n| `tools` | 参数已写死的一批调用 | 当前 agent，0 次额外模型调用 |\n| `worker` | 继承本对话，自己干活，**不画图** | 插件自建 fork |\n| `spawner` | 空上下文起手，自己画图 | harness `subagent` |\n| `forker` | 继承本对话，自己画图 | 插件自建 fork |\n\n`AGENT_NODE_KINDS = [worker, spawner, forker]`（`plan.ts:27`），`WORKER_NODE_KINDS = ['worker']`（`plan.ts:35`）。**只有一层**：没有 `after`、没有依赖（`plan.ts:15-18`）；要顺序就把活塞进一个节点（`order: 'parallel' | 'sequential'`，默认 parallel，`plan.ts:60,141`）。\n\n**调用参数的处理**：\n\n- **解析期几乎不校验参数**。`arguments` 的类型是 `unknown`，`parsePlanArgs` 只查形状——`name` 必须是非空字符串，`arguments` 原样透传，只有 `undefined` 才补成 `{}`（`plan.ts:148-159`）。参数内容的 schema 校验发生在工具注册表执行那一刻（`tool.ts:220-234` → `batch.ts:253-260`）。\n- 参数还有第二个用途：决定并发。`mayRunTogether` 会去读 `args.command` 判断 shell 是否只读（`batch.ts:342`、`concurrency.ts`），判断不了就排队。\n- **运行期失败即修**：同批其他调用不受影响，最多 1 次原样 + 2 次修复（`MAX_REPAIRS = 2`，`batch.ts:216,248-249`），修复走**本会话自己的模型和线路**（`index.ts:342-364`），只回一个 JSON `{\"name\",\"arguments\"}`，解析严格，不合规则按失败上报（`repair.ts:139-158`）。\n- `writes` 是节点自己声明的写集：写集重叠的两个节点**不并行**（`plan.ts:190-215`）；没声明的节点插件无从得知，一概按「不写文件」信任。\n\n---\n\n## 2. 插件强制的那条规则\n\n**规则**：**一个回合 = 一张图。图跑完之后，这个回合只剩「判断」——写结论，或者交下一张图；直接的工具调用一律被拒。**\n\n**实现**：一个全局工具守卫 `applyJudgementGuard`（`rounds.ts:375-384`，注册于 `index.ts:297`）。状态由 `Plans` 跟踪器持有：新用户消息时 `expect()`（`rounds.ts:161-173`），图跑完时 `done()`（`index.ts:278-287`）。\n\n**触发条件**（四条同时成立才拒）：有 agent（`rounds.ts:377`）→ 是模型自己发起的调用（`callId === rootCallId`，`rounds.ts:359-364`）→ 工具名不是 `refine_plan`（`rounds.ts:380`）→ 本次请求已经交过图（`plans.waiting() === false`，`rounds.ts:381`）。命中就返回 `JUDGE_ONLY` 文本（`rounds.ts:347-349`）。\n\n**故意不触发的地方**：第一次交图之前（设计阶段，工具调用合法——教条明确允许）；图内部发出的嵌套调用（`callId ≠ rootCallId`）；`refine_plan` 自己；无 agent 的调用；插件整体关闭时（`index.ts:212`）。\n\n**注意**：**「必须交图」不在强制之列**。现在唯一要模型交图的是每轮第 1 步注入的那条软教条（`rounds.ts:23-35,183-206`），`src/` 里没有任何 `agent/turn-stopping` 拉回规则——模型完全可以不交图把活干完。同一家族的其余硬机制是：worker 调 `refine_plan` 被拒但工具留在表里（`rounds.ts:290-299`）、直调 `subagent`/`subagent_fork` 被拒除非嵌套在图内（`rounds.ts:312-338`）、后台子代理管理工具整块摘掉（`rounds.ts:68-72,314`）、计划报告永不截断（`index.ts:320-325`）。\n\n**一处真缺口**：`/dsh-refine-loop off` 把计划工具从作用域里摘掉、把引导从系统提示词里摘掉（`policy.ts:68-87`、`index.ts:243`），**却没有撤掉判断守卫**——守卫是全局的、只按 `session.id` 认状态。同一请求里已经跑过图之后再关插件，会继续吃到 `JUDGE_ONLY` 拒答，直到下一条用户消息重新武装设计阶段（`rounds.ts:165-170`）。常见情形（在交图之前就关）表现正常，因为那时守卫本来就沉默。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来，子代理受什么限制\n\n**跑法**：`execute`（`tool.ts:582-631`）解析 → 查节点数上限（`maxBatchSize`，默认 8）→ `runPlan`（`tool.ts:357-398`）。`runPlan` 先用 `buildGroups` 按写集把节点切成一组组：组与组之间顺序跑，组内 `Promise.all` —— 所以是「一层并行」加上「写冲突才拆组」。所有结果一次收齐，按计划声明顺序回填节点结果（`{id, kind, ok, output, error}`），再由 `renderPlan`（`tool.ts:406-423`）渲染成模型读到的报告；报告用「带 value 的决定」交回去，harness 的 spill 策略因此跳过它，永不截断（`index.ts:320-325`）。\n\n**回合的续接**：图跑完后 `onPlanFinished`（`index.ts:278-287`）给回合计数加一，若还在 `maxRounds`（默认 16）预算内，就挂一条 `NEXT_ROUND` 跟进消息并让工具 `exec.concludeTurn()` 结束本回合，下一回合由 harness 开启；预算用尽则回合自然结束。预算有两层：整图 `maxBatchTimeoutMs`（默认 900000）、单个子代理节点 `agentNodeTimeoutMs`（默认 540000，超时只判该节点失败、其余照常返回，`tool.ts:136-155`）。\n\n**派出去的子代理受七重限制**：\n\n1. **启动路径只有两条**：`worker`/`forker` **不走** harness 委派工具，由插件自己 `spawnForkedChild` 起子会话，seed 是父会话「此刻」的全部事件（含本轮那张 `refine_plan` 调用；未回结果的调用补合成错误结果，补 `step/end`、`turn/end{forked}`，`fork.ts:180-241`）；只有 `spawner` 走 harness 的 `subagent`（`tool.ts:290-316`）。`plan.ts:46-50` 的 `NODE_AGENT_TOOL` 映射只是插件 fork 不可用时的退路（`tool.ts:605-610`）。\n2. **深度上限**：`delegationDepth >= maxAgentDepth`（默认 3）该节点直接判失败「已经是被委派的子会话」，子会话深度 = 父 + 1（`tool.ts:245-255`、`fork.ts:310`）。\n3. **单节点预算**：超时中止该节点，不牵连其他节点。\n4. **同步前台**：`run_in_background: false`（`tool.ts:308`）、`await child.whenIdle()`（`fork.ts:341`）。因此不存在可管理的后台子代理，`list_agents`/`send_message`/`interrupt_agent` 被整个从模型工具表移除。\n5. **交付契约**（`buildAgentPrompt`，`tool.ts:164-187`）：判"
+}

@@ -1,0 +1,47 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 68947,
+  "timedOut": false,
+  "sessionId": "session-b92d024a-a215-4cbd-804f-3b060506ab54",
+  "stderr": "",
+  "steps": 6,
+  "toolCalls": 7,
+  "tools": [
+    "pwsh",
+    "glob",
+    "read",
+    "read",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 72088,
+    "outputTokens": 9529,
+    "cacheReadTokens": 204032,
+    "totalTokens": 285649
+  },
+  "formation": {
+    "agents": 1,
+    "input": 72088,
+    "output": 9529,
+    "cacheRead": 204032,
+    "total": 285649,
+    "steps": 6
+  },
+  "mainPrompt": 81847,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 13818,
+  "thinkingPreview": "Let me read the key source files. The three parts:\n1. src/plan.ts — plan data structure, node kinds, tool call argument handling.\n2. The plugin's enforced rule — likely in src/policy.ts — how it's implemented, trigger conditions.\n3. src/tool.ts — how the plan is run, what restrictions the dispatched subagents have.\n\nLet me read plan.ts, tool.ts, policy.ts, and also index.ts for the rule enforcement.\n\nLet me read them in parallel.\nNow I need to find the enforced rule. Let me look at src/policy.ts, src/index.ts, src/rounds.ts, src/fork.ts.\n\nThe plugin is \"refine-loop\" — it forces the rule that every turn must hand over a plan (one layer). Let me read policy.ts and index.ts.\n\nLet me use refine_plan for parallel reads. Actually I can just read them directly. But the system prompt says every round must go through refine_plan. Let me design a plan with parallel reads.\n\nActually let me be effic",
+  "finalText": "已读完 `dsh-refine-loop` 的 `src/` 全部相关文件（plan / tool / policy / rounds / fork / batch / concurrency / index）、`README.md` 与 `verify/` 规格。**未修改任何文件。**\n\n---\n\n# 1. `src/plan.ts` —— 计划的数据结构、节点种类、调用参数\n\n## 数据结构（4 个类型）\n\n```ts\nPlanArgs   = { criteria: string[], nodes: PlanNode[] }\nPlanNode   = { id, kind, calls: PlanToolCall[], task, order, writes: string[] }\nPlanToolCall = { name: string, arguments: unknown }\nPlanNodeKind   = 'tools' | 'worker' | 'spawner' | 'forker'\nPlanNodeOrder  = 'parallel' | 'sequential'\n```\n\n一句话形状：**一张图 = 判据 + 节点；节点只有一层，节点之间没有依赖边。**\n\n## 四种节点\n\n| kind | 上下文 | 是否自己画图 | 语义 |\n|---|---|---|---|\n| `tools` | 就是本 agent | — | 一批**参数已经写死**的调用，额外模型调用 0 次 |\n| `worker` | 继承本对话（**含本轮 plan 与已读到的内容**） | 否 | 边想边做的子代理，交结论 |\n| `spawner` | 空（从零开始） | 是 | 按同一套循环干活的子代理 |\n| `forker` | 继承本对话（含本轮 plan） | 是 | 继承了上下文、也画图的子代理 |\n\n关键设计：`NODE_AGENT_TOOL` 把「节点语义」和「harness 工具名」**故意解耦** —— `worker→subagent_fork`、`spawner→subagent`、`forker→subagent_fork`。三种子代理共用两个工具；`worker` 与 `forker` 的唯一区别是 **`worker` 调 `refine_plan` 会被拒绝**（`WORKER_NODE_KINDS = ['worker']`）。\n\n## 调用参数（`arguments`）的处理\n\n这是全文件最值得注意的一处**不对称**：\n\n- **schema 层**：`arguments` 声明为 `type: 'json'`、`required: true` —— 只保证「是个 JSON 值」。\n- **解析层**（`parsePlanArgs`）：`arguments: unknown`，**完全不校验形状**。只有 `undefined` 被规整为 `{}`；`null`、字符串、数字等**原样透传**。真正对目标工具参数的校验发生在**执行时**由目标工具自己的 schema 负责。\n- **兜底**：执行失败时由 `repairFailedCall`（index.ts）拿**本对话自己的模型**问「这个调用本该是什么」，最多重试 `MAX_REPAIRS = 2` 次；只有失败的那一个调用被重问，其余节点不受影响。\n\n`parsePlanArgs` 的拒绝清单（任一不满足即返回 `undefined` → 工具抛 `refine_plan needs criteria, and nodes that each have an id and a kind`）：`criteria` 非数组 / 去空去白后为空；`nodes` 非数组；节点非对象；`id` 非空串或**重复**；`kind` 不在四种之内；`tools` 节点 `calls` 为空或缺失；agent 节点 `task` 为空。\n\n两处**静默**归一化值得注意：`order` 只有 `'sequential'` 被识别，**其它任何值（包括拼错的）都悄悄变成 `'parallel'`**；`writes` 非数组则变成 `[]`（不报错）。\n\n**空图是合法的**：`{criteria:['x'], nodes:[]}` 通过校验 —— 语义是「这一轮没有要跑的东西，交结论结束」。\n\n**分组**（`buildGroups`）：按声明顺序贪心分组，两个节点 `writes` 有交集就**不并行**；声明顺序即执行顺序。**声明为空 `writes` 的节点一律被「照单全收」**（插件无从知道某个调用会不会写盘），它永远并进第一个组 —— 这一点在 `verify/plan.spec.ts:148` 被固定为契约。\n\n---\n\n# 2. 被强制的那条规则 —— 实现与触发条件\n\n## 规则本身\n\nREADME 标题是「插件强制了什么（这是它区别于「建议」的地方）」，实现放在**扩展点**上而不是提示词里。核心那条是：\n\n> **图跑完只能判断**：一张图跑完之后，模型自己发起的工具调用一律被拒绝 —— 这一步只能写结论，或者交下一张图。\n\n配套的另外几条硬机制：\n\n| 强制 | 实现位置 | 手法 |\n|---|---|---|\n| 每轮开始就想图 | `applyTurnDoctrine`（rounds.ts） | `agent/pre-step` 里把 `ROUND_LOOP` 作为**最后一条消息**塞进去（注册顺序在 `applyRounds` 之前，因为 pre-step 的 `next()` 跑的是后注册的 hook） |\n| **图跑完只能判断** | `applyJudgementGuard`（rounds.ts） | `ctx.tools.guard()` 返回 `JUDGE_ONLY` |\n| 派发只能走图 | `applyDelegationRule`（rounds.ts） | 在 agent 自己的 scope 里重新注册 `subagent`/`subagent_fork`，`execute` 里 `if (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)` |\n| 计划报告永远不截断 | `applyReportRetention`（index.ts） | `tools/post-execute` 里对 `refine_plan` 返回 `{kind:'accept', value}` —— 带 `value` 的决定会跳过 harness 的 spill 截断策略，避免中间被挖空 |\n| 后台子代理管理工具不给看 | `applyDelegationRule` | `agent.ctx.tools.restrict({ deny: HIDDEN_TOOLS })`，整个移除 `list_agents`/`send_message`/`interrupt_agent`（是移除而非拒绝调用） |\n| worker 不画图 | `applyWorkerRule`（rounds.ts） | `ctx.tools.guard()` 返回 `WORKER_NO_PLAN` |\n| 插件整体可关 | `policy.ts` | `/dsh-refine-loop off` → `ctx.tools.restrict({deny:[refine_plan]})`；工具离开工具表 → 系统提示词里那段 guidance（条件于工具在不在）也一起消失 → 规则停止生效 |\n\n## 触发条件（精确）\n\n**`applyJudgementGuard`（核心那条）** 同时满足才拒绝：\n\n1. `execution.agent !== undefined`\n2. `isModelCall(execution)` —— **`callId === rootCallId`**，即模型自己发起的调用\n3. `execution.name !== 'refine_plan'`\n4. **`!plans.waiting(agent.session.id)`** —— 本次请求已经交过图\n\n第 4 条的状态机在 `Plans` 类里：`applyRounds` 在 `agent/pre-step` 看到**用户消息**时 `plans.expect(sessionId)`（新请求重新开始期待一张图）；`onPlanFinished` 在计划返回时 `plans.done(sessionId)`。\n\n第 2 条是整个设计的关键：**计划内部发起的调用是嵌套的，`callId ≠ rootCallId`，因此全部放行** —— 这正是 `worker`/`spawner`/`forker` 节点还能跑通的原因。\n\n**`applyDelegationRule`**：`callId === rootCallId` 就抛错，对每个 agent（含 worker）都生效；计划内部的嵌套调用不受影响。\n\n**`applyWorkerRule`**：agent 属于 `Workers` 集合（`onWorker → workers.mark(sessionId)`，在 `fork.ts` 的 `onCreated` 回调里记录）**或**消息里带 `[refine-loop worker]`"
+}

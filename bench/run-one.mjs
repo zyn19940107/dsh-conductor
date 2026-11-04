@@ -23,8 +23,13 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureBuild } from './build-check.mjs'
 import { TASKS } from './task.mjs'
 import { readSessions, subtree, totals } from './sessions.mjs'
+
+// Never measure a bundle that does not match the sources: a stale build once
+// made every run of a new version measure the old one.
+ensureBuild()
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const EXE = 'C:/Users/Administrator/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe'

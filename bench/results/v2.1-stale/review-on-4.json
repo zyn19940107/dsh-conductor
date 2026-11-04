@@ -1,0 +1,60 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 156263,
+  "timedOut": false,
+  "sessionId": "session-d29e66c9-b21d-47a0-a6a9-a5d6990c9625",
+  "stderr": "",
+  "steps": 12,
+  "toolCalls": 18,
+  "tools": [
+    "glob",
+    "glob",
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "refine_plan",
+    "grep",
+    "grep",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 56544,
+    "outputTokens": 11956,
+    "cacheReadTokens": 459520,
+    "totalTokens": 528020
+  },
+  "formation": {
+    "agents": 5,
+    "input": 267223,
+    "output": 45322,
+    "cacheRead": 1709824,
+    "total": 2022369,
+    "steps": 51
+  },
+  "mainPrompt": 68371,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "说清了触发条件(缺:触发)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 25239,
+  "thinkingPreview": "The glob is polluted by node_modules. Let me use PowerShell to list source files, or glob with more specific patterns.\nLet me read the key files. First plan.ts and tool.ts, and the other files for the rule (policy.ts likely holds the forced rule).\n\nLet me read all source files.\nNow I need to find the \"forced rule\" — likely in policy.ts. Let me read policy.ts, rounds.ts, index.ts, fork.ts, concurrency.ts, batch.ts.\n\nThe user asks three separate reviews:\n1. src/plan.ts — data structure, node kinds, how call arguments are handled.\n2. The plugin's forced rule — what is it, how is it implemented in the current code, trigger conditions.\n3. src/tool.ts — how the plan is run, what limits apply to dispatched subagents.\n\nThen summarize.\n\nThe \"forced rule\" is likely in policy.ts — probably the rule \"every turn must hand over a plan before doing work\" i.e. \"the turn must draw a plan\" doctrine. Let m",
+  "finalText": "三个部分都审完了（全程只读，未修改 `dsh-refine-loop` 下任何文件）。README:108-111 关于「闸门已删」的说明、`bench/results/`（161 个样本文件，`.gitignore` 只排除 `*.tmp`）以及 `appliesTo` 死代码都已交叉核实。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构\n\n**结构**：`PlanArgs = { criteria: string[]; nodes: PlanNode[] }`（plan.ts:87-92）；`PlanNode = { id, kind, calls, task, order, writes }`（plan.ts:71-84）；`PlanToolCall = { name: string; arguments: unknown }`（plan.ts:63-68）。关键点：**它不是判别联合**——每个节点都带全部六个字段，靠解析器把无关字段清空：tools 节点 `task: ''`（plan.ts:160），agent 节点 `calls: []`（plan.ts:166）。`criteria` 是「可观测的成败判据」，`nodes` 是工作本身。\n\n**四种节点**（plan.ts:24，语义见 plan.ts:8-13）：`tools`（参数已写死的调用）／`worker`（继承本对话、自己干活、绝不画图）／`spawner`（空起、自己画图）／`forker`（继承本对话、自己画图）。命名描述的是**子代理做什么**，不是用哪个工具启动——`worker` 和 `forker` 共用 `subagent_fork`，`spawner` 用 `subagent`（plan.ts:46-50、tool.ts:46-50）。只有一层，没有 `after`、没有轮内依赖（plan.ts:15-18）。\n\n**调用参数怎么处理**：`arguments` 类型是 `unknown`，**从不校验**，原样透传给工具注册表；唯一的规范化是 `arguments === undefined ? {} : arguments`（plan.ts:157-158）——`null` 仍是 `null`，字符串仍是字符串。`name` 必须是非空字符串并被 trim（plan.ts:155-156）。\n\n决定性的性质是**全有全无的拒绝**：`parsePlanArgs` 对任何缺陷都返回 `undefined`，整个计划作废、工具抛错、一个节点都不跑（plan.ts:115-173 → tool.ts:583-586）。被拒的包括：criteria/nodes 非数组（119）、去空后没有有效 criteria（120-123）、节点非对象（128）、id 空或重复（132、138-139）、kind 不在四种之内（133-136）、tools 节点 calls 空或非数组（150）、call 的 name 空（156）、agent 节点 task 空（165）。反过来有两处是**静默强转而非拒绝**：`order` 不是 `'sequential'` 就变 `'parallel'`（141），`writes` 不是数组就变 `[]`（142-146）——一个写错的 `order` 会悄悄并发，一个漏写的 `writes` 会悄悄放任写冲突。另外**空计划是合法的**（`nodes: []` 通过，plan.ts:168-170），但 criteria 永远不能空。`buildGroups`（190-198）按声明顺序贪心分组，唯一拆开两个节点的理由是它们声明了同一个 `writes` 路径（207-214）；没声明 `writes` 的节点「按它说的信」（180-182）。\n\n## 二、插件强制的规则\n\n**先纠正一个容易踩的预期：插件并不强制「必须交图」。** 那条闸门在 v1.0 之前的 `5b6b997` 里被刻意删掉了（README:108-111），现在一轮不交图不会被拉回来，模型可以完全不交图把活干完。代码印证：`applyJudgementGuard` 只在**图已经跑完之后**才拦，交图之前（`plans.waiting` 为真）直接放行，设计阶段调工具是明确允许的（README:106）。\n\n真正被强制的是一组机制，分两类：\n\n**硬拦截（机械拒绝）**\n- **图跑完只能判断**：`applyJudgementGuard`（rounds.ts:375-383）注册为 `ctx.tools.guard`，条件是「模型自己发起的调用」（`isModelCall`：`callId === rootCallId`，rounds.ts:359-364）**且**工具名不是 `refine_plan` **且** `plans.waiting(sessionId)` 为 false → 返回 `JUDGE_ONLY` 拒掉。`plans.expect` 在每条真人 user 消息时置位（rounds.ts:161-172），`plans.done` 在计划跑完后清除（index.ts:280）。\n- **派发只能走图**：直调 `subagent`/`subagent_fork` 被包装器抛 `DELEGATE_IN_GRAPH`（rounds.ts:330-333），指向图里的节点；计划内部的嵌套调用（`callId !== rootCallId`）放行。\n- **worker 不得画图**：`applyWorkerRule`（rounds.ts:290-299）用 `WORKER_NO_PLAN` 挡回，但**工具仍留在表里**（摘掉会改请求头、让继承前缀的 KV cache 失效，fork.ts:325-328）。\n\n**提示词/工具表层面**\n- 每轮第 1 步前把「四步循环」作为**最后一条消息**注入（`applyTurnDoctrine`，rounds.ts:183-207）；直调派发被拒时给的理由同样指向图。\n- 计划报告走 `value` 返回以绕开 harness 的 spill 截断（`applyReportRetention`，index.ts:320-325）。\n- `list_agents`/`send_message`/`interrupt_agent` 整个从模型工具表移除（rounds.ts:313-314、68-72）。\n\n**豁免**：worker 对话（由 `Workers` 集合或首条消息里的 `[refine-loop worker]` 标记识别，rounds.ts:194、253-265）；计划内部的嵌套调用；每对话开关 `/dsh-refine-loop off`（policy.ts:45-88，靠 `agent.ctx.tools.restrict({ deny: ['refine_plan'] })`，policy.ts:72，副作用是系统提示词里的 guidance 随之渲染为空，index.ts:243）。\n\n**两处实打实的缺陷（已核实）**：`SessionPolicy.appliesTo()`（policy.ts:55-57）是**死代码**——全 `src` 树只有定义、没有调用点，规则层从不读 off 状态。因此 `off` 只是「把工具藏起来」：它被动地让判定拦截失效（`plans.done` 永不执行 → `waiting` 恒为 true），却**没有撤掉教条注入和委派拒绝**——关掉的对话每轮第 1 步照样收到 `ROUND_LOOP`，直调派发照样被拒，而且拒绝理由让模型去用一个它已经没有的 `refine_plan`。\n\n## 三、`src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n**怎么跑**：唯一入口 `refine_plan`（tool.ts:47、473-632）。`execute` 先 `parsePlanArgs` 校验，再查节点上限 `maxBatchSize`（默认 8，index.ts:99；tool.ts:587-591）。`buildGroups` 分组后**组间串行、组内 `Promise.all` 并行**（tool.ts:374-389）；tools 节点交给 `runBatch`（batch.ts:303）——`order:\"sequential\"` 严格逐个跑（325-330），默认按工具自身并发安全性切 wave（332-365），插件额外放行 `glob`/`grep`、`ops_bash` 按只读命令词法判定（concurrency.ts:195-233）。call id 由模块级计数器生成（tool.ts:90-100、batch.ts:153-163），计划自身的 callId 作为 `rootCallId` 往下传（tool.ts:617），`isModelCall` 靠这一对区分「模型自己调的」和「计划里嵌套的」。单条调用失败可被**修复**最多 2 次，用会话自己那条模型线路问「这次调用本来该是什么」（batch.ts:216、248-279；index.ts:288、342-364）。节点级 `runWithDeadline` 超时后 abort、该节点记为失败、**计划继续跑其余节点**（tool.ts:136-155、331-339）。过长的输出先压缩再进报告（index.ts:2"
+}
