@@ -22,7 +22,7 @@ const GROUPS = [
   ['off', RESULTS, 'off'],
   ['v1.0', join(RESULTS, 'before-one-layer'), 'on'],
   ['v2.0', join(RESULTS, 'v2.0'), 'on'],
-  ['v2.3', RESULTS, 'on'],
+  ['v2.4', RESULTS, 'on'],
 ]
 
 /**
@@ -166,7 +166,7 @@ for (const [label, dir, arm] of GROUPS) {
 console.log('场景            版本   n   墙钟   归一    token   步数  编队    正确    报告截断')
 for (const [task, versions] of table) {
   let printed = false
-  for (const label of ['off', 'v1.0', 'v2.0', 'v2.3']) {
+  for (const label of ['off', 'v1.0', 'v2.0', 'v2.4']) {
     const runs = versions.get(label)
     if (runs === undefined) continue
     printed = true
