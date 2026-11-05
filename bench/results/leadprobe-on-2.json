@@ -1,0 +1,41 @@
+{
+  "task": "leadprobe",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 99023,
+  "timedOut": false,
+  "sessionId": "session-8e2855eb-62ab-4021-b4af-9d09376c9b84",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 2150,
+    "outputTokens": 3059,
+    "cacheReadTokens": 24502,
+    "totalTokens": 29711
+  },
+  "formation": {
+    "agents": 5,
+    "input": 81536,
+    "output": 54099,
+    "cacheRead": 631752,
+    "total": 767387,
+    "steps": 31
+  },
+  "mainPrompt": 15239,
+  "correctness": {
+    "passed": 2,
+    "total": 2,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 3416,
+  "thinkingPreview": "The task: delegate the whole thing to one owner (leader) who internally splits the work. So I should use refine_plan with a single node of kind \"forker\" (inherits conversation) that dispatches its own sub-agents.\n\nThe workspace is D:/code/vibe/dsh-refine-loop (read-only). Let me first check what's there? The instructions say the plan's first message IS the plan — I hand it over before calling anything else. But I need to give the leader enough context. The leader inherits this conversation, so it knows the workspace path and the requirement.\n\nActually, should I read the files myself first to verify? No — the requirement says the same owner does it, and I shouldn't do the work myself. The forker will do the reading.\n\nLet me design the plan:\n\nCriteria:\n- Three modules reviewed in parallel, mutually independent, no cross-reference.\n- Each module yields: responsibilities, one most easily mis",
+  "finalText": "## 机制验证结果：通过\n\n整件事由**一个负责人**（`review-lead`，forker）整体承接，由他内部一次性派出三个 worker 并行审查——同一轮同时开始、互相隔离，各自只拿到一个模块路径 + 统一输出格式，互不参考；三份结论回来后由**他本人**写成汇总。没有出现三个互不相干的顶层负责人，我也没有代做其中任何一份。全程只读，未改动 `dsh-refine-loop` 任何文件。\n\n---\n\n### 三份独立审查\n\n**1. `src/plan.ts`**\n- **职责**：`refine_plan` 的数据模型与参数校验。`parsePlanArgs`(121-183) 校验归一工具参数（criteria/nodes 非空、id 唯一、kind 合法、tools 节点须有 calls、agent 节点须有 task，非法整份拒绝）；`buildGroups`(200-208) + `canRunTogether`(217-225) 按节点自报的 `writes` 分组。零 import、无副作用的纯模块。\n- **最易误用点**：`src/plan.ts:221` —— 写冲突检测是**字符串全等**（`node.writes.includes(path)`），而路径在 152-156 只做了 `trim`，没有分隔符/大小写/相对绝对归一。同一文件写成 `src/x.ts` 与 `src\\x.ts`，冲突检测即静默失效 → 两节点同组并发 → 后写覆盖先写。配套陷阱在 `:218`：未声明 `writes` 的节点一律放行。\n- **结论**：三个模块里最干净的，但并发安全的唯一保障建立在「调用方自报的字符串相等」上；另有容错不均（`:140-142` 非法 kind 即拒，`:151` 非法 order 静默按 parallel，`:148-150` 非法 budget 静默按未声明）。\n\n**2. `src/batch.ts`**\n- **职责**：`parseBatchArgs`(95) 解析一批调用；`runBatch`(313) 按「能否与邻居同跑」切成波次(341-358)，可并发波次走 `Promise.all`，`order:'sequential'` 时严格按书写顺序(334)；`runOne`(249) 走 registry pipeline，失败可注入 `RepairCall` 让模型改参数重试（`MAX_REPAIRS=2`, 229）；`renderBatch`(394) 把整批结果压成文本。\n- **最易误用点**：`src/batch.ts:282` —— 失败分支直接返回**未截断**的 `output`，没过 `capOutput`（成功分支 `:275` 才截）。调用方看到 `MAX_CALL_OUTPUT_CHARS = 10000`(:204) 自然以为每条结果都受 1 万字符约束，但这个假设只在成功时成立；而失败恰恰最容易带巨型输出（堆栈、整文件 dump），会被原样灌进唯一那条工具结果。\n- **结论**：边界清楚、注释充分，质量较高。另有两处：`:114` 解析结果从不填 `order`，故 `BatchArgs.order`(:51) 恒为 undefined，`:334` 的串行分支对解析器产物不可达；修复换工具后(:288) 回报的仍是原始 `call.name`，与 `BatchItemResult.name` 文档所称「实际调用的工具」(:65) 不符，A 工具的成败可能被记在 B 工具名下。\n\n**3. `src/concurrency.ts`**\n- **职责**：`mayRunTogether`(222-234) 判定一次调用能否与邻居并行——工具自报可并行则以其为准，只有「工具什么都没说」时插件 override 才生效(228-230)；`isReadOnlyCommand`(138-156) 用自写 lexer 拆词，拒绝一切伪装成多条命令的形式（重定向/串联/管道/命令替换/换行, `:62`），再要求可执行名在 `READ_ONLY_COMMANDS`(31) 白名单且不含 `UNSAFE_FLAGS`(44) 里「把读者变写者」的开关。纯分类器，不做调度也不做沙盒。\n- **最易误用点**：`src/concurrency.ts:35` —— 白名单里有 `env`。它表面只打印环境变量，实际是**程序启动器**（`env VAR=1 PROGRAM` 会执行 PROGRAM），而 `UNSAFE_FLAGS` 没有 `env` 项，于是走到 `:149` 的「无已知危险开关即放行」提前返回 true → `env rm -rf some/dir` 被判成只读。同族问题：`date`（`date -s` 改系统时钟）、`:146` 只取 basename 匹配（`/tmp/x/ls` 被当成可信 `ls`）。\n- **结论**：模块本身扎实——只分类不调度、失败方向保守、lexer 对「一条命令伪装成多条」覆盖较全。风险集中在白名单维护：把「只打印的程序」与「能启动别的程序」混在一张表里，而「未登记危险开关 ⇒ 视为安全」的兜底把名单错误放大成静默的错误保证。\n\n---\n\n### 负责人汇总（他本人写的）\n\n三个模块合起来看，这套插件的并发控制是「三层各自把关」：`plan.ts` 按调用方自报的 `writes` 分组、`batch.ts` 按工具自报的 `executionMode` 切波次、`concurrency.ts` 兜底判定 shell 命令是否只读；三层都偏保守，但保守的落点并不在真正危险的地方——最值得注意的三点分别是：`plan.ts:221` 的写冲突检测建立在未经归一化的路径字符串全等上，路径写法不同即静默失效并让两个节点并发写同一文件；`batch.ts:282` 的失败分支绕过输出上限，而失败恰是最容易产出巨型文本的场合；`concurrency.ts:35` 把 `env` 放进只读白名单，配合 `:149` 的「无危险开关即放行」兜底，`env rm -rf ...` 会被静默判为只读——三处失败模式都是**静默的**，都不抛错、不告警，只会安静地把不安全的东西放进并行批次。"
+}

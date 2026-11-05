@@ -127,6 +127,35 @@ export const BUDGET_PROBE = {
  * inside a child, so this task hands a forker a job that must be done with
  * refine_plan and checks that the child actually drew one.
  */
+/**
+ * A probe for the nested-fan-out case.
+ *
+ * A "worker" cannot dispatch anyone, so a job that must be owned by one person
+ * and split inside that person needs a leader node ("forker" or "spawner"). The
+ * task says the ownership and the parallelism; it says nothing about which kind
+ * to use, so what the model picks is the measurement.
+ */
+export const LEAD_PROBE = {
+  text: [
+    '这是一个机制验证任务：把一件事整包交给一个负责人，由他内部再分工。',
+    '',
+    '工作区：D:/code/vibe/dsh-refine-loop（只读，不要改文件）',
+    '',
+    '把下面这件事交给**同一个负责人**整体负责：',
+    '  对 3 个互不相干的模块做并行审查：src/plan.ts、src/batch.ts、src/concurrency.ts',
+    '  要求三份审查同时进行、互相独立、互不参考；',
+    '  每个模块给出：它的职责、一个最容易被误用的地方（带行号）、结论。',
+    '  最后由他把三份结论汇总成一段话交给我。',
+    '',
+    '注意：这件事必须由**同一个负责人**整体负责 —— 你不能直接派三个互不相干的人，',
+    '也不能自己一个个做。他内部再分几个、怎么分，由他自己决定。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '三个模块都提到了', needles: ['plan.ts', 'batch.ts', 'concurrency.ts'] },
+    { what: '有行号', any: [':1', ':2', ':3', ':4', ':5', ':6', ':7', ':8', ':9', 'L1', 'L2', 'L3'] },
+  ]),
+}
+
 export const FORKER_PROBE = {
   text: [
     '这是一个机制验证任务，只做一件事：验证 forker 节点里的子代理能不能自己画图。',
@@ -164,7 +193,7 @@ export const GOAL_PROBE = {
   ]),
 }
 
-export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE,
+export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE, leadprobe: LEAD_PROBE,
   survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
