@@ -407,12 +407,14 @@ export function applyPlanTool(
       + 'plan of its own), "spawner" (a child that starts empty and plans through this loop), '
       + '"forker" (a child that starts with this conversation and plans through this loop). '
 
-      + 'Keep it small: a node task is one sentence, one or two criteria decide the round, and a child that '
-      + 'inherits this conversation already sees it, so its task says what to do rather than what the '
-      + 'conversation says. Shape of a plan: {"criteria": ["...", "..."], "nodes": ['
+      + 'A node task says what to do and what finished looks like. A child that inherits this conversation '
+      + 'already sees it, so its task needs no background — but the standard has to be in the task, because '
+      + 'the result comes back and is used as it stands. A spawner starts empty: its task carries the whole '
+      + 'brief — the goal, the background, the constraints, and what finished looks like. Shape of a plan: '
+      + '{"criteria": ["...", "..."], "nodes": ['
       + '{"id": "scan", "kind": "tools", "calls": [{"name": "read", "arguments": {"file_path": "src/plan.ts"}}]}, '
       + '{"id": "plan-review", "kind": "worker", "task": "Review src/plan.ts: its structure, its node kinds, '
-      + 'how it handles arguments."}]}',
+      + 'how it handles arguments. Done when each kind is named and its arguments are traced from the code."}]}',
     parameters: {
       criteria: {
         type: 'array',
@@ -456,7 +458,10 @@ export function applyPlanTool(
             },
             task: {
               type: 'string',
-              description: 'The task of an agent node. For kind "worker", "spawner" and "forker".',
+              description: 'The task of an agent node, for kind "worker", "spawner" and "forker". Say what '
+                + 'to do and what finished looks like. A worker or forker inherits this conversation, so its task '
+                + 'needs no background; a spawner starts empty, so its task carries the whole brief. The result '
+                + 'comes back and is used as it stands.',
             },
             order: {
               type: 'string',

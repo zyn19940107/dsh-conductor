@@ -29,13 +29,12 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'parent still learns something. If you already have what you need, hand over the '
   + 'empty plan and go straight to the conclusion. (2) Hand it over with refine_plan: one layer, every node '
   + 'starts at the same time, every result comes back together. (3) It runs — the nodes together — and every '
-  + 'result comes back. (4) Only then judge: if those results answer the request, write the conclusion, which '
-  + 'ends the loop; if they do not, the next round designs the next plan. There is no dependency between the '
-  + 'nodes of one round: work that needs another node output belongs to the next round, and work that must '
-  + 'happen in order belongs inside one node. "worker" starts with this conversation and does the work itself, '
-  + 'never drawing a plan; "spawner" starts empty and plans; "forker" starts with this conversation and plans.'
-
-  + '"worker" starts with this conversation and does the work itself, never drawing a plan; "spawner" '
+  + 'result comes back. (4) Only then judge the request: if those results answer it, write the conclusion, '
+  + 'which ends the loop; if they do not, the next round designs the next plan. The results are used as they '
+  + 'come back — the standard for a node lives in its task, not in a check after the fact, so a node is '
+  + 'trusted to do what it was told. There is no dependency between the nodes of one round: work that needs '
+  + 'another node output belongs to the next round, and work that must happen in order belongs inside one '
+  + 'node. "worker" starts with this conversation and does the work itself, never drawing a plan; "spawner" '
   + 'starts empty and plans; "forker" starts with this conversation and plans.'
 
 /**
