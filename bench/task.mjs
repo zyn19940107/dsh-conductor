@@ -119,6 +119,31 @@ export const BUDGET_PROBE = {
  * a goal is open. This task asks the model to open one, do the work in the
  * plugin's rounds, and close it — so the two mechanisms are exercised together.
  */
+/**
+ * A probe for the nested-leader path.
+ *
+ * A "forker" is a child that is a leader itself: it inherits the conversation and
+ * draws its own plans. That claim is only true if the plan tool is reachable from
+ * inside a child, so this task hands a forker a job that must be done with
+ * refine_plan and checks that the child actually drew one.
+ */
+export const FORKER_PROBE = {
+  text: [
+    '这是一个机制验证任务，只做一件事：验证 forker 节点里的子代理能不能自己画图。',
+    '',
+    '请交一张图，criteria 写「forker 子代理自己画了一张图并拿到 package.json 的 version」，nodes 原样照抄：',
+    '{"id": "nested-lead", "kind": "forker", "budgetMs": 120000,',
+    ' "task": "你是一个领导。请用 refine_plan 画一张图去查 D:/code/vibe/dsh-refine-loop/package.json 的 version 字段，',
+    '图里用一个 tools 节点调 read 读这个文件。拿到结果后说出版本号，然后直接给结论。"}',
+    '',
+    '等它回来之后告诉我：它的节点输出里有没有提到版本号，它有没有自己画图。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '报出了版本号', any: ['2.4', '2.3'] },
+    { what: '说清了它自己画图', any: ['画图', 'plan', '图'] },
+  ]),
+}
+
 export const GOAL_PROBE = {
   text: [
     '请用 create_goal 建立一个持久目标，目标是：',
@@ -139,7 +164,7 @@ export const GOAL_PROBE = {
   ]),
 }
 
-export const TASKS = { goalprobe: GOAL_PROBE,
+export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE,
   survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**

@@ -55,27 +55,27 @@ export const REFINE_GUIDANCE = [
   'Refined loop:',
   `- ${PLAN_TOOL}: one call that carries the whole shape of the round — the criteria that decide whether it `
   + 'succeeded, and the nodes it is made of. There is one layer: every node starts at the same time and every '
-  + 'result comes back together. How a round runs, and when the plan or the conclusion is due, is said at the '
-  + 'head of every round.',
-  '- A node is one of four kinds: "tools" (calls whose arguments are already decided), "worker" (a child that '
-  + 'starts with this conversation and does the work itself, without drawing a plan of its own), "spawner" (a '
-  + 'child that starts empty and plans through this loop), "forker" (a child that starts with this conversation '
-  + 'and plans through this loop).',
+  + 'result comes back. How a round runs, and when the plan or the conclusion is due, is said at the head of '
+  + 'every round.',
+  '- A node is one of four kinds, and the kind decides what its task has to say: "tools" runs calls whose '
+  + 'arguments are already decided — the cheapest node, no child and no inherited context; "worker" does the '
+  + 'work itself and never plans, so its task says what to do and what finished looks like; "forker" is a '
+  + 'leader itself — it inherits this conversation and draws its own plans, so its task says the goal and the '
+  + 'boundaries, not the steps; "spawner" is that same leader starting empty, so its task carries the whole '
+  + 'background.',
+  '- If you can write out how the work is done, use "tools" or "worker"; if the work is too big to write out '
+  + 'as one task and needs its own plan, use "forker" or "spawner".',
   '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
   + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
   + '"order": "sequential", or a worker.',
-  '- A "worker" or a "forker" already sees this conversation, including what you have read so far, so its '
-  + 'task says what to do; only a "spawner" starts empty and needs the context in its task.',
   '- An agent node answers with its conclusion, and that conclusion goes into your answer as it stands: give '
-  + 'it a task that says what to decide. Asking a child for a report, or for proofs of what it found, is you '
-  + 'doing the work twice.',
+  + 'it a task that says what to decide. The standard it has to meet goes into its task; asking it afterwards '
+  + 'for a report, or for proofs of what it found, is you doing the work twice.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',
-  '- Keep each node task to one sentence and the criteria to one or two: they decide the round, they are '
-  + 'not a report.',
-  '- The plan runs in one round trip and every result comes back together. A result may be too long to fit '
-  + 'and be left out of what you see — the rest is in the spill file.',
+  '- The plan report comes back whole — the plugin keeps this one result out of the harness\'s truncation — so '
+  + 'judge from all of it.',
 ].join('\n')
 
 /**

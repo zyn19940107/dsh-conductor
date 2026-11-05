@@ -34,9 +34,10 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'come back — the standard for a node lives in its task, not in a check after the fact, so a node is '
   + 'trusted to do what it was told. There is no dependency between the nodes of one round: work that needs '
   + 'another node output belongs to the next round, and work that must happen in order belongs inside one '
-  + 'node. "worker" starts with this conversation and does the work itself, never drawing a plan; "spawner" '
-  + 'starts empty and plans; "forker" starts with this conversation and plans. Prefer the cheapest node that '
-  + 'can do the job: "tools" first, then the kinds that copy this conversation.'
+  + 'node. "worker" does the work itself and never plans; "forker" inherits this conversation and is a leader '
+  + 'itself, so its task is a goal rather than steps; "spawner" is that same leader starting empty. If you '
+  + 'can write out how to do the work, use "tools" or "worker"; if it needs its own plan, use "forker" or '
+  + '"spawner".'
 
 /**
  * What the model is told when a plan has run and another round is open.
@@ -328,9 +329,10 @@ export function applyDelegationRule(ctx: Context): void {
         // so leaving the harness's wording there is what makes it assume a node
         // cannot see what this round has already read.
         description: `Not called directly: delegation happens inside refine_plan, as a node of kind "worker" `
-          + '(does the work itself), "spawner" (starts empty and plans) or "forker" (starts with this '
-          + 'conversation and plans). The child of a plan node starts from this conversation as it stands when the '
-          + 'plan is handed over, including what this round has already read.',
+          + '(does the work itself, never plans), "forker" (a leader that inherits this conversation and draws '
+          + 'its own plans) or "spawner" (that same leader starting empty). The child of a plan node starts from '
+          + 'this conversation as it stands when the plan is handed over, including what this round has already '
+          + 'read.',
         execute: async (args: unknown, exec: Parameters<typeof original.execute>[1]) => {
           if (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)
           return await original.execute(args, exec)
