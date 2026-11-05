@@ -403,19 +403,18 @@ export function applyPlanTool(
       + 'criteria that decide whether it succeeded, and the nodes it is made of. There is one layer: every '
       + 'node starts at the same time. A node is one of four kinds, and the kind decides what its task has to '
       + 'say: '
-      + '"tools" — a batch of calls whose arguments are already decided. No child and no inherited context: '
-      + 'the cheapest node there is, for every call you already know you need. '
-      + '"worker" — a child that does the work itself and never plans. You have decided how: its task says '
-      + 'what to do and what finished looks like. Use it for a piece of work you can write out. '
-      + '"forker" — a child that is a leader itself: it inherits this conversation and draws its own plans. '
-      + 'Its task says the goal and the boundaries, not the steps — it decides how to split the work and how '
-      + 'to check itself. Use it when the work is too big to write out as one task; it carries a copy of this '
-      + 'conversation, so it is not free. '
-      + '"spawner" — the same kind of leader, starting empty: it sees nothing of this conversation, so its '
-      + 'task carries the whole background. Use it for independent work that should not inherit this '
-      + 'conversation. '
-      + 'If you can write out how to do the work, use "tools" or "worker"; if it needs its own plan, use '
-      + '"forker" or "spawner". '
+      + '"tools" — a batch of calls whose arguments are already decided. No child and no inherited '
+      + 'context: the cheapest node there is, for every call you already know you need. '
+      + '"worker" — a leaf: it does the work itself and can hand none of it to anyone else, because the '
+      + 'plan tool is refused inside it. Everything it needs must be in its task, and its task says what '
+      + 'to do and what finished looks like. '
+      + '"forker" — a leader: it inherits this conversation and dispatches its own sub-agents through '
+      + 'refine_plan. Its task says the goal and the bar to clear, not the steps — it decides how to split '
+      + 'the work. '
+      + '"spawner" — the same kind of leader, starting empty: it sees nothing of this conversation, so '
+      + 'its task carries the whole background. '
+      + 'If the work is one person\'s job, use "worker"; if parts of it could be handed to someone '
+      + 'else, use a leader — "forker", or "spawner" when it should start from nothing. '
 
       + 'The task says what the node has to deliver, and the kind decides how much of the how goes in it: a '
       + 'worker gets what to do and what finished looks like; a forker gets the goal and the boundaries; a '
@@ -425,8 +424,8 @@ export function applyPlanTool(
       + '{"id": "budget-field", "kind": "worker", "task": "Add the budgetMs field to PlanNode in '
       + 'src/plan.ts and read it in parsePlanArgs. Done when both places are changed and tsc passes."}, '
       + '{"id": "plan-review", "kind": "forker", "task": "Review how the plan format treats node '
-      + 'arguments: where they are validated, where they leak, and what a fifth node kind would need. Done '
-      + 'when each question has an answer backed by a line of code."}]}',
+      + 'arguments: where they are validated, where they leak, and what a fifth node kind would need. You '
+      + 'decide how to split the review. Done when each question has an answer backed by a line of code."}]}',
     parameters: {
       criteria: {
         type: 'array',
@@ -451,12 +450,13 @@ export function applyPlanTool(
               enum: ['tools', 'worker', 'spawner', 'forker'],
               required: true,
               description: '"tools" runs a batch of calls whose arguments are already decided — the cheapest '
-                + 'kind, no child and no inherited context. "worker" does the work itself and never plans: its '
-                + 'task carries what to do and what finished looks like. "forker" is a leader itself — it '
-                + 'inherits this conversation and plans for itself, so its task carries the goal and the '
-                + 'boundaries, not the steps. "spawner" is the same kind of leader starting empty, so its '
-                + 'task carries the whole background. If you can write out how to do the work, use "tools" or '
-                + '"worker"; if it needs its own plan, use "forker" or "spawner".',
+                + 'kind, no child and no inherited context. "worker" is a leaf: it does the work itself and '
+                + 'cannot hand any of it to anyone else — the plan tool is refused inside it — so its task '
+                + 'carries what to do and what finished looks like. "forker" is a leader: it inherits this '
+                + 'conversation and dispatches its own sub-agents through refine_plan, so its task carries '
+                + 'the goal and the bar, not the steps. "spawner" is the same kind of leader starting empty, '
+                + 'so its task carries the whole background. If the work is one person\'s job, use '
+                + '"worker"; if parts of it could be handed to someone else, use a leader.',
             },
             calls: {
               type: 'array',
@@ -473,10 +473,10 @@ export function applyPlanTool(
             task: {
               type: 'string',
               description: 'The task of an agent node, for kind "worker", "forker" and "spawner". What it '
-                + 'has to say depends on the kind: a worker gets what to do and what finished looks like; a '
-                + 'forker gets the goal and the boundaries, since it makes its own plan; a spawner gets those '
-                + 'plus the whole background, since it sees nothing of this conversation. The result comes '
-                + 'back and is used as it stands.',
+                + 'has to say depends on the kind: a worker is a leaf, so its task carries what to do and '
+                + 'what finished looks like; a forker is a leader, so its task carries the goal and the bar, '
+                + 'not the steps; a spawner is that same leader starting empty, so its task also carries the '
+                + 'whole background. The result comes back and is used as it stands.',
             },
             order: {
               type: 'string',

@@ -58,13 +58,13 @@ export const REFINE_GUIDANCE = [
   + 'result comes back. How a round runs, and when the plan or the conclusion is due, is said at the head of '
   + 'every round.',
   '- A node is one of four kinds, and the kind decides what its task has to say: "tools" runs calls whose '
-  + 'arguments are already decided — the cheapest node, no child and no inherited context; "worker" does the '
-  + 'work itself and never plans, so its task says what to do and what finished looks like; "forker" is a '
-  + 'leader itself — it inherits this conversation and draws its own plans, so its task says the goal and the '
-  + 'boundaries, not the steps; "spawner" is that same leader starting empty, so its task carries the whole '
-  + 'background.',
-  '- If you can write out how the work is done, use "tools" or "worker"; if the work is too big to write out '
-  + 'as one task and needs its own plan, use "forker" or "spawner".',
+  + 'arguments are already decided — the cheapest node, no child and no inherited context; "worker" is a '
+  + 'leaf — it does the work itself and can hand none of it to anyone else, so its task says what to do and '
+  + 'what finished looks like; "forker" is a leader — it inherits this conversation and dispatches its own '
+  + 'sub-agents through refine_plan, so its task says the goal and the bar, not the steps; "spawner" is '
+  + 'that same leader starting empty, so its task carries the whole background.',
+  '- If the work is one person\'s job, use "worker"; if parts of it could be handed to someone else, use a '
+  + 'leader — "forker", or "spawner" when it should start from nothing.',
   '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
   + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
   + '"order": "sequential", or a worker.',
