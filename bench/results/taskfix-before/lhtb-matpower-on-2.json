@@ -1,0 +1,58 @@
+{
+  "task": "lhtb-matpower",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 376551,
+  "timedOut": false,
+  "sessionId": "session-63436117-7790-494f-bed0-a39d42c9c4ad",
+  "stderr": "",
+  "steps": 16,
+  "toolCalls": 15,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "write",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 126125,
+    "outputTokens": 84467,
+    "cacheReadTokens": 1051130,
+    "totalTokens": 1261722
+  },
+  "formation": {
+    "agents": 1,
+    "input": 126125,
+    "output": 84467,
+    "cacheRead": 1051130,
+    "total": 1261722,
+    "steps": 16
+  },
+  "mainPrompt": 138868,
+  "correctness": {
+    "passed": 11,
+    "total": 12,
+    "missing": [
+      "11/12 个判据测试通过"
+    ],
+    "score": 0.9167
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 70016,
+  "thinkingPreview": "Interesting — pypower has no `case*` attributes at top level? Let me check. `pypower.case9` etc. Actually `dir(pypower)` returned [] for names starting with 'case' — maybe because pypower's `__init__.py` doesn't import cases. Let me check `pypower.case9` directly.\n\nAlso I need to read the existing source files: audit.py, cli.py, __init__.py, experiments/run_opf_suite.py, pyproject.toml.\n\nLet me plan the next round: read all existing files and probe pypower API.\n\nKey facts to establish:\n- `pypower.case9` module structure: `pypower.case9.case9()` returns ppc dict. Actually in PYPOWER, `pypower.case9` is a module with `case9()` function; `pypower.case9.case9()`.\n- `pypower.rundcpf`, `pypower.rundcopf`, `pypower.runopf`.\n- Gen data column indices in ppc['gen']: MATPOWER gen matrix columns: GEN_BUS, PG, QG, QMAX, QMIN, VG, MBASE, GEN_STATUS, PMAX, PMIN, PC1, ... So PG=1, QG=2, QMAX=3, QMIN=4,",
+  "finalText": "## 完成报告\n\n### 实现思路\n\n**入口**:`src/power_audit/audit.py`(`run_audit(manifest, out_dir)`),CLI `cli.py` 与 `experiments/run_opf_suite.py` 都走同一条流水线。已 `pip install -e .` 装成可编辑包,`python -m power_audit.cli` 在任意 cwd 都能跑。\n\n**每个 case 的处理链**:\n1. 按名字 `importlib` 加载官方函数(`pypower.case9.case9()` 等),失败则记 `solver` 违规而不是崩掉;\n2. **求解前**应用 manifest 修改:`load_scale`×`PD/QD`,`branch_rate_scale`×`RATE_A`(仅 `RATE_A>0`),`gen_pmax_scale`×`PMAX`;\n3. 三个静默求解:`ppoption(VERBOSE=0, OUT_ALL=0)` → `rundcpf`(AC 潮流)、`rundcopf`(DC OPF)、`runopf`(AC OPF),每次求解喂一份深拷贝,互不污染;\n4. **三张明细表全部由 AC OPF 解生成**,潮流只提供 `pf_success`;AC OPF 失败的 case **不产出任何明细行**,目标值/电压置 `null`;\n5. 违规:solver 失败→`fatal`,母线电压越限、支路过载→`hard`(tol 1e-6)。\n\n**两个关键坑**(都是实测踩出来的):\n- PYPOWER 的 bus 矩阵是 **MATPOWER 文件列序**(VM=7, VA=8, BASE_KV=9, ZONE=10, **VMAX=11, VMIN=12**),不是内部矩阵列序 → 全部列下标一律走 `pypower.idx_*` 常量;\n- `case9/case14` 等矩阵是 int64,原地乘系数会 numpy 抛 casting 错误 → 先 `astype(float)` 再缩放(否则隐藏 manifest 里 `case9 + gen_pmax_scale` 直接崩)。\n\n**契约落实**:CSV 表头逐字对齐、每行带 `case_id`、按 manifest 顺序;JSON 顶层 `metadata/cases/diagnostics/overall_pass` 及 case/diagnostics 的键集**精确等于**规范;`grid_summary.md` 只有那五个标题、每 case 一行 `case_id: pf=.. dcopf=.. acopf=..`,并含 `detail_rows`、`binding_totals`;浮点用 `repr` 全精度 + `\\n` 行尾,重跑字节一致。\n\n### 每个 case 状态(公开 manifest,10/10 全绿)\n\n| case | pf/dcopf/acopf | dcopf obj | acopf obj |\n|---|---|---|---|\n| case9_base | true/true/true | 5216.0266 | 5296.6865 |\n| case14_base | true/true/true | 7642.5937 | 8081.5264 |\n| case30_base | true/true/true | 565.2060 | 576.8923 |\n| case57_base | true/true/true | 41006.7353 | 41737.7855 |\n| case118_base | true/true/true | 125947.8727 | 129660.6864 |\n| case14_load_110 | true/true/true | 8672.4797 | 9127.9808 |\n| case30_load_102 | true/true/true | 579.5886 | 597.7381 |\n| case57_load_105 | true/true/true | 43620.7700 | 44439.7584 |\n| case118_load_102 | true/true/true | 129305.4307 | 133027.8692 |\n| case30_gen_110 | true/true/true | 565.2060 | 576.8923 |\n\n`violation_count=0`、`overall_pass=true`、`detail_rows = bus 477 / generator 153 / branch 704`、`max_acopf_branch_loading=1.0000001001`。\n\n### 验证自写 `tools/selfcheck.py`(评分器同款:独立重跑 PYPOWER 逐字段比对)跑通:\n- 公开 manifest:目标值、load缩放、电压裕度、发电机出力向量、支路潮流/载流率、行数、JSON/表头/标题契约 —— **全部一致**;\n- 确定性:两次运行7 个产物 **sha256 全同**;\n- 隐藏风格 manifest(case9 压力 `load_scale=9`、`branch_rate_scale=0.8`、case9 `gen_pmax_scale=1.1`、case118):失败 case 目标值 `null`、无明细行、出 `solver` fatal 违规,其余 case 不受影响 → **ALL CHECKS PASSED**。\n\n### 产物清单(`outputs/`)\n\n`opf_report.json`、`grid_summary.md`、`case_table.csv`(10 行)、`violations.csv`(仅表头,0 违规)、`bus_voltage_table.csv`(477 行)、`generator_dispatch.csv`(153 行)、`branch_loading.csv`(704 行)。\n\n受保护的 `D:\\code\\vibe\\dsh-refine-loop` 未做任何改动。"
+}

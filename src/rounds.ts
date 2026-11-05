@@ -35,7 +35,8 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'trusted to do what it was told. There is no dependency between the nodes of one round: work that needs '
   + 'another node output belongs to the next round, and work that must happen in order belongs inside one '
   + 'node. "worker" starts with this conversation and does the work itself, never drawing a plan; "spawner" '
-  + 'starts empty and plans; "forker" starts with this conversation and plans.'
+  + 'starts empty and plans; "forker" starts with this conversation and plans. Prefer the cheapest node that '
+  + 'can do the job: "tools" first, then the kinds that copy this conversation.'
 
 /**
  * What the model is told when a plan has run and another round is open.

@@ -402,10 +402,16 @@ export function applyPlanTool(
       + 'once, and the round can end with the conclusion. A turn hands its shape over here — the observable '
       + 'criteria that decide whether it succeeded, and the nodes it is made of. There is one layer: every '
       + 'node starts at the same time. A node is one of four kinds: '
-      + '"tools" (calls whose arguments are already decided), '
-      + '"worker" (a child that starts with this conversation and does the work itself, without drawing a '
-      + 'plan of its own), "spawner" (a child that starts empty and plans through this loop), '
-      + '"forker" (a child that starts with this conversation and plans through this loop). '
+      + '"tools" — a batch of calls whose arguments are already decided. No child and no inherited context: '
+      + 'the cheapest node there is, and the one to use for every call you already know you need. '
+      + '"worker" — a child that starts with this conversation and does the work itself, without a plan of '
+      + 'its own. It carries a copy of this conversation, so it is expensive: use it for work that needs '
+      + 'several steps of judgement, not for a call you could make yourself. '
+      + '"spawner" — a child that starts empty and plans. It sees nothing of this conversation, so the whole '
+      + 'brief has to be in its task; use it for work that should start from nothing. '
+      + '"forker" — a child that starts with this conversation and also plans. Use it when the work needs '
+      + 'both what this conversation knows and its own plan. '
+      + 'Pick the cheapest kind that can do the job; when in doubt, use "tools". '
 
       + 'A node task says what to do and what finished looks like. A child that inherits this conversation '
       + 'already sees it, so its task needs no background — but the standard has to be in the task, because '
@@ -438,11 +444,12 @@ export function applyPlanTool(
               type: 'string',
               enum: ['tools', 'worker', 'spawner', 'forker'],
               required: true,
-              description: '"tools" runs a batch of calls together. "worker" is a child that starts with '
-                + 'this conversation and does the work itself, and never draws a plan of its own. "spawner" '
-                + 'is a child that starts empty and plans. A node may declare a "budgetMs": when it is spent the '
-      + 'node is stopped and asked to report where it got to rather than being killed without a word. "forker" is a child that starts with this '
-                + 'conversation and plans.',
+              description: '"tools" runs a batch of calls whose arguments are already decided — the cheapest '
+                + 'kind, no child and no inherited context. "worker" is a child that starts with this '
+                + 'conversation and does the work itself, never drawing a plan of its own; it carries a copy of '
+                + 'the conversation, so it is expensive. "spawner" is a child that starts empty and plans, so '
+                + 'its task has to carry the whole brief. "forker" is a child that starts with this '
+                + 'conversation and plans. Pick the cheapest kind that can do the job.',
             },
             calls: {
               type: 'array',
