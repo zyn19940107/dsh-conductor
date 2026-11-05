@@ -1,0 +1,42 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 7,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 101528,
+  "timedOut": false,
+  "sessionId": "session-e0b0a311-3092-49e4-b43c-e588465d5bd2",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 14654,
+    "outputTokens": 4560,
+    "cacheReadTokens": 30080,
+    "totalTokens": 49294
+  },
+  "formation": {
+    "agents": 4,
+    "input": 142387,
+    "output": 34754,
+    "cacheRead": 818688,
+    "total": 995829,
+    "steps": 33
+  },
+  "mainPrompt": 18197,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 10011,
+  "thinkingPreview": "The user asks three read-only questions about D:\\code\\vibe\\dsh-refine-loop\\verify and src. Let me plan.\n\nFirst round: plan design. I need to:\n1. Read all .spec.ts files under verify, determine entry function under test.\n2. List src modules (8 files), compare with specs.\n3. Find line counts.\n\nI should use refine_plan with parallel nodes. But also I could just use glob + read directly. The instructions require a plan as the first message. Let me design a plan with tools nodes.\n\nLet me first check the directory structure... but the instruction says the first message IS the plan, no tool call comes first. So I must hand over a plan.\n\nPlan:\n- Node A: tools — glob for verify/**/*.spec.ts, read each; determine entry function per spec. But glob returns paths, then reads need sequential dependency. A tools node with order sequential can do glob then read. But I don't know file names in advance. H",
+  "finalText": "## 结论（只读，未改动任何文件）\n\n### 先纠正一个前提\n`src/` 下实际是 **9 个 `.ts` 模块**，不是 8 个；**8 是 `verify/` 下 `.spec.ts` 的数量**。题面的\"8 个模块\"来自 `bench/scenarios.mjs:148` 的写死清单（batch/concurrency/index/plan/policy/repair/rounds/tool），漏了后加的 `fork.ts`。`src/` 无子目录、无嵌套模块。\n\n---\n\n### 1. 每个 `.spec.ts` 实际测的入口函数\n\n| spec 文件 | 被测 src 模块 | 实际调用并断言的入口函数 |\n|---|---|---|\n| `batch.spec.ts` | src/batch.ts | **`runBatch`**（主）、`capOutput` |\n| `concurrency.spec.ts` | src/concurrency.ts + batch.ts | **`isReadOnlyCommand`**、**`mayRunTogether`**、**`buildOverrides`**；`runBatch`（仅测批内顺序） |\n| `fork.spec.ts` | src/fork.ts | **`buildSeedFromNow`**（主）、`openTurnClosers` |\n| `plan.spec.ts` | src/tool.ts + plan.ts | **`runPlan`**（主）、**`renderPlan`**；**`parsePlanArgs`**、**`buildGroups`** |\n| `refine.spec.ts` | src/batch.ts + policy.ts | **`parseBatchArgs`**、**`renderBatch`**；**`parsePolicyCommand`** |\n| `repair.spec.ts` | src/batch.ts + repair.ts | **`runBatch`**（带修复钩子，主）；**`parseRepair`** |\n| `retain.spec.ts` | src/index.ts + tool.ts | **`applyReportRetention`**（主）；`PLAN_TOOL` 常量 |\n| `rounds.spec.ts` | src/rounds.ts + plan.ts | **`Rounds`**（类）、**`applyTurnDoctrine`**、**`applyWorkerRule`**、**`isWorkerConversation**；`WORKER_MARKER` |\n\n---\n\n### 2. 没有对应 spec 的模块\n\n按「同名专属 spec 文件」口径（严格）：\n\n- **`policy.ts`** — 无 `policy.spec.ts`，仅被 `refine.spec.ts` 顺带 import 了 `parsePolicyCommand`；`applyPolicyCommand` / `applyPolicyMessage` / `SessionPolicy` / `runPolicyCommand` 全未测。\n- **`tool.ts`** — 无 `tool.spec.ts`；`applyPlanTool` 完全未测（`runPlan`/`renderPlan`/`PLAN_TOOL` 被别的 spec 碰过）。\n- **`index.ts`** — 无 `index.spec.ts`；只有 `retain.spec.ts` 碰了 `applyReportRetention`，`apply`/`Config`/全部 `DEFAULT_*` 未测。\n\n**更值得注意的一个缺口**：`repair.ts` 有 `repair.spec.ts`，但它**不在 `verify/run-specs.mjs:21` 的执行清单里**（该清单 7 项：refine/batch/concurrency/plan/rounds/fork/retain），`package.json` 里也只有 `\"specs\": \"node verify/run-specs.mjs\"` 一条路径跑 spec，仓库无 CI —— 所以 `repair.spec.ts` **有源码覆盖但从不执行**。\n\n宽口径（被任一 spec import 过）下，9 个模块都至少被碰到，差别只在深度。\n\n---\n\n### 3. 行数最多的模块\n\n**`src/tool.ts`，570 行**（物理行，含空行，`[System.IO.File]::ReadAllLines` 计；`Get-Content | Measure-Object -Line` 口径为 548，因其不数空行——两种口径它都是第一）。\n\n次高：`fork.ts` 549/520、`batch.ts` 409/383、`rounds.ts` 388/359、`index.ts` 351/323、`policy.ts` 241/228、`concurrency.ts` 234/224、`plan.ts` 225/207、`repair.ts` 173/162。"
+}

@@ -112,7 +112,34 @@ export const BUDGET_PROBE = {
   ]),
 }
 
-export const TASKS = {
+/**
+ * A probe for running under a persisted goal.
+ *
+ * The harness keeps a session working across automatic continuation rounds while
+ * a goal is open. This task asks the model to open one, do the work in the
+ * plugin's rounds, and close it — so the two mechanisms are exercised together.
+ */
+export const GOAL_PROBE = {
+  text: [
+    '请用 create_goal 建立一个持久目标，目标是：',
+    '"读完 D:\code\vibe\dsh-refine-loop 的 src/plan.ts 和 src/tool.ts，说明计划的数据结构和四种节点分别是什么，',
+    '并给出 refine_plan 的执行入口在哪个文件哪个函数里。"',
+    '',
+    '要求：',
+    '1. 先调用 create_goal 建立这个目标（不要只说不做）；',
+    '2. 用 refine_plan 交图去完成它（图里带 budgetMs）；',
+    '3. 结论写清楚之后，用 update_goal 把目标标记为 complete。',
+    '',
+    '只读不改。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '说清了计划的数据结构', needles: ['criteria', 'nodes'] },
+    { what: '说清了四种节点', needles: ['tools', 'worker', 'forker'] },
+    { what: '指出了执行入口', any: ['runPlan', 'tool.ts'] },
+  ]),
+}
+
+export const TASKS = { goalprobe: GOAL_PROBE,
   survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
