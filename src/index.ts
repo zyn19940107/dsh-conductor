@@ -306,6 +306,12 @@ export function apply(ctx: Context, config: Config): void {
 export function applyReportRetention(ctx: Context): void {
   ctx.on('tools/post-execute', async (exec, result, next) => {
     if (exec.name !== PLAN_TOOL) return await next()
+    // A failed result has no value to keep, and the harness refuses to let a
+    // policy replace one: accepting here throws "cannot replace the value of a
+    // failed result" and hides the real failure. That is how a nested plan
+    // cancelled by its own node's budget used to reach the model — as an error
+    // about the hook instead of the abort that caused it.
+    if (result.isError) return await next()
     return { kind: 'accept', value: result.value as never }
   }, { prepend: true })
 }

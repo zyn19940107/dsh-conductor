@@ -242,7 +242,30 @@ export const LHTB_COMMIT0_TIGHT = {
   },
 }
 
+/**
+ * The same task under one organisation rule: each library is handed to a leader
+ * that owns it whole and decides how to split it. Run against the plain task to
+ * measure what planning the work inside a child costs, when the work is the same.
+ */
+export const LHTB_COMMIT0_LEAD = {
+  ...LHTB_COMMIT0,
+  name: 'lhtb-commit0-lead',
+  setup() {
+    process.env.DSH_BENCH_SUFFIX = 'lhtbcommit0lead'
+    LHTB_COMMIT0.setup()
+    this.text = `${LHTB_COMMIT0.text}
+
+## 这一版的硬性组织要求
+
+三个库**各自整包交给一个负责人**：每个库一个节点，由这个负责人自己决定怎么拆、怎么实现、
+怎么验证、先做什么后做什么。你不要直接写实现，也不要给每个库派"只会干活、不会拆活"的人。
+负责人自己可以再往下派活。
+`
+  },
+}
+
 export const LHTB_COMMIT0_TASKS = {
   'lhtb-commit0': LHTB_COMMIT0,
   'lhtb-commit0-tight': LHTB_COMMIT0_TIGHT,
+  'lhtb-commit0-lead': LHTB_COMMIT0_LEAD,
 }

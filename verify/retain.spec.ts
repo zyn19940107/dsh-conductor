@@ -79,7 +79,25 @@ const report = {
   check('hook registered prepended', (options as { prepend?: boolean } | undefined)?.prepend === true)
 }
 
-// 2. Every other tool still goes through the chain unchanged.
+// 2. A failed plan result is left to the chain: the harness throws when a policy
+//    replaces the value of a failure, so accepting here would hide the failure.
+{
+  const { listener } = registered()
+  let nextCalled = false
+  const decision = await listener(
+    { name: PLAN_TOOL },
+    { content: [{ type: 'text', text: 'aborted' }], value: undefined, isError: true },
+    async () => {
+      nextCalled = true
+      return { kind: 'accept', content: [{ type: 'text', text: 'aborted' }] }
+    },
+  ) as { content?: { text: string }[], value?: unknown }
+  check('failed plan: policy chain runs', nextCalled === true)
+  check('failed plan: no value replacement', decision.value === undefined)
+  check('failed plan: the failure itself passes through', decision.content?.[0]?.text === 'aborted')
+}
+
+// 3. Every other tool still goes through the chain unchanged.
 {
   const { listener } = registered()
   let nextCalled = false
