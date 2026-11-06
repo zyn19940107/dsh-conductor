@@ -101,9 +101,12 @@ console.log('what the turn doctrine says')
   check('it says the round is one plan', ROUND_LOOP.includes('refine_plan'))
   check('it says the plan is one layer', ROUND_LOOP.includes('one layer'))
   check('it says there is no dependency between nodes', ROUND_LOOP.includes('no dependency'))
-  check('it names the worker', ROUND_LOOP.includes('worker'))
-  check('it names the spawner', ROUND_LOOP.includes('spawner'))
-  check('it names the forker', ROUND_LOOP.includes('forker'))
+  // The four kinds are defined in the policy section, not again here: a round
+  // message repeats every round, so a definition living in it drifts once and
+  // then repeats the drift.
+  check('the doctrine leaves the kinds to the policy',
+    ROUND_LOOP.includes('is a leaf') === false
+    && ROUND_LOOP.includes('"forker" is a leader') === false)
 }
 
 console.log('a worker conversation is recognised')

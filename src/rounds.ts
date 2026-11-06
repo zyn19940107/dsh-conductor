@@ -36,10 +36,7 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'independent re-derivation, no hardening pass over what already worked. When a result is incomplete, the '
   + 'missing work is new work, never a re-check of work that came back. There is no dependency between the nodes of one round: work that needs '
   + 'another node output belongs to the next round, and work that must happen in order belongs inside one '
-  + 'node. "worker" is a leaf: it does the work itself and can hand none of it to anyone else. "forker" is '
-  + 'a leader: it inherits this conversation and dispatches its own sub-agents. "spawner" is that same '
-  + 'leader starting empty. If the work is one person\'s job, use "worker"; if parts of it could be handed '
-  + 'to someone else, use "forker" — or "spawner" when it should start from nothing.'
+  + 'node.'
 
 /**
  * What the model is told when a plan has run and another round is open.

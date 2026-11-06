@@ -380,6 +380,21 @@ export function renderPlan(output: PlanOutput): string {
   return lines.join('\n')
 }
 
+/** The tool's own description: what it does, and the shape of a plan. */
+export const PLAN_TOOL_DESCRIPTION = 'Run one plan and return every result together. A plan may be empty: it then returns at '
+      + 'once, and the round can end with the conclusion. One call carries the whole round — the criteria '
+      + 'that decide whether it succeeded, and the nodes it is made of. There is one layer: every node starts '
+      + 'at the same time and every result comes back together. Each node is one of four kinds. What a kind '
+      + 'is, and which one to pick, is in the policy section above the tools; the kind only decides what a '
+      + 'node\'s task has to say. '
+      + 'Shape of a plan: {"criteria": ["...", "..."], "nodes": ['
+      + '{"id": "scan", "kind": "tools", "calls": [{"name": "read", "arguments": {"file_path": "src/plan.ts"}}]}, '
+      + '{"id": "budget-field", "kind": "worker", "task": "Add the budgetMs field to PlanNode in '
+      + 'src/plan.ts and read it in parsePlanArgs. Done when both places are changed and tsc passes."}, '
+      + '{"id": "plan-review", "kind": "forker", "task": "Review how the plan format treats node '
+      + 'arguments: where they are validated, where they leak, and what a fifth node kind would need. You '
+      + 'decide how to split the review. Done when each question has an answer backed by a line of code."}]}'
+
 /**
  * Register the plan tool.
  *
@@ -421,34 +436,7 @@ export function applyPlanTool(
   ctx.tools.register(defineTool({
     name: PLAN_TOOL,
     timeoutMs: options.timeoutMs(),
-    description: 'Run one plan and return every result together. A plan may be empty: it then returns at '
-      + 'once, and the round can end with the conclusion. A turn hands its shape over here — the observable '
-      + 'criteria that decide whether it succeeded, and the nodes it is made of. There is one layer: every '
-      + 'node starts at the same time. A node is one of four kinds, and the kind decides what its task has to '
-      + 'say: '
-      + '"tools" — a batch of calls whose arguments are already decided. No child and no inherited '
-      + 'context: the cheapest node there is, for every call you already know you need. '
-      + '"worker" — a leaf: it does the work itself and can hand none of it to anyone else, because the '
-      + 'plan tool is refused inside it. Everything it needs must be in its task, and its task says what '
-      + 'to do and what finished looks like. '
-      + '"forker" — a leader: it inherits this conversation and dispatches its own sub-agents through '
-      + 'refine_plan. Its task says the goal and the bar to clear, not the steps — it decides how to split '
-      + 'the work. '
-      + '"spawner" — the same kind of leader, starting empty: it sees nothing of this conversation, so '
-      + 'its task carries the whole background. '
-      + 'If the work is one person\'s job, use "worker"; if parts of it could be handed to someone '
-      + 'else, use a leader — "forker", or "spawner" when it should start from nothing. '
-
-      + 'The task says what the node has to deliver, and the kind decides how much of the how goes in it: a '
-      + 'worker gets what to do and what finished looks like; a forker gets the goal and the boundaries; a '
-      + 'spawner gets those plus the whole background. The result comes back and is used as it stands. '
-      + 'Shape of a plan: {"criteria": ["...", "..."], "nodes": ['
-      + '{"id": "scan", "kind": "tools", "calls": [{"name": "read", "arguments": {"file_path": "src/plan.ts"}}]}, '
-      + '{"id": "budget-field", "kind": "worker", "task": "Add the budgetMs field to PlanNode in '
-      + 'src/plan.ts and read it in parsePlanArgs. Done when both places are changed and tsc passes."}, '
-      + '{"id": "plan-review", "kind": "forker", "task": "Review how the plan format treats node '
-      + 'arguments: where they are validated, where they leak, and what a fifth node kind would need. You '
-      + 'decide how to split the review. Done when each question has an answer backed by a line of code."}]}',
+    description: PLAN_TOOL_DESCRIPTION,
     parameters: {
       criteria: {
         type: 'array',
@@ -472,14 +460,9 @@ export function applyPlanTool(
               type: 'string',
               enum: ['tools', 'worker', 'spawner', 'forker'],
               required: true,
-              description: '"tools" runs a batch of calls whose arguments are already decided — the cheapest '
-                + 'kind, no child and no inherited context. "worker" is a leaf: it does the work itself and '
-                + 'cannot hand any of it to anyone else — the plan tool is refused inside it — so its task '
-                + 'carries what to do and what finished looks like. "forker" is a leader: it inherits this '
-                + 'conversation and dispatches its own sub-agents through refine_plan, so its task carries '
-                + 'the goal and the bar, not the steps. "spawner" is the same kind of leader starting empty, '
-                + 'so its task carries the whole background. If the work is one person\'s job, use '
-                + '"worker"; if parts of it could be handed to someone else, use a leader.',
+              description: '"tools": a batch of calls, no child. "worker": a leaf — the plan tool is refused '
+                + 'inside it. "forker": a leader — it inherits this conversation. "spawner": a leader starting '
+                + 'empty. The policy section says what each kind is for and how to pick one.',
             },
             calls: {
               type: 'array',
@@ -495,11 +478,9 @@ export function applyPlanTool(
             },
             task: {
               type: 'string',
-              description: 'The task of an agent node, for kind "worker", "forker" and "spawner". What it '
-                + 'has to say depends on the kind: a worker is a leaf, so its task carries what to do and '
-                + 'what finished looks like; a forker is a leader, so its task carries the goal and the bar, '
-                + 'not the steps; a spawner is that same leader starting empty, so its task also carries the '
-                + 'whole background. The result comes back and is used as it stands.',
+              description: 'The task of an agent node (worker, forker or spawner). What it has to say '
+                + 'depends on the kind — the policy section says how much of the how goes in it. The result '
+                + 'comes back and is used as it stands.',
             },
             order: {
               type: 'string',

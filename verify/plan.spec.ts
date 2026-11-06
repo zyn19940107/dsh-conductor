@@ -5,7 +5,7 @@
  * that can split the layer is two nodes writing the same file.
  */
 
-import { runPlan, renderPlan, type PlanOutput } from '../src/tool.js'
+import { PLAN_TOOL_DESCRIPTION, runPlan, renderPlan, type PlanOutput } from '../src/tool.js'
 import { REFINE_GUIDANCE } from '../src/index.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
@@ -401,6 +401,19 @@ console.log('a node that runs out of time is reported, and the plan carries on')
     (output.nodes[0]?.error ?? '').toLowerCase().includes('budget'))
   check('the other node still ran', output.nodes[1]?.ok === true)
   clearTimeout(keepAlive)
+}
+
+// The four kinds are defined once, in the system prompt. The tool description
+// and the doctrine point at that definition instead of repeating it, because a
+// rule said in three places drifts in three directions.
+{
+  check('the policy defines the kinds', REFINE_GUIDANCE.includes('"worker" is a')
+    || REFINE_GUIDANCE.includes('"worker" is a leaf'))
+  check('the tool description does not re-explain the kinds',
+    PLAN_TOOL_DESCRIPTION.includes('is a leaf') === false
+    && PLAN_TOOL_DESCRIPTION.includes('is a leader') === false)
+  check('the tool description points at the policy',
+    PLAN_TOOL_DESCRIPTION.includes('policy section'))
 }
 
 // The system prompt says the same thing as the doctrine, in its own bullet.
