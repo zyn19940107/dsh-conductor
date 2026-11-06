@@ -187,6 +187,9 @@ export function applyRounds(ctx: Context, rounds: Rounds, plans: Plans): void {
  *
  * @param ctx - the plugin context supplying the agent runtime.
  */
+/** The conversations that have already been told when they started. */
+const started = new Set<string>()
+
 export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
@@ -207,46 +210,60 @@ export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
     // a task that says "15 minutes" cannot be budgeted against. The session knows
     // when it started; a round is where the budget decision is made, so the
     // elapsed time rides with the round's message.
-    // Two messages, not one: the doctrine is what to do, the clock is what is
-    // true right now. Mixing them makes a reading of the world look like a rule.
+    // The clock is not a reading the plugin pushes every round: the shell has a
+    // clock, and the model can read it when a budget matters. What the model
+    // cannot find out by itself is when this conversation started, so that is
+    // said once, in the first round, and the elapsed time is left to be worked
+    // out from there.
     const messages = [...decision.messages, createUserMessage({
       content: [{ type: 'text', text: ROUND_LOOP }],
       source: { kind: 'system-prompt' },
     })]
-    const elapsed = elapsedSince(payload.agent.session)
-    if (elapsed !== undefined) {
-      messages.push(createUserMessage({
-        content: [{ type: 'text', text: `This conversation has been running for ${formatElapsed(elapsed)}.` }],
-        source: { kind: 'system-prompt' },
-      }))
+    const sessionId = payload.agent.session.id
+    if (!started.has(sessionId)) {
+      started.add(sessionId)
+      const start = startOf(payload.agent.session)
+      if (start !== undefined) {
+        messages.push(createUserMessage({
+          content: [{ type: 'text', text: `This conversation started at ${formatClock(start, new Date(start))}.` }],
+          source: { kind: 'system-prompt' },
+        }))
+      }
     }
     return { ...decision, messages }
   })
 }
 
 /**
- * How long a conversation has been running.
+ * When a conversation started.
  *
  * @param session - the conversation's session.
- * @returns the elapsed milliseconds, or undefined when the start is unknown.
+ * @returns the start instant in milliseconds, or undefined when it is unknown.
  */
-export function elapsedSince(session: unknown): number | undefined {
+export function startOf(session: unknown): number | undefined {
   const carrier = session as { createdAt?: unknown; header?: { createdAt?: unknown } } | undefined
   const raw = carrier?.createdAt ?? carrier?.header?.createdAt
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined
-  return Math.max(0, Date.now() - raw)
+  return raw
 }
 
 /**
- * Format a duration the way a person says it.
+ * Format an instant the way a person reads it off a clock.
  *
- * @param ms - the duration.
- * @returns it as "12m 30s", or "45s" under a minute.
+ * The zone and the date go in because a model comparing it against the shell's
+ * clock needs both: the shell prints local time, and a bare "20:14" would not
+ * say which day it belonged to.
+ *
+ * @param ms - the instant.
+ * @param date - it as a Date, for the caller to reuse.
+ * @returns the local date and time.
  */
-export function formatElapsed(ms: number): string {
-  const total = Math.round(ms / 1000)
-  const minutes = Math.floor(total / 60)
-  return minutes > 0 ? `${minutes}m ${total % 60}s` : `${total}s`
+export function formatClock(ms: number, date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+    + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    + ` (UTC${date.getTimezoneOffset() <= 0 ? '+' : '-'}`
+    + `${pad(Math.abs(Math.trunc(date.getTimezoneOffset() / 60)))}:${pad(Math.abs(date.getTimezoneOffset() % 60))})`
 }
 
 /**

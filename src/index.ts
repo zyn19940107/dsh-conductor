@@ -72,6 +72,8 @@ export const REFINE_GUIDANCE = [
   + 'into your answer as it stands. Ask for the substance, compactly: what it found out — named exactly, the '
   + 'file or the field when that is the answer — roughly how, and what came of it. No receipts: no line '
   + 'numbers, no citation trail, and never 证据 / evidence / proof / 行号.',
+  '- When the task states a time budget, read the clock before you size the round: the shell has one, and '
+  + 'the start of this conversation was given in its first round. What is left is what the round may spend.',
   '- Never spend a node on checking another node. No review node, no independent re-derivation, no hardening '
   + 'pass: a node is trusted to do what its task said, and its result is used as it comes back. When a result '
   + 'is incomplete, the missing work is new work — not a re-check of what already came back.',

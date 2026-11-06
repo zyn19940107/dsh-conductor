@@ -14,8 +14,8 @@ import {
   Workers,
   applyTurnDoctrine,
   applyWorkerRule,
-  elapsedSince,
-  formatElapsed,
+  formatClock,
+  startOf,
   isWorkerConversation,
 } from '../src/rounds.ts'
 import { WORKER_MARKER } from '../src/plan.ts'
@@ -60,6 +60,7 @@ function captureDoctrine(): (payload: unknown, next: () => Promise<unknown>) => 
 function payload(text: string, restricted: string[]) {
   return {
     agent: {
+      session: { id: 'session-doctrine', createdAt: Date.now() },
       ctx: {
         tools: {
           restrict: (filter: { deny?: readonly string[] }) => {
@@ -134,8 +135,22 @@ console.log('the doctrine hook skips the worker, and the plan tool stays in its 
 
   const normalRestricted: string[] = []
   const normalDecision = await handler(payload('please do the thing', normalRestricted), enter)
-  check('a normal turn is given the doctrine', normalDecision.messages.length === 1)
+  const normalText = normalDecision.messages
+    .map(message => (message as { content?: Array<{ text?: string }> }).content?.map(part => part.text ?? '').join('') ?? '')
+    .join(' ')
+  check('a normal turn is given the doctrine', normalText.includes(ROUND_LOOP))
+  check('the first round also says when the conversation started',
+    normalText.includes('This conversation started at'))
   check('a normal turn keeps the plan tool', normalRestricted.length === 0)
+
+  // The start is a fact about the conversation, said once: the next round must
+  // not repeat it.
+  const secondDecision = await handler(payload('next round', []), enter)
+  const secondText = secondDecision.messages
+    .map(message => (message as { content?: Array<{ text?: string }> }).content?.map(part => part.text ?? '').join('') ?? '')
+    .join(' ')
+  check('the next round gets the doctrine but not the start again',
+    secondText.includes(ROUND_LOOP) && secondText.includes('started at') === false)
 }
 
 console.log('the worker rule refuses the plan tool where it is called')
@@ -164,15 +179,19 @@ console.log('the worker rule refuses the plan tool where it is called')
   check('the refusal says not to plan', WORKER_NO_PLAN.includes('Do not draw a plan'))
 }
 
-// The model has no clock of its own: the elapsed time has to be handed to it,
-// or a task that states a budget cannot be planned against.
+// The plugin does not push a clock reading: the shell has a clock. What it does
+// give once is when the conversation started, because that is the one number the
+// model cannot read off the machine.
 {
-  check('a duration under a minute is seconds', formatElapsed(45_000) === '45s')
-  check('a duration over a minute is minutes and seconds', formatElapsed(750_000) === '12m 30s')
-  check('the elapsed time comes from the session start',
-    Math.abs((elapsedSince({ createdAt: Date.now() - 5_000 }) ?? 0) - 5_000) < 1_000)
-  check('a session with no start time has no elapsed time', elapsedSince({}) === undefined)
-  check('a bad start time has no elapsed time', elapsedSince({ createdAt: 0 }) === undefined)
+  const instant = new Date(2026, 10, 6, 20, 14, 3).getTime()
+  check('the start comes from the session', startOf({ createdAt: instant }) === instant)
+  check('a session with no start has none', startOf({}) === undefined)
+  check('a bad start has none', startOf({ createdAt: 0 }) === undefined)
+  const clock = formatClock(instant, new Date(instant))
+  check('the start is rendered as a local date and time',
+    /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \(UTC[+-]\d{2}:\d{2}\)$/.test(clock))
+  check('the rendered start names the same instant',
+    new Date(clock.slice(0, 19).replace(' ', 'T')).getTime() === instant)
 }
 
 // The parent does not verify the children: the doctrine says so in its own
