@@ -1,0 +1,43 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 111753,
+  "timedOut": false,
+  "sessionId": "session-a4a7420e-43e6-4e0f-a4c8-552f0965121d",
+  "stderr": "",
+  "steps": 4,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 21135,
+    "outputTokens": 8605,
+    "cacheReadTokens": 73728,
+    "totalTokens": 103468
+  },
+  "formation": {
+    "agents": 2,
+    "input": 64848,
+    "output": 22596,
+    "cacheRead": 450816,
+    "total": 538260,
+    "steps": 16
+  },
+  "mainPrompt": 31672,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 18803,
+  "thinkingPreview": "Let me understand the task. The user asks about a directory `D:\\code\\vibedsh-refine-loop` (the path given has some weird formatting with backslashes possibly stripped: \"D:codeibedsh-refine-looperify\" → `D:\\code\\vibedsh-refine-loop\\verify`). Let me check the workspace root D:\\code\\vibe. Maybe there's a directory `vibedsh-refine-loop` inside D:\\code\\vibe? Hmm, \"D:\\code\\vibedsh-refine-loop\\verify\" — the pattern \"D:codeibedsh-refine-looperify\" suggests \"D:\\code\\vibe\" + \"dsh-refine-loop\\verify\"? Wait: \"D:codeibedsh-refine-looperify\" → stripping backslashes: \"D:code\" + \"vibe\"? Hmm. Actually the string is `D:codeibedsh-refine-looperify`. If original is `D:\\code\\vibe\\dsh-refine-loop\\verify`, removing backslashes gives `D:codevibedsh-refine-loopverify` — but we have `D:codeibedsh-refine-looperify` which is missing \"v\" and has \"erify\" after \"loop\". Hmm, maybe the original was `D:\\code\\vibe` + `dsh",
+  "finalText": "三个问题都查清了，全程只读（未修改任何文件）。项目实际路径：`D:\\code\\vibe\\dsh-refine-loop`。\n\n## 1. `verify/` 下每个 .spec.ts 实际测的入口函数\n\n所有 spec 都直接 `import` 自 `../src/*.ts`（源码，非构建产物），所以入口函数可从 import 行直接确认：\n\n| spec 文件 | 行数 | 实际调用的入口函数（import 来源） |\n|---|---|---|\n| `refine.spec.ts` | 81 | `parseBatchArgs`、`renderBatch`（src/batch.js）+ `parsePolicyCommand`（src/policy.js） |\n| `batch.spec.ts` | 178 | `runBatch`（主入口）、`capOutput`、`MAX_CALL_OUTPUT_CHARS`（src/batch.js） |\n| `concurrency.spec.ts` | 123 | `buildOverrides`、`isReadOnlyCommand`、`mayRunTogether`（src/concurrency.js）+ `runBatch`（src/batch.js） |\n| `fork.spec.ts` | 122 | `buildSeedFromNow`、`openTurnClosers`（src/fork.ts） |\n| `plan.spec.ts` | 407 | `runPlan`、`renderPlan`（src/tool.js）+ `WORKER_MARKER`、`buildGroups`、`parsePlanArgs`（src/plan.js） |\n| `repair.spec.ts` | 162 | `parseRepair`（src/repair.js）+ `runBatch`（src/batch.js） |\n| `retain.spec.ts` | 102 | `applyReportRetention`（src/index.js）+ `PLAN_TOOL`（src/tool.js） |\n| `rounds.spec.ts` | 169 | `Rounds`、`NEXT_ROUND`、`ROUND_LOOP`、`WORKER_NO_PLAN`、`Workers`、`applyTurnDoctrine`、`applyWorkerRule`、`isWorkerConversation`（src/rounds.ts）+ `WORKER_MARKER`（src/plan.ts） |\n\n注意文件名会骗人：`refine.spec.ts` 测的是 batch/policy；`retain.spec.ts` 测的是 index.ts 的 `applyReportRetention`；`plan.spec.ts` 的一半落在 tool.ts 而不是 plan.ts。\n\n## 2. 8 个模块里没有对应 spec 的\n\n`src/` 下共 9 个 `.ts`，排除插件入口 `index.ts` 正好是你说的 8 个功能模块。\n\n**按\"同名 spec 文件\"算，缺 2 个：**\n- **`policy.ts`** — 没有 `policy.spec.ts`。只有 `parsePolicyCommand` 被 `refine.spec.ts` 顺带碰了一下；`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全无覆盖。\n- **`tool.ts`** — 没有 `tool.spec.ts`。只在 `plan.spec.ts` 里测到 `runPlan`/`renderPlan`、`retain.spec.ts` 里测到 `PLAN_TOOL` 常量；真正的注册入口 `applyPlanTool` 没测。\n\n**再按\"实际会被跑到\"算，还要加上 1 个：**\n- **`repair.ts`** — `repair.spec.ts` 文件存在，但 `verify/run-specs.mjs` 的 specs 数组只有 7 项（`refine / batch / concurrency / plan / rounds / fork / retain`），**`repair.spec.ts` 不在里面，从未执行过**。而且它也只测 `parseRepair` 这一个函数。\n\n（另：`index.ts` 不在这 8 个之内，它同样没有自己的 spec，只有 `retain.spec.ts` 覆盖了 `applyReportRetention`，主入口 `apply` 没测。）\n\n有专属 spec 的：`batch.ts`、`concurrency.ts`、`fork.ts`、`plan.ts`、`rounds.ts`。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts` —— 575 行**（总行数，含注释与空行）。\n\n| src 模块 | 行数 |\n|---|---|\n| **tool.ts** | **575** |\n| fork.ts | 549 |\n| batch.ts | 409 |\n| rounds.ts | 387 |\n| index.ts | 351 |\n| policy.ts | 241 |\n| concurrency.ts | 234 |\n| plan.ts | 225 |\n| repair.ts | 173 |\n\n一行提醒：行数最多的是 `tool.ts`，但它恰好也是没有专属 spec 的模块之一——体量最大的那个文件，测试覆盖却最薄。"
+}

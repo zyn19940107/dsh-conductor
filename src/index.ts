@@ -69,9 +69,8 @@ export const REFINE_GUIDANCE = [
   + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
   + '"order": "sequential", or a worker.',
   '- An agent node answers with its conclusion, and that conclusion is what you judge from and what goes '
-  + 'into your answer as it stands. Ask for three things, compactly: what it found out, roughly how it did '
-  + 'it, and what came of it. The raw tool output of a round is capped, so a bare verdict leaves you unable '
-  + 'to judge.',
+  + 'into your answer as it stands. Ask for the substance, compactly: what it found out, roughly how, and '
+  + 'what came of it — no line numbers, no file paths, no citation trail.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',

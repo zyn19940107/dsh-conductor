@@ -6,7 +6,7 @@
  * look at the overlap rather than at a summary.
  */
 
-import { capNodeOutput, capOutput, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
+import { capAgentOutput, capNodeOutput, capOutput, MAX_AGENT_OUTPUT_CHARS, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
 
 let failures = 0
 
@@ -186,6 +186,18 @@ console.log('a call that fails is reported, not thrown')
   check('the node cap says what it dropped', capped.includes("characters of this node's 50000-character output were left out"))
   check('the node cap names every call', capped.includes('1. read ok') && capped.includes('2. pwsh failed'))
   check('a small tools node is untouched', capNodeOutput('short', results) === 'short')
+}
+
+// A conclusion is knowledge and gets more room than raw output, but a child
+// that pastes a whole file still has to be bounded.
+{
+  const big = 'H'.repeat(4000) + 'M'.repeat(20000) + 'T'.repeat(2000)
+  const capped = capAgentOutput(big)
+  check('a long conclusion is capped', capped.length <= MAX_AGENT_OUTPUT_CHARS + 200, String(capped.length))
+  check('the conclusion cap keeps the head', capped.startsWith('HHHH'))
+  check('the conclusion cap keeps the tail', capped.endsWith('TTTT'))
+  check('the conclusion cap says what it dropped', capped.includes('characters of this 26000-character conclusion were left out'))
+  check('a short conclusion is untouched', capAgentOutput('short') === 'short')
 }
 
 if (failures > 0) {

@@ -262,6 +262,40 @@ ${tail}`
 }
 
 /**
+ * How much of an agent node's conclusion reaches the plan report.
+ *
+ * A conclusion is knowledge, not raw material, so it gets more room than a
+ * tools node: the parent judges from it and it is the bulk of what it knows
+ * about the round. It still needs a ceiling — a child that pastes a whole file
+ * into its answer would undo the cap on the raw output it just avoided.
+ */
+export const MAX_AGENT_OUTPUT_CHARS = 6000
+
+/** How much of the conclusion's head survives the cap; the tail gets the rest. */
+const AGENT_HEAD_CHARS = 4000
+const AGENT_TAIL_CHARS = MAX_AGENT_OUTPUT_CHARS - AGENT_HEAD_CHARS
+
+/**
+ * Cap one agent node's conclusion, keeping its head and its tail.
+ *
+ * @param output - the conclusion the child returned.
+ * @returns the conclusion, or its capped form with a marker saying what was cut.
+ */
+export function capAgentOutput(output: string): string {
+  if (output.length <= MAX_AGENT_OUTPUT_CHARS) return output
+  const head = output.slice(0, AGENT_HEAD_CHARS)
+  const tail = output.slice(-AGENT_TAIL_CHARS)
+  const removed = output.length - MAX_AGENT_OUTPUT_CHARS
+  const note = `[... ${removed} characters of this ${output.length}-character conclusion were left out; `
+    + 'the head and the tail are above ...]'
+  return `${head}
+
+${note}
+
+${tail}`
+}
+
+/**
  * How many times one failed call may be repaired.
  */
 export const MAX_REPAIRS = 2
