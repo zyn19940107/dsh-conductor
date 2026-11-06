@@ -1,0 +1,44 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 258211,
+  "timedOut": false,
+  "sessionId": "session-1705fc09-21e1-47ba-868d-a74228e86634",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 15630,
+    "outputTokens": 4722,
+    "cacheReadTokens": 13568,
+    "totalTokens": 33920
+  },
+  "formation": {
+    "agents": 4,
+    "input": 183006,
+    "output": 33115,
+    "cacheRead": 1424896,
+    "total": 1641017,
+    "steps": 36
+  },
+  "mainPrompt": 17815,
+  "correctness": {
+    "passed": 4,
+    "total": 6,
+    "missing": [
+      "说清了规则现在住哪(缺:rounds.ts)",
+      "子代理限制的字段(缺:delegationDepth)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 4241,
+  "thinkingPreview": "The user wants a read-only review of three parts of D:\\code\\vibe\\dsh-refine-loop. Let me first look at the repo structure.\n\nPer the workflow: my first message of the round IS the plan — I hand it over before calling anything else. But I need to explore first to design the plan... Actually the instruction says \"your first message of the round IS the plan: you hand it over before you call anything else, no tool call comes first.\" Hmm, but I need to know the repo layout to design a plan. The rule says design the plan and hand it over before calling anything else. But practically, a tools node can do discovery.\n\nActually, I can design a plan that includes a tools node doing discovery + reads, and three worker nodes each reviewing one part. But the workers need to know what to look at. They can find the files themselves — worker tasks carry what to do and what finished looks like. Since the t",
+  "finalText": "三处审查都已完成,结论如下(只读,未改动任何文件)。\n\n## 1. src/plan.ts —— 计划的数据结构\n\n**输入结构**只有一层,结果结构不在这个模块里:\n\n- `PlanArgs = { criteria: string[]; nodes: PlanNode[] }`\n- `PlanNode = { id, kind, calls[], task, order, writes[], budgetMs }` —— 所有节点都是\"胖对象\",字段全在,按种类填不同的槽:`tools` 节点填 `calls`、`task` 置空;agent 节点填 `task`、`calls` 置空。\n- 结果侧在工具模块:`PlanNodeResult { id, kind, ok, output, error }` 与 `PlanOutput { criteria, groups, nodes }`。模块边界即输入/输出边界。\n\n**节点四种**,靠 `kind` 判别:`tools` / `worker` / `spawner` / `forker`,枚举被硬编码在校验里,不在枚举内整份计划直接作废(返回空,不抛错)。代码用三组常量区分:`AGENT_NODE_KINDS` = worker/spawner/forker(会起子代理),`WORKER_NODE_KINDS` = 只有 worker(叶子)。所有 agent 节点都走插件自己的派生通道而非宿主委派工具——因为插件要拿到子代理句柄,才能在预算到期时叫停它并索要状态。差别在于:worker 不能再调计划工具,forker 可以但继承本轮上下文,spawner 同样可以但从空白起步。\n\n**调用参数的处理**:不做白名单、不做类型检查,`arguments` 原样透传,只有 `undefined` 被替成空对象;工具名只校验\"trim 后非空\",不验证工具是否存在——真正的形状校验在执行期由注册表完成。调用失败后走**修复**:拿失败的名字、参数、错误文本和该工具声明的参数形态去问模型,最多修两次(共三次尝试);模型给的修正里名字回退到原名,参数必须是普通对象否则视为无效。规范化细节:id/工具名/task/writes 路径 trim;criteria 过滤空项后为空则计划无效;`order` 只认 `sequential`,其余一律当 `parallel`;`budgetMs` 非有限或非正归零,否则四舍五入并截到 1 小时上限;task 文本无长度上限,只要求非空;节点数上限不在此模块,在工具模块执行时检查并抛错。\n\n另外还提供一个**分组函数**:声明了 `writes` 且写同一文件的节点被拆进不同组,组内并行、组间串行——所以\"一层同时跑\"只在无写冲突时成立。`writes` 只按字面字符串比较,不做路径规范化。\n\n## 2. 被强制的规则\n\n**规则本体是\"一轮 = 一张图\"**:一轮要么交出一张计划图,要么直接写结论;图跑完就结束,图没解决的下轮再说。**但只有后半截被代码强制**:\n\n- **「图跑完只能判断」= 硬约束。** 工具表上挂了判定守卫:本次请求已产出过计划图后,模型自己发起的任何工具调用一律被拒(靠比较调用 id 与根调用 id 判定\"模型自己发起\"),只放行计划工具,拒答文案是\"图已经跑完,结果都在上面;这一轮是判断:写结论,或者用计划工具交下一张图\"。图内部的嵌套调用不受限。\n- **「第一条消息必须是图」= 提示,不是机制。** 每轮开始前插件把\"四步循环\"教条作为**最后一条消息**塞给模型,但代码里没有任何东西拦\"还没交图就先调工具\";那个\"计划开始时回调\"的钩子定义了却从未接线,所以没人观察第一次调用是什么。\n\n其余按强制强度分层:内置直调子代理工具被重新注册、描述改写,直调即报错(\"委派发生在计划里,请加 worker/spawner/forker 节点\");worker 里画图在**子会话创建之前**就登记好,所以第一次画图尝试也会被拒;后台子代理管理工具整个从工具表移除;计划报告在执行后钩子里改走 `value` 通道返回,绕开 harness 的溢出截断(失败结果原样放行,否则会掩盖真失败);子代理结论里带出处位置/导入/引用标记的**整行**被正则删除(全篇都是这类行则原样保留);深度上限 3、节点预算封顶 1 小时。\n\n触发状态机:计划跑完 → 清除标记 → 轮次 +1 → 未超上限(默认 16)就排入\"图跑完了,判断一下\"的跟进消息并结束当前 turn,harness 开下一轮;轮次用尽则本轮直接结束。会话开关 `/dsh-conductor off` 会摘掉计划工具和提示词指引,规则自然不生效——**但教条消息仍照发**(教条钩子不查开关),所以\"关掉\"不等于沉默。弱约定部分:\"每轮第一句必须是图\"\"每个节点都要写预算\"\"结论不要带收据\"里的前两条只有提示劝,代码不强制(没写预算就一路跑到运行器上限)。\n\n## 3. src/tool.ts —— 计划怎么跑、子代理受什么限制\n\n**入口**:工具参数是结构化 schema 而非自由 JSON,顶层只有 `criteria` 和 `nodes`;节点对象 `additionalProperties: false`。真正的闸门是运行时的解析函数:白名单重建节点对象(未知字段静默丢弃)、kind 非法或 id 重复则整份计划作废、tools 节点必须至少一个 call、agent 节点必须非空 task。解析失败或节点数超限(默认 8)时**抛错给模型看**。\n\n**执行链**:工具 `execute` → 解析 → 取本对话的调用配置 → `runPlan`。`runPlan` 先按 `writes` 冲突分组,然后逐组 await:组内 `Promise.all` 并行,组间串行。每组内交给 `runNode`:\n\n- **tools**:调用列表丢进批次执行器,批次按工具自身的并发安全声明切\"波\",安全的一波并发、独占的一波串行;节点 `order: sequential` 则严格按写下的顺序跑;每个 call 输出截到 5000 字符(留头留尾),节点合并后再截一次。\n- **worker/forker**:用插件自己的 spawn 起子会话,**继承当前对话日志**(以此刻为界,末尾未闭合的 turn/step 由合成的工具结果补齐),prompt = 任务 + 计划判据 + 固定回报契约;worker 额外带\"自己干、别画计划也别派活\"的开场标记。\n- **spawner**:同样由插件起会话,但不带任何继承,完全空白起步。\n\n**汇总**:每节点统一产出 `id/kind/ok/output/error`;节点失败**不中止计划**,只标失败并写入 error;只有计划解析失败或超限才整体抛错。报告按计划里写的顺序排列,渲染成一段文本并**整份交回**。跑完后若还有轮次预算,排下一轮并结束当前 turn。\n\n**预算与失败**:tools 节点 budgetMs 到点 abort 仍在跑的调用,已完成部分保留;调用失败最多修复两次。agent 节点 budgetMs 到点不直接杀——先取消子会话,再给一个有限窗口(45 秒到预算四分之一之间)自选\"最短路径收尾\"或\"报告当前状态\";无产出报\"没有给出答案\";被取消报\"计划被取消\"。节点另有独立天花板(默认 9 分钟),整轮有工具级上限(默认 15 分钟),深度上限默认 3(子会话里的计划不许再起代理)。\n\n**子代理的限制**——拿到的:与父对话**完全相同**的工具表和请求头(刻意为之,子代理继承父会话前缀,工具表一变前缀缓存就不命中)、相同工作目录、父会话 id、递增的委派深度;worker/forker 继承此刻的完整对话(含正在进行的这一轮),spawner 一无所有;产出取子会话日志里最后一段助手文本,无结构化字段。**代码强制剥夺的**:worker 调不到计划工具(工具留在表里保缓存,调用点被守卫拦);worker 拿不到轮次教条(认会话靠登记 + 开场标记);直接委派被封(模型自己发起的根调用报错,计划内部的嵌套调用放行);管子/通知/中断类工具直接 deny;子会话里的计划不能再起代理;回报文本里带出处痕迹的整行被丢弃;计划跑过后模型自己再直接调工具会被拦。**只靠提示、没有代码保证的**:回报契约里\"结论优先、别写过程、别带文件路径、别写长、不要清单表格\"全靠说——代码只丢出处痕迹那几类行,文件路径不拦;\"节点的标准写在任务里、不做事后检查\"也是自觉,没有任何环节拿产出对照判据打分;**子代理的写权限与父对话一样大**,`writes` 只是模型自述,插件无法发现未声明的写冲突。\n\n## 汇总\n\ndsh-refine-loop 是一台\"一轮一张图\"的执行机器:计划侧只定义输入结构(`criteria` + `nodes`),节点按 `kind` 分四种——tools 跑已定参的调用批,worker 是不能再画图的叶子,spawner 从空白起步,forker 继承本轮上下文并可再画图——所有 agent 节点都走插件自带的派生通道,以便预算到期时能叫停子代理并索要状态;调用参数原样透传、不做白名单,形状校验推迟到执行期由注册表完成,失败最多让模型修复两次,`budgetMs` 非正即视为未声明而只吃节点天花板。真正被代码强制的规则只有\"一张图跑完就只能判断\":判定守卫会拒绝模型在图跑完后自己发起的任何直接工"
+}

@@ -1,0 +1,43 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 115792,
+  "timedOut": false,
+  "sessionId": "session-6bbd2834-44f9-4818-aa79-a9b616b66953",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "glob",
+    "glob"
+  ],
+  "usage": {
+    "inputTokens": 3265,
+    "outputTokens": 2669,
+    "cacheReadTokens": 39727,
+    "totalTokens": 45661
+  },
+  "formation": {
+    "agents": 4,
+    "input": 111577,
+    "output": 25102,
+    "cacheRead": 1053441,
+    "total": 1190120,
+    "steps": 38
+  },
+  "mainPrompt": 16016,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 3585,
+  "thinkingPreview": "The user asks three read-only questions about D:\\code\\vibe\\dsh-refine-loop\\verify (spec files) and D:\\code\\vibe\\dsh-refine-loop\\src (8 modules).\n\nPer instructions, I should design a plan and hand it over with refine_plan first. Let me plan: independent nodes — one to read spec files in verify/, one to list src/ modules and check specs coverage, one to count lines of each src module.\n\nActually these are all read-only explorations. Let me first look at the directory structure to understand. But the rule says my first message of the round IS the plan — no tool call comes first. So I need to hand over the plan.\n\nLet me design nodes:\n- node \"specs\": worker — read all .spec.ts under D:\\code\\vibe\\dsh-refine-loop\\verify, determine which entry function each spec actually tests (imports + describe/it names, calls under test).\n- node \"src-modules\": worker — list the 8 modules under src, map to spec",
+  "finalText": "## 结论\n\n### 1) verify 下每个 .spec.ts 实际测的入口函数\n\n| spec 文件 | 实际主测入口 | 同一文件里附带被测 |\n|---|---|---|\n| `plan.spec.ts` | `runPlan`（src/tool.ts） | `renderPlan`（tool.ts）、`parsePlanArgs`、`buildGroups`、`WORKER_MARKER`（plan.ts） |\n| `batch.spec.ts` | `runBatch`（src/batch.ts） | `capOutput`、`capNodeOutput`、`scrubConclusion` |\n| `refine.spec.ts` | `parseBatchArgs`（src/batch） | `renderBatch`；后半段测 `parsePolicyCommand`（src/policy.ts） |\n| `rounds.spec.ts` | `applyTurnDoctrine`（src/rounds.ts） | `applyWorkerRule`、`Rounds`、`Workers.mark`、`isWorkerConversation`、`NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN` |\n| `fork.spec.ts` | `buildSeedFromNow`（src/fork.ts） | `openTurnClosers`（同模块） |\n| `repair.spec.ts` | `runBatch` 的修复回调分支（src/batch.ts） | `parseRepair`（src/repair.ts） |\n| `retain.spec.ts` | `applyReportRetention`（src/index.ts） | `PLAN_TOOL` 常量（tool.ts） |\n| `concurrency.spec.ts` | `isReadOnlyCommand`（src/concurrency.ts） | `mayRunTogether`、`buildOverrides`；末段借 `runBatch` 验批内调用顺序 |\n\n注意文件名与被测对象并不一致：**仓库里没有 refine 模块**，`plan.spec.ts` 的主角住在 `tool.ts`，`retain.spec.ts` 测的是 `index.ts`。\n\n### 2) src 下 8 个模块里哪些没有对应的 spec\n\nsrc 实际是 9 个 `.ts`（扁平无子目录）：8 个功能模块 + 插件入口 `index.ts`。按「8 个功能模块」这口径，**没有专属同名 spec 的是 `policy.ts` 和 `tool.ts`**：\n\n- **policy.ts** — 无 policy.spec.ts，只有 `parsePolicyCommand` 被 refine.spec.ts 顺带测到；`SessionPolicy`、`runPolicyCommand`、`applyPolicyCommand`、`applyPolicyMessage` 全部无人测。\n- **tool.ts** — 无 tool.spec.ts；`runPlan`/`renderPlan` 由 plan.spec.ts 测，`PLAN_TOOL` 只是 retain.spec.ts 借去的常量，`applyPlanTool` 无人测。\n- 若把入口 `index.ts` 也算进模块，它同样没有 index.spec.ts（仅 `applyReportRetention` 被 retain.spec.ts 覆盖）。\n\n其余（batch、concurrency、fork、plan、rounds、repair）都有对应 spec。\n\n⚠️ 一个附带发现（来自覆盖调查）：`verify/run-specs.mjs` 的执行清单只有 7 项（refine / batch / concurrency / plan / rounds / fork / retain），**repair.spec.ts 在盘上但不在清单里**，所以 `pnpm specs` 实际不会执行那套修复环断言——这意味着 repair.ts 的验收覆盖实际为零。\n\n### 3) 行数最多的模块\n\n**`src/tool.ts`，600 行**（文件总行数口径）。同一文件在另外两种口径下也仍然最长：非空行 578，剔除整行注释后约 447 行代码。\n\n全部 8 个模块行数对照（总行数 / 非空行 / 近似代码行）：\n\n| 模块 | 总行 | 非空 | 代码行 |\n|---|---|---|---|\n| tool | 600 | 578 | 447 |\n| fork | 549 | 520 | 346 |\n| batch | 476 | 444 | 229 |\n| rounds | 390 | 362 | 163 |\n| policy | 241 | 228 | 115 |\n| concurrency | 234 | 224 | 116 |\n| plan | 225 | 207 | 97 |\n| repair | 173 | 162 | 88 |\n\n（入口文件 `index.ts` 为 358 行，计入与否都不影响「最长是 tool.ts」的结论。）\n\n全程只读，未修改任何文件。"
+}

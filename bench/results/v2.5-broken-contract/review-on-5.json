@@ -1,0 +1,46 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 231641,
+  "timedOut": false,
+  "sessionId": "session-5c2b2097-7398-4d43-a197-b17936d7dc4a",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "glob",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 17595,
+    "outputTokens": 6737,
+    "cacheReadTokens": 32768,
+    "totalTokens": 57100
+  },
+  "formation": {
+    "agents": 4,
+    "input": 189113,
+    "output": 26942,
+    "cacheRead": 690176,
+    "total": 906231,
+    "steps": 29
+  },
+  "mainPrompt": 19750,
+  "correctness": {
+    "passed": 4,
+    "total": 6,
+    "missing": [
+      "说清了规则现在住哪(缺:rounds.ts)",
+      "子代理限制的字段(缺:delegationDepth)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 12983,
+  "thinkingPreview": "Let me start by exploring the project structure to understand what's there.\n\nThe task: independently review three parts of D:\\code\\vibe\\dsh-refine-loop:\n1. src/plan.ts — plan data structure, node kinds, how call arguments are handled\n2. The rule this plugin enforces — how it's implemented, trigger conditions\n3. src/tool.ts — how plans are run, what restrictions sub-agents get\n\nThen summarize into one paragraph. Read-only.\n\nI need to first design the plan and hand it over with refine_plan. But I should first look at the repo... Actually the runtime context says: \"your first message of the round IS the plan: you hand it over before you call anything else, no tool call comes first.\"\n\nHmm, but I need to know the file structure to design a plan. The instruction says hand over the plan first. But I can do a quick exploration first? The rule says the first message of the round IS the plan, no t",
+  "finalText": "三份结论如下(全部只读,未改动任何文件)。\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n顶层只有 `PlanArgs = { criteria: string[]; nodes: PlanNode[] }`:没有 meta,也没有顶层预算,预算只挂在节点上。\n\n节点 `PlanNode` 固定七个字段:`id: string`、`kind: PlanNodeKind`、`calls: PlanToolCall[]`、`task: string`、`order: PlanNodeOrder`、`writes: string[]`、`budgetMs: number`。其中 `PlanToolCall = { name: string; arguments: unknown }`,`PlanNodeKind = 'tools' | 'worker' | 'spawner' | 'forker'`,`PlanNodeOrder = 'parallel' | 'sequential'`。关键点是**四种 kind 规范化后都带齐这七个字段**——tools 节点的 `task` 恒为 `''`,agent 节点的 `calls` 恒为 `[]`,所以判别节点形态靠的是 kind 加上\"哪个字段非空\",而不是字段是否存在。模块还导出 `AGENT_NODE_KINDS` 与 `NODE_AGENT_KINDS`(内容重复,只有前者被运行层消费)、`WORKER_NODE_KINDS`(定义了但无消费点)、`MAX_NODE_BUDGET_MS = 3_600_000`、`WORKER_MARKER = '[refine-loop worker]'`。plan.ts 本身不承载 forker 与 spawner 的\"继承/空手\"差别,它只把 kind 原样下传。\n\n调用参数的处理只做形状检查:`call` 必须是非 null 对象,`name` 必须是非空字符串(会 trim),`arguments` 原样透传、类型为 `unknown`,**计划层不做任何 schema 校验**——真正的参数 schema 在工具注册层(`arguments: { type: 'json', required: true }`),由运行时兜底;缺失时补 `{}`。节点与 call 上的多余字段被静默丢弃(节点对象逐字段重建)。默认值:`order` 只有恰为 `'sequential'` 才生效,否则一律 `'parallel'`;`writes` 缺失或非数组为 `[]`,只留 trim 后非空的字符串;`budgetMs` 仅在有限正数时生效,四舍五入后按 `MAX_NODE_BUDGET_MS` 截断,否则为 `0`(0 表示未声明,节点会一直跑到运行器天花板)。`parsePlanArgs` 不抛错,只返回 `undefined`:criteria/nodes 非数组、criteria 无一条合法非空串、节点非对象、id 缺失或为空、kind 非法、id 重复、tools 节点缺 calls、call 的 name 为空、agent 节点(含 spawner)task 为空,都算无效;调用方再转成一句笼统报错。**空计划是合法的**(criteria 非空而 nodes 为空),语义就是\"这轮直接收尾\"。`buildGroups` 按声明顺序分组,只有两个节点声明了同一个 `writes` 文件时才被拆开,未声明 writes 的节点按其自述相信;组内并行、组间顺序。\n\n## 2. 被强制的规则\n\n规则是**\"一个回合 = 一张图\"**:每轮第一条消息必须是那张图(`refine_plan`),交图之前不调任何工具;图跑完后这轮只剩两件事——写结论,或交下一张图,不能再一个一个调工具干活;派发子代理也只能作为图里的节点,不能直接调用 harness 自带的委派工具。\n\n实现上全靠 harness 的公开扩展点,没动循环结构:\n\n- **tool guard**:本请求已跑完过一张图后,模型**自己发起**的顶层工具调用(call id 等于根 call id)除计划工具外一律被拒,理由是\"图已经跑完,这一轮是判断阶段\";计划内部发出的调用嵌套在计划那次调用之下,豁免;人说话时该状态重新武装。\n- **委派闸门**:每个 agent 创建时重注册 harness 的 `subagent` / `subagent_fork`,换掉描述说明\"委派发生在图里\";顶层直调抛\"委派要作为 worker/spawner/forker 节点\",嵌套在计划下的调用照常放行。\n- **worker 闸门**:worker 会话里调用计划工具被拒(\"You are a worker…\"),但工具**故意留在表里**——摘掉会改请求头、让继承前缀的 KV cache 失效;worker 会话由插件在建子会话前登记 session id,或由首条消息的 worker 标记识别。\n- **其它**:后台子代理管理工具(`list_agents` / `send_message` / `interrupt_agent`)从所有 agent 的工具表里整个移除(隐藏而非拒绝);计划报告用带 value 的方式返回,绕开 harness 的 spill 截断。\n- **另一条较小的强制**:子代理只交结论不交 paperwork——交付契约追加在节点 task 之后并声明压过 task,随后结论逐行清洗,点名具体代码位置或引用出处的整行被丢掉(整段都这样才原样保留)。\n\n触发条件:机制只管住\"图跑完之后\"这一半;**\"第一条消息必须是图\"只是提示**——插件不拦交图前的工具调用,也不把没交图的一轮拉回来(早期版本的闸门已被删除),README 明说这点并称实测交图率很高。guard 只看顶层模型调用;人一说话就重置轮次预算并重新期待一张图,轮次上限(默认 16)用完后不再排下一轮。会话级开关 `off` 会把计划工具从该会话 scope 摘掉、指引渲染为空,规则不再被强制;插件整体关闭时什么都不挂载:没有工具、没有指引、没有规则。worker 会话不收教条消息且计划工具被拒;子代理深度超限时该节点直接报错而非继续派生。\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n`refine_plan` 注册为一个工具,两个必填参数 `criteria: string[]` 与 `nodes: object[]`;节点 schema 恰好允许 `id`、`kind`、`calls`(每项 `{name, arguments}`,arguments 为自由 JSON)、`task`、`order`、`writes`、`budgetMs`,未知字段被 schema 拒绝;整次调用受工具自身 `timeoutMs` 约束(计划预算,默认 15 分钟)。\n\n执行是 parse → validate → 限额 → run → report:`parsePlanArgs` 返回 undefined 时抛\"refine_plan needs criteria, and nodes that each have an id and a kind\";节点数超过 `maxBatchSize`(默认 8)抛\"split it\"错误;归一化规则同第 1 节;插件从不拿目标工具自己的 schema 校验参数载荷,那发生在执行时。计划内某个调用失败时,最多 `MAX_REPAIRS`(2)次用**本会话自己的模型、在本会话的 provider 与 config 上**讨要一份修正后的 `{name, arguments}`,只动失败的那一个调用。`runPlan` 先 `buildGroups`,于是是**波次式**而非一刀平铺:组间顺序、组内并行;结果以 id 为键,按计划顺序返回 `PlanOutput { criteria, groups, nodes }` 与 `PlanNodeResult { id, kind, ok, output, error }`。tools 节点的调用走注册表自己的管线,在不可共存的调用处切成波,`order: 'sequential'` 则严格按书写顺序;每次调用输出截到 5000 字符(保留头尾),节点合并输出同样截断,并附一份点名每个调用的名册。agent 节点先做深度检查:达到或超过 `maxAgentDepth`(默认 3)直接以\"this conversation is already a delegated child\"失败。计划跑完后由 `onPlanFinished` 决定是否排下一轮(受 `maxRounds` 默认 16 约束):要排就投递下一轮指令并调 `exec.concludeTurn()` 让 harness 开启它,否则回合自然结束。报告刻意保持完整:post-execute 钩子返回计划的 value 而非 content,让 harness 的 spill/截断策略永远切不到中间。\n\n派出去的子代理受到的限制:\n\n- **上下文**:worker 与 forker 由父会话\"此刻\"的事件播种(含在飞的那一轮),开放尾部用合成的 tool result 闭合;spawner 从空白开始。子代理的第一条消息就是 agent prompt:task → 计划据以评判的 criteria → 契约。\n- **工具**"
+}

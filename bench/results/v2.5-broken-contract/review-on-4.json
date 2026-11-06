@@ -1,0 +1,44 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 247351,
+  "timedOut": false,
+  "sessionId": "session-f4b803fb-d826-494b-983d-9175e71128a6",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 3458,
+    "outputTokens": 5791,
+    "cacheReadTokens": 25088,
+    "totalTokens": 34337
+  },
+  "formation": {
+    "agents": 4,
+    "input": 159176,
+    "output": 34463,
+    "cacheRead": 1376512,
+    "total": 1570151,
+    "steps": 37
+  },
+  "mainPrompt": 17163,
+  "correctness": {
+    "passed": 4,
+    "total": 6,
+    "missing": [
+      "说清了规则现在住哪(缺:rounds.ts)",
+      "子代理限制的字段(缺:delegationDepth)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 12112,
+  "thinkingPreview": "The user wants a read-only review of three parts of D:\\code\\vibe\\dsh-refine-loop. Let me plan.\n\nPer the runtime context, my first message of the round IS the plan — I need to hand over the plan via refine_plan before other tool calls.\n\nThe three parts:\n1. src/plan.ts — data structure of the plan, node kinds, how call arguments are handled.\n2. The forced rule of the plugin — what it is, how implemented, trigger conditions.\n3. src/tool.ts — how the plan gets run, what limits subagents get.\n\nThen summarize into one paragraph.\n\nThese are three independent reviews. I could use three worker nodes in parallel, each reviewing one part. That's the natural fan-out. Let me first check the repo structure... but the instruction says the first message must be the plan and no tool call comes first. Hmm, \"your first message of the round IS the plan: you hand it over before you call anything else, no too",
+  "finalText": "三个部分的审查都回来了,结论如下。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**顶层只有两个字段**:`criteria`(字符串数组,判据)和 `nodes`(节点数组)。\n\n**节点是一个扁平接口,四种 kind 共用同一组字段**:`id`、`kind`、`calls`、`task`、`order`、`writes`、`budgetMs`,哪个字段有内容由 kind 决定 —— tools 节点填 `calls`、`task` 置空;agent 节点填 `task`、`calls` 置空数组。\n\n- `calls` 的元素是 `{name, arguments}`,`arguments` 是**不受类型约束的自由 JSON**,插件不按目标工具自己的参数 schema 去约束它;\n- `order` 只有 `parallel`(默认)和 `sequential`;\n- `writes` 是文件路径数组,`budgetMs` 是毫秒,0 表示没声明,会被压到一个小时上限。\n\n**四种节点**:tools(纯工具调用批,参数已定,无子代理无继承上下文,最便宜)、worker(叶子子代理,继承当前对话,不能再往下派)、forker(领导者,继承当前对话,自己再通过 refine_plan 派子代理,所以 task 只写目标与标准)、spawner(领导者,但从空白开始,看不见本对话,task 必须自带全部背景)。四种 kind 全走插件自己的 spawn 路径而不是 harness 的委派工具 —— 因为插件需要子代理的句柄,才能在预算耗尽时让它汇报状态而不是无声杀掉。\n\n**校验是两层**:外层是工具自己声明的 JSON schema(harness 在 execute 前校验,节点不允许额外属性,kind 与 order 取枚举);内层是 `parsePlanArgs` 的语义校验 —— criteria 必须是非空字符串数组、节点 id 非空且不重复、kind 必须在那四种之内、`budgetMs` 只有有限正数才算数否则当 0 并压上限、只有显式写 `sequential` 才生效、tools 节点 `calls` 不能为空且每个 `name` 非空、agent 节点 `task` 非空。任何一项不合规,整份计划判无效并抛回模型;唯一例外是 `nodes` 为空 —— 那表示这一轮已经够了,直接交结论。\n\n**`arguments` 本身不做语义校验**,原样交给工具注册表的执行管线,所以普通工具调用的所有护栏对计划里的调用一样生效;插件只在两处读它:并发分级,和只读 shell 的判定。附带发现:仓库里的示例计划文件还留着 `description` 和 `after` 两个字段,现在的解析器忽略未知字段,但 schema 禁止节点带额外属性,照那份示例原样提交会在参数校验阶段被挡下 —— 是旧版遗留。\n\n---\n\n## 2. 插件强制的那条规则\n\n**规则是「一轮 = 一个计划」**:模型必须画出计划并用 refine_plan 交出去;计划跑完,这一轮就结束了,模型只能做两件事 —— 写结论(结束循环)或交下一轮的计划。怎么切分、用哪种节点、花多久、回报什么,都刻意留给模型。\n\n**实现是软硬两半**:\n\n- **软(提示层)**:一段 doctrine 文本块,在每一轮的第一步、模型开口之前的最后一条消息位置注入(通过 `agent/pre-step` hook 注册,且注册顺序在其他 pre-step hook 之前,以抢到「最后读」的位置);系统提示的 policy 槽另有一段较短的说明,讲清这个工具和四种节点;每个 agent 节点的 task 末尾会拼上输出契约。\n- **硬(代码拦截)**:一旦本请求里已经跑过一个计划,tools guard 就拒绝模型自己发出的任何工具调用 —— 出口只有结论和下一个计划;`refine_plan` 本身豁免,计划内部嵌套的调用也豁免。harness 原生的直接委派工具被重新注册,顶层调用会被拒绝并指向计划节点,嵌套调用仍然可用;三个后台代理管理工具则直接从工具表里移除。worker 对话里调用 `refine_plan` 会被拒绝(工具仍留在 worker 的表里以保住继承前缀的缓存命中,拒绝发生在调用时)。计划工具返回后本轮就此结束,下一轮作为后续消息排队,每请求有轮次预算。计划报告通过 post-execute hook 以值的形式交出,绕过 harness 的截断策略,保证不被切掉。\n\n**触发条件**:对每个非 worker 对话的每个请求都生效;新用户消息重置轮次预算并重新武装期待。worker(插件自己启动的子代理,靠 session id 或首条用户消息里的标记识别)拿不到 doctrine,且被拒绝使用计划工具。空计划是合法的 —— 它就是「用结论结束一轮」的方式。\n\n**没被硬约束的一半**是「本轮第一条消息必须是计划、之前不许有任何工具调用」—— 这只是指令:本请求的第一次计划之前,guard 放行一切。\n\n值得标一个缺口:每个会话的 opt-out 只把工具移出作用域并清空系统提示那一段,doctrine 消息和委派拦截并不受 opt-out 约束,而且策略对象自己的 `appliesTo` 谓词在全仓没有任何地方被调用 —— 也就是说「关掉」这个插件,doctrine 还在注入、直接委派还在被拒,比策略文本宣称的要多。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么被跑起来,子代理受什么限制\n\n**流水线**:工具被调用后参数解析成计划,格式非法直接抛回模型;节点数超过上限(默认 8)会抛「拆开,或收窄」。插件用当前会话自己的 request config 造一个修复器,然后**分组**:一个节点加入第一个「成员没有声明同一个待写文件」的组 —— 也就是说写冲突是唯一能把一层拆开的东西,没声明 writes 的节点按它自己的话信。组与组串行,组内所有节点同时启动,tools 节点和 agent 节点并排跑。tools 节点的调用走工具注册表自己的管线,所以 harness 的每条护栏和策略都照常生效;节点内部,工具自己声明为安全的调用并行跑,其余是屏障单独跑,除非节点要求 sequential 那就按书写顺序。单个调用输出被截断(头加尾,约 5k 字符),节点合并输出再截一次并附上调用名册。结果收进按节点 id 索引的 map,按计划顺序作为结构化值返回(criteria、组数、每节点的 ok/output/error),渲染成以「Every result is above. The turn is over.」结尾的文本。轮次还有余额就排下一轮的消息并结束本轮,否则就到此为止。\n\n**失败与边界**:某个工具调用失败会被就地修复 —— 拿当前会话自己的模型去问「这次调用本该是什么」,最多修两次,计划其余部分不动。某个节点失败不拖垮整个计划,它报 not-ok 加错误,其他节点照常出结果。取消通过节点信号传到子代理,子代理回报计划已被取消。深度超限、没有可继承的会话、宿主没有 agent 工厂,各自变成单节点失败加一句白话解释,而不是抛异常掀翻计划。空计划被接受并立刻返回 —— 这就是用结论结束一轮的方式。轮次计数加一,预算耗尽后本轮结束,会话等人接手。\n\n另外两个小发现:写冲突分组只分开「双方都声明了同一个文件」的节点;工具对外暴露的「计划开始」生命周期钩子没人接线,目前不起作用。\n\n---\n\n## 汇总\n\n这个插件把「一轮 = 一个计划」变成一条近乎硬性的纪律:模型每轮必须先画出计划交出去,计划跑完这一轮就封口,模型只剩写结论或交下一份计划两个出口 —— 前一半靠每轮开头注入的 doctrine 文本,后一半靠代码层的 guard 直接拒绝模型自发的工具调用、原生委派工具改道、worker 禁用计划工具。计划本身只有 `criteria` 加 `nodes` 两个字段,节点是四种 kind 共享的扁平接口,tools 节点带一批 `{name, arguments}` 的自由 JSON 调用,另三种 agent 节点带一段自由文本 task,靠 `writes` 声明来避免写冲突,靠 `budgetMs` 给每个节点上时间闸。执行时节点按写冲突分层、组内并发、组间串行,tools 节点走正常工具管线所以护栏照旧生效,agent 节点走插件自己的 spawn 路径以保住句柄好在预算耗尽时收尾;派出去的 worker 是叶子、只能干活不能再派,forker 继承本对话再往下派,spawner 从空白开始因此 task 必须自带背景,所有 agent 节点都共享 criteria 作为评判标准,单个失败或超时不掀翻整份计划,只有格式非法或节点超限会被整体退回。"
+}

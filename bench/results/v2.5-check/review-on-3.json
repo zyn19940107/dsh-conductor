@@ -1,0 +1,41 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 83998,
+  "timedOut": false,
+  "sessionId": "session-adfea21c-babf-4814-b6a4-67de2987fa36",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 4431,
+    "outputTokens": 4089,
+    "cacheReadTokens": 23682,
+    "totalTokens": 32202
+  },
+  "formation": {
+    "agents": 4,
+    "input": 167805,
+    "output": 21762,
+    "cacheRead": 1455380,
+    "total": 1644947,
+    "steps": 38
+  },
+  "mainPrompt": 16736,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 402,
+  "thinkingPreview": "The three results answer the question. I should write the conclusion — three conclusions plus a summary paragraph. No further tools needed.\n\nLet me write it well in Chinese.\n\nNote: the \"rule\" is that a turn is one plan. Let me write it up.\n\nNote also: I should not include line numbers per instructions (\"no receipts: no line numbers\"). File names and function names are fine.\n\nLet me write the answer.",
+  "finalText": "三份审查都回来了，结论如下（全程只读，未改动任何文件）。\n\n## 1. src/plan.ts —— 计划的数据结构、节点种类、调用参数\n\n**数据结构**：`PlanArgs` 只有两个字段 —— `criteria: string[]`（判断这一轮成功的可观测标准）和 `nodes: PlanNode[]`。`PlanNode` 是一个**扁平接口**，四种 kind 共用同一组字段，差异靠语义约定而非类型系统：\n\n```\nPlanNode { id: string; kind: PlanNodeKind; calls: PlanToolCall[]; task: string;\n           order: PlanNodeOrder; writes: string[]; budgetMs: number }\nPlanToolCall { name: string; arguments: unknown }\nPlanNodeKind  = 'tools' | 'worker' | 'spawner' | 'forker'\nPlanNodeOrder = 'parallel' | 'sequential'\n```\n\n`tools` 节点用 `calls`、`task` 恒为空串；三种 agent 节点用 `task`、`calls` 恒为空数组。**agent kind 的真正差别在上下文继承**，不在字段上：`worker` 继承本对话且只干活、`forker` 继承本对话且自己继续画图、`spawner` 从空白开始画图。计划**只有一层**，没有 `after`、没有依赖边；节点先后只由 `buildGroups` 的分组顺序体现。\n\n**调用参数的处理**：唯一入口是手写的 `parsePlanArgs(value): PlanArgs | undefined`（不用 zod）。`criteria`/`nodes` 必须是数组，criteria 过滤空串后清空就整体拒绝；节点 `id` 必须非空且不重复，`kind` 必须是四个枚举之一，否则整个计划被拒。`budgetMs` 只接受有限正数，四舍五入后被 `MAX_NODE_BUDGET_MS = 3_600_000` 夹住，其余情况（缺失/0/负数/字符串）一律记为 0，含义是\"没声明预算，跑到 runner自己的天花板\"。`order` 只有字面量 `'sequential'` 生效，其余**全部**落回 `'parallel'` 默认。`writes` 非数组归 `[]`。`tools` 节点的 `calls` 必须非空，每条 call 的 `name` 必须非空字符串，而 **`arguments` 是 `unknown` 原样透传 —— 插件不校验它的内部结构**，只在 `undefined` 时补 `{}`。agent 节点的 `task` 必须非空。**空计划是合法的**（criteria 有、nodes 为空数组），模型可以直接交空计划结束这一轮。\n\n`buildGroups` 用私有 `canRunTogether` 把节点依次并入第一个\"不与自己 `writes` 路径冲突\"的组，写同一文件的两个节点因此被拆进不同组；组内并发、组间串行，顺序保持声明顺序。校验走两道：框架层 `defineTool` 的 property-map DSL 编译成原生 JSON Schema，既发给模型也用于 `validateJsonSchemaValue` 校验；插件层 `execute` 里再跑一遍 `parsePlanArgs` 做归一化，失败抛 `'refine_plan needs criteria, and nodes that each have an id and a kind'`。运行时形状是字段全补齐的 `PlanArgs`；输出方向是 `PlanOutput { criteria, groups, nodes: [{id, kind, ok, output, error}] }`。\n\n## 2. 插件强制的规则\n\n规则原文在 `src/index.ts` 的模块注释：**\"The rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over — what the plan did not settle belongs to the next round.\"** `src/policy.ts` 关闭插件时提示\"the rule that makes a turn one plan is not enforced\"。\n\n**被真正强制的是后半句** —— 「图跑完，这一轮只剩判断」。前半句「本轮第一条消息必须是图」只是教条：README 明确说它不在强制清单里，插件不拦交图前的工具调用，也不把没交图的轮次拉回来（v1.0 的\"闸门\"已删）。所以规则是单向的：交图之前随便调工具，交图之后只能写结论或再交一张图。\n\n**实现**全在 `src/rounds.ts`，由 `src/index.ts` 的 `apply()` 装配，共四个机制：\n\n- `applyJudgementGuard(ctx, plans)`：`ctx.tools.guard` 拦截**模型自己发起**的调用（`isModelCall` 判 `callId === rootCallId`），除 `refine_plan` 外一律拒绝，回复 `JUDGE_ONLY`（\"The graph has run — every result is above. This turn is the judgement…\"）。\n- `applyDelegationRule(ctx)`：重写 harness 自带的 `subagent`/`subagent_fork`，描述改成\"Not called directly: delegation happens inside refine_plan\"，`execute` 里当 `exec.callId === exec.rootCallId` 时抛 `DELEGATE_IN_GRAPH`；同时 `restrict({ deny: HIDDEN_TOOLS })` 把 `list_agents`/`send_message`/`interrupt_agent` 从工具表隐藏。\n- `applyWorkerRule(ctx, workers)`：worker 会话里调 `refine_plan` 被 `WORKER_NO_PLAN` 拒绝。工具**故意留在表里**——摘掉会改 request header、让继承前缀的 KV cache 失效。\n- `applyTurnDoctrine(ctx, workers)`：`agent/pre-step` 时 `payload.step === 1` 且会话非 worker，把 `ROUND_LOOP` 作为最后一条消息追加（教条那一半）。\n\n**触发条件**由 `Plans` 跟踪：`applyRounds` 在 `agent/pre-step` 看到 user 消息时调 `plans.expect(sessionId)`，`onPlanFinished` 在 `runPlan` 返回后调 `plans.done(sessionId)`，于是窗口是「人发出请求 → 该请求里第一次计划跑完」；`plans.waiting` 变 false 后模型自发起的一切工具调用被拒。计划内部的调用是嵌套的（rootCallId 是计划那次调用），不受影响。worker 会话由 `workers.has(sessionId)` 或 `isWorkerConversation`（首条文本以 `WORKER_MARKER = \"[refine-loop worker]\"` 开头）识别，不给教条也不给计划工具。\n\n**违规后果**一律是拒绝执行并给改道说明，不崩溃：guard 的字符串成为该次调用的错误结果；直调委派抛 `DELEGATE_IN_GRAPH`。计划跑完后若轮数未超 `maxRounds`，会 `agent.followup(NEXT_ROUND)` 并 `exec.concludeTurn()` 结束本轮。配套还有 `applyReportRetention`：`tools/post-execute` 上用带 `value` 的 `{ kind: 'accept' }` 绕开 harness 的 spill 截断，保证计划报告永远完整。\n\n**尚未闭环**：`applyDelegationRule` 注册在全局 `ctx.tools` 上，不看 `SessionPolicy`，所以 `/dsh-conductor off` 后直调 `subagent` 仍被拒；`applyPlanTool` 的 `onPlanStarted` 选项在 `index.ts` 里从未接线。\n\n## 3. src/tool.ts —— 计划怎么跑起来、子代理受什么限制\n\n**执行链**：工具名 `refine_plan`（常量 `PLAN_TOOL`），由 `applyPlanTool(ctx, options)` 经 `ctx.tools.register(defineTool(...))` 注"
+}

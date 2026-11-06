@@ -271,7 +271,7 @@ ${tail}`
  * report. They are removed rather than asked away because a prompt has not once
  * been enough on its own.
  */
-const RECEIPT_PATTERN = /证据|来源|行号|\bL\d+\b|\bline\s+numbers?\b|\bevidence\b|\bproof\b|\bcite[sd]?\b|\bcitation\b|\bimport(s|ed|ing)?\b/i
+const RECEIPT_PATTERN = /证据|行号|\bL\d+\b|\bline\s+numbers?\b|\bevidence\b|\bproof\b|\bcite[sd]?\b|\bcitation\b/i
 
 /**
  * Drop the receipt sentences from a conclusion.

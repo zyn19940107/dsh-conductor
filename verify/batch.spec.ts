@@ -194,19 +194,18 @@ console.log('a call that fails is reported, not thrown')
 {
   const text = [
     'The verify scripts are hand-rolled: run-specs bundles each and runs it in node.',
-    'batch.spec.ts tests runBatch.',
+    'The rule lives in src/rounds.ts and the field is delegationDepth.',
     '证据：batch.ts:351 连着三处调用。',
-    'This rests on the import of src/batch.js.',
     'Line numbers: L6, L8.',
     'The result is that all 8 specs pass.',
   ].join('\n')
   const scrubbed = scrubConclusion(text)
   check('receipt lines with 证据 are dropped', scrubbed.includes('证据') === false)
-  check('receipt lines with import are dropped', /import/i.test(scrubbed) === false)
   check('receipt lines with line numbers are dropped', scrubbed.includes('L6') === false)
   check('the conclusion itself survives', scrubbed.includes('all 8 specs pass'))
-  check('ordinary lines survive', scrubbed.includes('batch.spec.ts tests runBatch'))
-  const allReceipts = '证据: a\nimport: b'
+  check('a named file and field survive', scrubbed.includes('src/rounds.ts') && scrubbed.includes('delegationDepth'))
+  check('ordinary lines survive', scrubbed.includes('run-specs bundles each'))
+  const allReceipts = '证据: a\n行号: L3'
   check('an all-receipt conclusion is left alone', scrubConclusion(allReceipts) === allReceipts)
   check('plain text is untouched', scrubConclusion('the suite passes') === 'the suite passes')
 }

@@ -1,0 +1,47 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 148292,
+  "timedOut": false,
+  "sessionId": "session-2d3274fe-157a-4491-b48e-6a9da4e11ec1",
+  "stderr": "",
+  "steps": 5,
+  "toolCalls": 7,
+  "tools": [
+    "glob",
+    "glob",
+    "pwsh",
+    "glob",
+    "glob",
+    "pwsh",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 30633,
+    "outputTokens": 4213,
+    "cacheReadTokens": 86947,
+    "totalTokens": 121793
+  },
+  "formation": {
+    "agents": 4,
+    "input": 220192,
+    "output": 28081,
+    "cacheRead": 1424590,
+    "total": 1672863,
+    "steps": 39
+  },
+  "mainPrompt": 44133,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 5672,
+  "thinkingPreview": "No files found in refine-loop? Let me check the workspace root.\n\nWait, the path is D:\\code\\vibe\\refine-loop. Let me glob the workspace root.\nThe project is `dsh-refine-loop` not `refine-loop`. Let me glob inside it.\nNow I have the structure:\n\n`src/` has 8 modules:\n- batch.ts\n- concurrency.ts\n- fork.ts\n- index.ts\n- plan.ts\n- policy.ts\n- repair.ts\n- rounds.ts\n- tool.ts\n\nWait, that's 9 files. Let me count: batch.ts, concurrency.ts, fork.ts, index.ts, plan.ts, policy.ts, repair.ts, rounds.ts, tool.ts = 9. The user says 8 modules. Maybe index.ts is not counted as a module, or maybe one is a re-export. Let me check.\n\n`verify/` has spec files:\n- batch.spec.ts\n- concurrency.spec.ts\n- fork.spec.ts\n- plan.spec.ts\n- refine.spec.ts\n- repair.spec.ts\n- retain.spec.ts\n- rounds.spec.ts\n\nThat's 8 spec files. Note there's no policy.spec.ts, no tool.spec.ts, no index.spec.ts. But there's refine.spec.ts and",
+  "finalText": "## 结论\n\n三个问题都已核实（全程只读，未修改任何文件）。项目路径实际是 `D:\\code\\vibe\\dsh-refine-loop`。\n\n---\n\n### 1. `verify/` 下每个 .spec.ts 实际测的入口函数\n\n先说结论：**spec 文件名和它测的模块并不一一对应**，有两处错位。\n\n| spec 文件 | 实际入口函数（按测试重心排序） | 对应 src 模块 |\n|---|---|---|\n| `batch.spec.ts` | `runBatch`（主体，4 组并发/独占/失败场景）＋ `capOutput`、`capNodeOutput`、`scrubConclusion` | `src/batch.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`；末尾借 `runBatch` 验批内顺序 | `src/concurrency.ts`（+batch） |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers` | `src/fork.ts` |\n| `plan.spec.ts` | **`runPlan`、`renderPlan`——在 `src/tool.ts` 里**；另测 `parsePlanArgs`、`buildGroups`、`WORKER_MARKER` | **`src/tool.ts`**（+plan） |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch` ＋ `parsePolicyCommand` | `src/batch.ts`（+policy） |\n| `repair.spec.ts` | `runBatch` 的 repair 钩子分支 ＋ `parseRepair` | `src/batch.ts`（+repair） |\n| `retain.spec.ts` | `applyReportRetention`（注册 `tools/post-execute` 的钩子）＋ 常量 `PLAN_TOOL` | `src/index.ts`（+tool） |\n| `rounds.spec.ts` | `applyTurnDoctrine`、`applyWorkerRule`、`Rounds`/`Workers` 类、`isWorkerConversation`、文本常量 `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN` | `src/rounds.ts`（+plan） |\n\n两处命名陷阱：\n- `plan.spec.ts` 的主角 `runPlan`/`renderPlan` 住在 **`src/tool.ts`**，不在 `src/plan.ts`。\n- `refine.spec.ts` 对应的 `src/refine.ts` **根本不存在**，它是 batch+policy 的组合测试。\n\n**没有共享 harness 间接层**：runner 只做 esbuild 打包后逐个 `node` 起进程，不注入任何 mock，spec 直接调 src 导出，所以「入口函数 = 它 import 并调用的那个导出」。\n\n### 2. 没有对应 spec 的模块\n\n先厘清「8 个模块」：`src/` 下实为 **9 个 `.ts`**，`index.ts` 是 Cordis 插件入口（`name`/`inject`/`apply`/`Config`），不是 barrel。排除它，正好是你说的 8 个功能模块：batch、concurrency、fork、plan、policy、repair、rounds、tool。\n\n按「同名专属 spec」口径，缺的是：\n\n- **`src/policy.ts`** —— 没有 `policy.spec.ts`。只有 `parsePolicyCommand` 一条被 `refine.spec.ts` 捎带测到；`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全无覆盖。\n- **`src/tool.ts`** —— 没有 `tool.spec.ts`。`runPlan`/`renderPlan` 被 `plan.spec.ts` 测到、`PLAN_TOOL` 被 `retain.spec.ts` 测到，但真正注册工具的 `applyPlanTool` 没被碰过。\n\n若把 `index.ts` 也算进「缺专属 spec」，它同样只有 `applyReportRetention` 一处被 `retain.spec.ts` 覆盖。\n\n**额外发现（比命名错位更严重）**：`verify/run-specs.mjs` 的 spec 清单是**硬编码的 7 项**（refine、batch、concurrency、plan、rounds、fork、retain），**`repair.spec.ts` 不在其中**。文件在盘上，但 `pnpm specs` 从不执行它 —— 所以 `src/repair.ts` 实际处于「有 spec 但从不跑」的状态。仓库里没有任何 coverage 配置或 CI 会发现这个缺口。\n\n### 3. 行数最多的模块\n\n**`src/tool.ts`，599 行**（`refine_plan` 工具本体：PLAN_TOOL、runPlan、renderPlan、applyPlanTool 等）。比第二名 `src/fork.ts`（549 行）多 50 行。\n\n完整行数：\n\n```\ntool.ts        599      ← 最多\nfork.ts        549\nbatch.ts       476\nrounds.ts      390\nindex.ts       358      (插件入口)\npolicy.ts      241\nconcurrency.ts 234\nplan.ts        225\nrepair.ts      173\n```\n\n两个独立计数法（`Get-Content .Count` 与 `ReadAllLines().Length`）结果一致。\n\n---\n\n**覆盖空洞的实质**：`tool.ts` 的 `applyPlanTool`（真正把工具注册进 Cordis 的那一步）和 `policy.ts` 除 `parsePolicyCommand` 外的全部导出，是目前最明显的盲区；再叠加 `repair.spec.ts` 未进 runner 清单，`src/repair.ts` 整体等于没测。这三处属于改动范围，本次未动。"
+}
