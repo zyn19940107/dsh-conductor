@@ -224,6 +224,39 @@ export function capOutput(output: string): string {
 }
 
 /**
+ * How much of one tools node's combined output reaches the plan report.
+ *
+ * Each call is capped on its own, but a node may hold many calls, and the plan
+ * report is what the parent reads every round: without a second cap a single
+ * node can be most of the parent's context. The head and tail survive, the
+ * marker lists every call so none of them disappears from the report, and the
+ * dropped middle is recoverable by running the call again in a later round.
+ */
+export const MAX_NODE_OUTPUT_CHARS = 10000
+
+/**
+ * Cap one tools node's combined output, keeping its head and its tail.
+ *
+ * @param output - the rendered output of the node.
+ * @param results - the calls it ran, in plan order.
+ * @returns the output, or its capped form with a marker naming every call.
+ */
+export function capNodeOutput(output: string, results: BatchItemResult[]): string {
+  if (output.length <= MAX_NODE_OUTPUT_CHARS) return output
+  const head = output.slice(0, OUTPUT_HEAD_CHARS)
+  const tail = output.slice(-OUTPUT_TAIL_CHARS)
+  const removed = output.length - MAX_NODE_OUTPUT_CHARS
+  const roster = results.map((item, index) => `${index + 1}. ${item.name} ${item.ok ? 'ok' : 'failed'}`).join(', ')
+  const note = `[... ${removed} characters of this node's ${output.length}-character output were left out; `
+    + `its calls, in order: ${roster}. Run one of them again in a later round to get the part you need ...]`
+  return `${head}
+
+${note}
+
+${tail}`
+}
+
+/**
  * How many times one failed call may be repaired.
  */
 export const MAX_REPAIRS = 2

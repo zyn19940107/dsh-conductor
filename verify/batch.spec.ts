@@ -6,7 +6,7 @@
  * look at the overlap rather than at a summary.
  */
 
-import { capOutput, MAX_CALL_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
+import { capNodeOutput, capOutput, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
 
 let failures = 0
 
@@ -169,6 +169,23 @@ console.log('a call that fails is reported, not thrown')
   check('the cap keeps the tail', capped.endsWith('TTTT'))
   check('the cap says what it dropped', capped.includes('characters of this 30000-character result were left out'))
   check('a small result is untouched', capOutput('short') === 'short')
+}
+
+// A node may hold many calls, so its combined output is capped as well: the
+// calls keep their names in the marker instead of disappearing from the report.
+{
+  const big = 'H'.repeat(6000) + 'M'.repeat(40000) + 'T'.repeat(4000)
+  const results = [
+    { name: 'read', ok: true, scheduled: 'concurrent' as const, output: '', error: '' },
+    { name: 'pwsh', ok: false, scheduled: 'concurrent' as const, output: '', error: 'boom' },
+  ]
+  const capped = capNodeOutput(big, results)
+  check('a large tools node is capped', capped.length <= MAX_NODE_OUTPUT_CHARS + 400, String(capped.length))
+  check('the node cap keeps the head', capped.startsWith('HHHH'))
+  check('the node cap keeps the tail', capped.endsWith('TTTT'))
+  check('the node cap says what it dropped', capped.includes("characters of this node's 50000-character output were left out"))
+  check('the node cap names every call', capped.includes('1. read ok') && capped.includes('2. pwsh failed'))
+  check('a small tools node is untouched', capNodeOutput('short', results) === 'short')
 }
 
 if (failures > 0) {

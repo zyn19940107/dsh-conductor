@@ -21,6 +21,7 @@ import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import {
+  capNodeOutput,
   renderBatch,
   runBatch,
   type BatchArgs,
@@ -191,7 +192,7 @@ async function runNode(
         id: node.id,
         kind: node.kind,
         ok: failed.length === 0,
-        output: renderBatch(batch) + note,
+        output: capNodeOutput(renderBatch(batch) + note, batch.results),
         error: failed.length === 0 ? '' : failed.map(item => `${item.name}: ${item.error}`).join('; '),
       }
     } finally {
