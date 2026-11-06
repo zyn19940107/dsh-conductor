@@ -68,8 +68,8 @@ export const REFINE_GUIDANCE = [
   '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
   + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
   + '"order": "sequential", or a worker.',
-  '- An agent node answers with its conclusion, and that conclusion is what you judge from and what goes '
-  + 'into your answer as it stands. Ask for the substance, compactly: what it found out — named exactly, the '
+  '- An agent node answers with its conclusion, and that conclusion goes into your answer. Ask for the '
+  + 'substance, compactly: what it found out — named exactly, the '
   + 'file or the field when that is the answer — roughly how, and what came of it. No receipts: no line '
   + 'numbers, no citation trail, and never 证据 / evidence / proof / 行号.',
   '- When the task states a time budget, read the clock before you size the round: the shell has one, and '

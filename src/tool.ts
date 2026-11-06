@@ -479,8 +479,7 @@ export function applyPlanTool(
             task: {
               type: 'string',
               description: 'The task of an agent node (worker, forker or spawner). What it has to say '
-                + 'depends on the kind — the policy section says how much of the how goes in it. The result '
-                + 'comes back and is used as it stands.',
+                + 'depends on the kind — the policy section says how much of the how goes in it.',
             },
             order: {
               type: 'string',
