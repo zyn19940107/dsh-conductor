@@ -402,6 +402,25 @@ console.log('a node that runs out of time is reported, and the plan carries on')
   clearTimeout(keepAlive)
 }
 
+// A plan whose node budgets add up to more than the plan's own ceiling can never
+// spend them; the report says so, so the next round can be planned around it.
+{
+  const warning = '[budgets] These nodes ask for 900s in total, and this plan stops at 600s.'
+  const rendered = renderPlan({
+    criteria: ['x'],
+    groups: 1,
+    nodes: [{ id: 'a', kind: 'tools', ok: true, output: 'ok', error: '' }],
+    budgetWarn: warning,
+  })
+  check('the budget warning is in the report', rendered.includes(warning))
+  const plain = renderPlan({
+    criteria: ['x'],
+    groups: 1,
+    nodes: [{ id: 'a', kind: 'tools', ok: true, output: 'ok', error: '' }],
+  })
+  check('a plan inside its ceiling has no warning', plain.includes('[budgets]') === false)
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`)
   process.exit(1)

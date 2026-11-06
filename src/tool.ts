@@ -82,6 +82,8 @@ export type PlanOutput = {
   groups: number
   /** One entry per node, in the order the plan listed them. */
   nodes: PlanNodeResult[]
+  /** A warning about the plan's own budgets, when they cannot all be spent. */
+  budgetWarn?: string
 }
 
 /**
@@ -360,6 +362,10 @@ export function renderPlan(output: PlanOutput): string {
   lines.push(`Plan finished — ${output.nodes.length} node(s) in ${output.groups} group(s), `
     + 'run in parallel.')
   lines.push(`Criteria: ${output.criteria.join('; ')}`)
+  if (output.budgetWarn !== undefined && output.budgetWarn !== '') {
+    lines.push('')
+    lines.push(output.budgetWarn)
+  }
   lines.push('')
   for (const node of output.nodes) {
     lines.push(`${node.id} (${node.kind}) — ${node.ok ? 'ok' : 'failed'}`)
@@ -577,6 +583,18 @@ export function applyPlanTool(
             host: options.host(),
             ...(options.onWorker === undefined ? {} : { onWorker: options.onWorker }),
           }
+      // The model has no clock, so it cannot tell how much of a stated budget is
+      // already gone. The node budgets it wrote are one thing it can be checked
+      // on: a plan whose nodes ask for more than the plan's own ceiling can never
+      // spend them, and the model should hear that in the same report, before it
+      // plans the next round.
+      const declared = parsed.nodes.reduce((sum, node) => sum + (node.budgetMs ?? 0), 0)
+      const ceiling = options.timeoutMs()
+      const budgetWarn = declared > ceiling
+        ? `[budgets] These nodes ask for ${Math.round(declared / 1000)}s in total, `
+          + `and this plan stops at ${Math.round(ceiling / 1000)}s: the nodes that run last cannot use what they asked for.`
+        : ''
+
       let output = await runPlan(
         ctx.tools,
         parsed,
@@ -590,6 +608,7 @@ export function applyPlanTool(
         repair,
         fork,
       )
+      if (budgetWarn !== '') output = { ...output, budgetWarn }
       // The plan has run. If the loop has a round left, the next one is already
       // queued; ending this turn is what lets the harness open it.
       if (agent !== undefined && options.onPlanFinished?.(agent) === true) {

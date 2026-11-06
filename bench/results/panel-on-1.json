@@ -1,0 +1,46 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 369500,
+  "timedOut": false,
+  "sessionId": "session-5bff06b7-7a1c-49a7-81e2-898f6efcb1ec",
+  "stderr": "",
+  "steps": 5,
+  "toolCalls": 4,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 35383,
+    "outputTokens": 19066,
+    "cacheReadTokens": 129486,
+    "totalTokens": 183935
+  },
+  "formation": {
+    "agents": 4,
+    "input": 417078,
+    "output": 102120,
+    "cacheRead": 6320404,
+    "total": 6839602,
+    "steps": 83
+  },
+  "mainPrompt": 43504,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 24814,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the DSH plugin at `D:\\code\\vibe\\dsh-refine-loop`. Read-only.\n\nCore rules: each round must submit a plan (图 = diagram/plan graph), after submitting judge whether a conclusion can be given; dispatch can only go through nodes in the plan.\n\nThree independent reviewers, each judging:\n1. Whether the rule over-restricts the model: does it force redundant planning?\n2. Whether it can be bypassed: can the model get a conclusion without submitting a plan?\n3. Whether it conflicts with harness native capabilities: subagent / plan mode / tool concurrency?\n\nEach review must read relevant source code and point out the file where implementation lives. Finally summarize: where the three agree and where they diverge.\n\nLet me first explore the plugin directory to understand it, then design the plan.\n",
+  "finalText": "# 三方独立评审汇总：`dsh-refine-loop` 核心规则\n\n**评审方式**：三份评审由三个互相隔离的 worker 独立产出，彼此看不到对方结论，只依据插件与 harness 源码。主控事后只做只读复核（grep/read），未修改任何文件、未安装依赖、未构建产物。\n\n**核心规则原文**：R1 每轮必须交一张图；R2 交完图后判断能不能给结论；R3 派发只能走图里的节点。\n\n---\n\n## 一、三份评审各自的结论\n\n### 评审 A（模型行为与成本视角）\n\n- **Q1 过度限制：部分成立。** 最重的多余规划源是「第一条消息就是图、交图前不许调工具」（`src/rounds.ts` 的 `ROUND_LOOP`，由 `applyTurnDoctrine` 每轮 step 1 追加）——模型只能盲写图，`tools` 节点的路径/offset/正则全靠猜，猜错走 `src/batch.ts` 的 repair 钩子再问一次模型。另外「已经够用就交空图」不是免费的：`src/plan.ts` 的 `parsePlanArgs` 仍要求 criteria 非空，`src/index.ts` 的 `onPlanFinished` 无条件 `concludeTurn()` 并排 `NEXT_ROUND`，一句话答案从 1 次往返变 2 次。每节点必写 `budgetMs`、报告截到每节点 5k 字符，都是把「一次交图」压成多轮。\n- **Q2 可被绕过：成立。** 「每轮必须交图」**没有任何代码门禁**——`Plans.expect/done` 只决定「还没交过图时放行一切工具调用」，`applyJudgementGuard` 只在「已经跑过图之后」才拒绝直接工具调用。README 自己写明「必须交图」是教条不是拦截，v1.0 的闸门已删。不交图会让另外两条门禁同时失效，绕过收益被放大。\n- **Q3 与原生能力：部分冲突。** 与原生 plan mode 是真冲突（同提示槽位；`exit_plan_mode` 会被判据守卫拦掉）；与原生 subagent 不是复用而是绕过（自建子会话，不走 `ctx.subagents` 的深度预算）；与工具并发只是重复实现且前提已过期（harness 侧 glob/grep/read 现已声明并发安全，插件的覆盖表已属冗余）。\n\n### 评审 B（对抗与可绕过性视角）\n\n- **Q1 过度限制：部分成立，代价可量化、边界清楚。** 每轮固定开销与任务规模无关：一条 doctrine 消息 + 常驻 `REFINE_GUIDANCE` + `refine_plan` 工具描述，合计约每请求 1.1k token；「每节点估时间」是第二条独立成本。真正被 R2 撑出多余轮次的是「一句话能答也要交图 → 跑图 → 判断」三段，判断阶段被禁止直接读文件。减分项：教义明写「已有需要就交空图直接给结论」，`parsePlanArgs` 允许 `nodes` 为空——退路存在，代价是一次空调用加一轮。\n- **Q2 可被绕过：成立，且 R1 是三条里唯一完全没有代码门禁的一条。** 强制点分层：**R1 纯文本无门禁 / R2 代码强制 / R3 代码强制但只覆盖 `subagent`、`subagent_fork` 两个工具名**。绕过路径五条：①第一步直接调工具（waiting 为真时守卫放行）；②用文字「交图」（插件不解析助手消息，统计的「交图率」只数有没有调用 `refine_plan`）；③空图买断整条规则；④强度在轮次类型之间不一致——`goal-round-driver` 排入的消息 `source.kind` 是 `'goal'` 不是 `'user'`，不触发 `plans.expect`，waiting 恒假，判断守卫全程生效，于是 **R1 在 goal 轮里事实上被代码强制、在用户轮里完全不强制**；⑤原生 `workflow` 工具由 base bundle 默认挂载、用 `agent()` 直接扇出、不经工具注册表，包装碰不到它，且支持 `run_in_background`，`job_list`/`job_output`/`job_kill` 不在 `HIDDEN_TOOLS` 里。R2 是唯一守得住的一条。\n- **Q3 与原生能力：成立，三处硬冲突 + 两处机制重叠。** ①原生 plan mode 的出口被堵死——`packages/plan/plan-mode` 注册的 `plan:policy` 段与插件的 `refine-loop:policy` 用同一槽位，而图跑完后 `exit_plan_mode` 是一次普通模型调用、不在判断守卫白名单 → 装此插件时原生 plan mode 的出口被拒；②`workflow` 与插件的图重复且不被门禁覆盖；③原生 `goal-round-driver` 与插件自己的 `agent.followup(NEXT_ROUND)` 两套轮次驱动并存，`maxRounds` 与 `maxGoalRounds` 互不知情；④工具并发两套策略，插件比 harness 默认更保守，但同一工具在不同调用位置行为漂移；⑤子代理深度双闸（插件 `maxAgentDepth` 默认 3、宿主 `subagent.maxDepth` 默认 1）。\n\n### 评审 C（harness 集成与接口一致性视角）\n\n- **Q1 过度限制：部分成立，集中在短任务和「需要先探索」的任务。** 每轮固定多一次往返；父代理无法自己探索——`tools` 节点的 `calls` 参数必须事先决定（`parsePlanArgs` 要求每个 tools 节点至少一条已定参数的调用），「先读一眼再决定」只能变成「派一个 worker 去探」，这把 leader 变成纯调度者、把派子代理变成默认动作。README 自陈正确性上没有稳定增益。\n- **Q2 可被绕过：成立，三条独立路径。** ①根本不交图（每个请求的第一张图之前可自由调任何工具，是当前默认行为而非漏洞）；②交一张退化图（`nodes: []` 合法，工具描述明写「A plan may be empty」）；③图外派发（`DELEGATION_TOOLS` 只重写两个名字；同工作区的 `dsh-web-search-subagent` 的 `search_web` 内部就是 `ctx.subagents.start`；且 `tools` 节点里的调用是嵌套调用，落到原生实现走后台 job 路径，不受节点预算约束）。R2 是唯一有代码门禁的一条。\n- **Q3：不是硬冲突，但是三处实质重叠/互斥。** ①原生 plan-mode 抢同一槽位也抢同一个词——原生「plan」= 交用户审批的 markdown 计划，插件「plan」= 结构化执行图；`exit_plan_mode` 始终注册、不在拒绝名单里，模型可以用它走原生那条路而一次 `refine_plan` 都不交；沙盒 bench/goalprobe profile **没挂 plan-mode**，两者从未一起测过。②并发调度是第二套实现——harness 原生会把一条 assistant 消息里的多个工具调用排进有界滚动池（上限 10），插件在 `src/batch.ts` 里自己排 wave、直接逐条 `ctx.tools.execute` 绕过滚动池，且单节点 `calls` 数量无上限；插件的 `DEFAULT_SHELL_TOOL = 'ops_bash'` 在当前 harness 里根本不存在（真实名字是 `bash`/`pwsh`），不显式配 `shellTool: pwsh` 就会让所有 shell 调用退化成独占。③委派预算被绕过、工具被从表里拿掉——插件的孩子走 `host['agentLoop'].createAgent` 自建种子，不走原生 `assertSubagentMaxDepth`，所以**部署的 `subagent.maxDepth` 并不约束插件的孩子**；`HIDDEN_TOOLS` 又把 `list_agents`/`send_message`/`interrupt_agent` 整个移除，模型可能拿到没有工具能管的句柄。\n\n---\n\n## 二、三方一致的地方\n\n| # | 一致结论 | 三方共同依据 |\n|---|---|---|\n| 1 | **Q1 只「部分成立」，且成立面窄**：短任务/纯探索任务净亏，多步可并行任务净赚；规则的价值在组织方式而不是正确率（README 自陈正确率无稳定增益）。代价不是「要交图」本身，而是固定开销——每轮 doctrine、常驻提示与工具描述、每节点 `budgetMs`、父代理不能先探再画、报告按节点截断。 | 插件 README 的 bench 对照（coverage 归一 83s vs off 56s、token 509k vs 383k；quixbugs 184s vs 86s；commit0 因编队膨胀 token 21.8M→37.4M；humeval/panel/nbody 反向） |\n| 2 | **Q2 成立：规则可被绕过，而且绕过收益被放大。** 三方一致把 R1/R2/R3 分成三层：**R1 是纯指令层、零代码门禁；R2 是真代码门禁；R3 是代码门禁但只覆盖 `subagent`/`subagent_fork` 两个工具名。** | `src/rounds.t"
+}

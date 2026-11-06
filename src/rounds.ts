@@ -201,14 +201,47 @@ export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
     }
 
     if (payload.step !== 1) return decision
+    // The model has no clock: nothing in its conversation carries a timestamp, so
+    // a task that says "15 minutes" cannot be budgeted against. The session knows
+    // when it started; a round is where the budget decision is made, so the
+    // elapsed time rides with the round's message.
+    const elapsed = elapsedSince(payload.agent.session)
+    const clock = elapsed === undefined
+      ? ''
+      : ` This conversation has been running for ${formatElapsed(elapsed)}.`
     return {
       ...decision,
       messages: [...decision.messages, createUserMessage({
-        content: [{ type: 'text', text: ROUND_LOOP }],
+        content: [{ type: 'text', text: `${ROUND_LOOP}${clock}` }],
         source: { kind: 'system-prompt' },
       })],
     }
   })
+}
+
+/**
+ * How long a conversation has been running.
+ *
+ * @param session - the conversation's session.
+ * @returns the elapsed milliseconds, or undefined when the start is unknown.
+ */
+export function elapsedSince(session: unknown): number | undefined {
+  const carrier = session as { createdAt?: unknown; header?: { createdAt?: unknown } } | undefined
+  const raw = carrier?.createdAt ?? carrier?.header?.createdAt
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined
+  return Math.max(0, Date.now() - raw)
+}
+
+/**
+ * Format a duration the way a person says it.
+ *
+ * @param ms - the duration.
+ * @returns it as "12m 30s", or "45s" under a minute.
+ */
+export function formatElapsed(ms: number): string {
+  const total = Math.round(ms / 1000)
+  const minutes = Math.floor(total / 60)
+  return minutes > 0 ? `${minutes}m ${total % 60}s` : `${total}s`
 }
 
 /**

@@ -14,6 +14,8 @@ import {
   Workers,
   applyTurnDoctrine,
   applyWorkerRule,
+  elapsedSince,
+  formatElapsed,
   isWorkerConversation,
 } from '../src/rounds.ts'
 import { WORKER_MARKER } from '../src/plan.ts'
@@ -160,6 +162,17 @@ console.log('the worker rule refuses the plan tool where it is called')
   check('another conversation is not touched',
     guard(modelCall('refine_plan', 'session-other')) === undefined)
   check('the refusal says not to plan', WORKER_NO_PLAN.includes('Do not draw a plan'))
+}
+
+// The model has no clock of its own: the elapsed time has to be handed to it,
+// or a task that states a budget cannot be planned against.
+{
+  check('a duration under a minute is seconds', formatElapsed(45_000) === '45s')
+  check('a duration over a minute is minutes and seconds', formatElapsed(750_000) === '12m 30s')
+  check('the elapsed time comes from the session start',
+    Math.abs((elapsedSince({ createdAt: Date.now() - 5_000 }) ?? 0) - 5_000) < 1_000)
+  check('a session with no start time has no elapsed time', elapsedSince({}) === undefined)
+  check('a bad start time has no elapsed time', elapsedSince({ createdAt: 0 }) === undefined)
 }
 
 if (failures > 0) {
