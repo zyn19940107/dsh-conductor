@@ -70,7 +70,8 @@ export const REFINE_GUIDANCE = [
   + '"order": "sequential", or a worker.',
   '- An agent node answers with its conclusion, and that conclusion is what you judge from and what goes '
   + 'into your answer as it stands. Ask for the substance, compactly: what it found out, roughly how, and '
-  + 'what came of it — no line numbers, no file paths, no citation trail.',
+  + 'what came of it. The reply carries no receipts — never 证据 / evidence / proof / import / 行号 — and no '
+  + 'line numbers, file paths or citation trail.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',

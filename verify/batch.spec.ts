@@ -6,7 +6,7 @@
  * look at the overlap rather than at a summary.
  */
 
-import { capAgentOutput, capNodeOutput, capOutput, MAX_AGENT_OUTPUT_CHARS, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
+import { capNodeOutput, capOutput, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, scrubConclusion, type BatchRunner } from '../src/batch.js'
 
 let failures = 0
 
@@ -188,16 +188,27 @@ console.log('a call that fails is reported, not thrown')
   check('a small tools node is untouched', capNodeOutput('short', results) === 'short')
 }
 
-// A conclusion is knowledge and gets more room than raw output, but a child
-// that pastes a whole file still has to be bounded.
+// A conclusion carries the verdict, not the receipts: lines that reach for a
+// line number, an import or a piece of evidence are dropped before the parent
+// reads them.
 {
-  const big = 'H'.repeat(4000) + 'M'.repeat(20000) + 'T'.repeat(2000)
-  const capped = capAgentOutput(big)
-  check('a long conclusion is capped', capped.length <= MAX_AGENT_OUTPUT_CHARS + 200, String(capped.length))
-  check('the conclusion cap keeps the head', capped.startsWith('HHHH'))
-  check('the conclusion cap keeps the tail', capped.endsWith('TTTT'))
-  check('the conclusion cap says what it dropped', capped.includes('characters of this 26000-character conclusion were left out'))
-  check('a short conclusion is untouched', capAgentOutput('short') === 'short')
+  const text = [
+    'The verify scripts are hand-rolled: run-specs bundles each and runs it in node.',
+    'batch.spec.ts tests runBatch.',
+    '证据：batch.ts:351 连着三处调用。',
+    'This rests on the import of src/batch.js.',
+    'Line numbers: L6, L8.',
+    'The result is that all 8 specs pass.',
+  ].join('\n')
+  const scrubbed = scrubConclusion(text)
+  check('receipt lines with 证据 are dropped', scrubbed.includes('证据') === false)
+  check('receipt lines with import are dropped', /import/i.test(scrubbed) === false)
+  check('receipt lines with line numbers are dropped', scrubbed.includes('L6') === false)
+  check('the conclusion itself survives', scrubbed.includes('all 8 specs pass'))
+  check('ordinary lines survive', scrubbed.includes('batch.spec.ts tests runBatch'))
+  const allReceipts = '证据: a\nimport: b'
+  check('an all-receipt conclusion is left alone', scrubConclusion(allReceipts) === allReceipts)
+  check('plain text is untouched', scrubConclusion('the suite passes') === 'the suite passes')
 }
 
 if (failures > 0) {

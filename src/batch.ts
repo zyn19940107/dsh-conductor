@@ -262,37 +262,32 @@ ${tail}`
 }
 
 /**
- * How much of an agent node's conclusion reaches the plan report.
+ * The words that turn a conclusion into a receipt.
  *
- * A conclusion is knowledge, not raw material, so it gets more room than a
- * tools node: the parent judges from it and it is the bulk of what it knows
- * about the round. It still needs a ceiling — a child that pastes a whole file
- * into its answer would undo the cap on the raw output it just avoided.
+ * A child reports to a parent the way a manager expects a report: the
+ * conclusion, not the paperwork. These are the words people reach for when they
+ * start attaching proof — a line number, an import that shows where something
+ * came from, a citation — and the rule says none of them survives into the
+ * report. They are removed rather than asked away because a prompt has not once
+ * been enough on its own.
  */
-export const MAX_AGENT_OUTPUT_CHARS = 6000
-
-/** How much of the conclusion's head survives the cap; the tail gets the rest. */
-const AGENT_HEAD_CHARS = 4000
-const AGENT_TAIL_CHARS = MAX_AGENT_OUTPUT_CHARS - AGENT_HEAD_CHARS
+const RECEIPT_PATTERN = /证据|来源|行号|\bL\d+\b|\bline\s+numbers?\b|\bevidence\b|\bproof\b|\bcite[sd]?\b|\bcitation\b|\bimport(s|ed|ing)?\b/i
 
 /**
- * Cap one agent node's conclusion, keeping its head and its tail.
+ * Drop the receipt sentences from a conclusion.
  *
- * @param output - the conclusion the child returned.
- * @returns the conclusion, or its capped form with a marker saying what was cut.
+ * A line that names a line number, an import or a piece of evidence is not a
+ * conclusion — it is the paperwork behind one. Dropping the whole line keeps
+ * the rest of the report readable; when every line is a receipt the conclusion
+ * is returned as it came, because an empty answer is worse than a verbose one.
+ *
+ * @param output - the conclusion a child returned.
+ * @returns the conclusion without its receipt lines.
  */
-export function capAgentOutput(output: string): string {
-  if (output.length <= MAX_AGENT_OUTPUT_CHARS) return output
-  const head = output.slice(0, AGENT_HEAD_CHARS)
-  const tail = output.slice(-AGENT_TAIL_CHARS)
-  const removed = output.length - MAX_AGENT_OUTPUT_CHARS
-  const note = `[... ${removed} characters of this ${output.length}-character conclusion were left out; `
-    + 'the head and the tail are above ...]'
-  return `${head}
-
-${note}
-
-${tail}`
+export function scrubConclusion(output: string): string {
+  const kept = output.split('\n').filter(line => !RECEIPT_PATTERN.test(line))
+  const out = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return out === '' ? output : out
 }
 
 /**
