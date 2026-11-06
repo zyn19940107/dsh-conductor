@@ -175,6 +175,17 @@ console.log('the worker rule refuses the plan tool where it is called')
   check('a bad start time has no elapsed time', elapsedSince({ createdAt: 0 }) === undefined)
 }
 
+// The parent does not verify the children: the doctrine says so in its own
+// sentence, not buried in the paragraph about trust.
+{
+  check('the round doctrine forbids checking a node',
+    ROUND_LOOP.includes('Do not spend a node on checking another node'))
+  check('the doctrine names the three disguises',
+    ROUND_LOOP.includes('no review node')
+    && ROUND_LOOP.includes('no independent re-derivation')
+    && ROUND_LOOP.includes('no hardening pass'))
+}
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`)
   process.exit(1)

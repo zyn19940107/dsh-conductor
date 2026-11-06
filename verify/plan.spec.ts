@@ -6,6 +6,7 @@
  */
 
 import { runPlan, renderPlan, type PlanOutput } from '../src/tool.js'
+import { REFINE_GUIDANCE } from '../src/index.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { BatchRunner } from '../src/batch.js'
@@ -400,6 +401,12 @@ console.log('a node that runs out of time is reported, and the plan carries on')
     (output.nodes[0]?.error ?? '').toLowerCase().includes('budget'))
   check('the other node still ran', output.nodes[1]?.ok === true)
   clearTimeout(keepAlive)
+}
+
+// The system prompt says the same thing as the doctrine, in its own bullet.
+{
+  check('the guidance forbids a checking node',
+    REFINE_GUIDANCE.includes('Never spend a node on checking another node'))
 }
 
 // A plan whose node budgets add up to more than the plan's own ceiling can never

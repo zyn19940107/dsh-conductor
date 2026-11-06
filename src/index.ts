@@ -72,6 +72,9 @@ export const REFINE_GUIDANCE = [
   + 'into your answer as it stands. Ask for the substance, compactly: what it found out — named exactly, the '
   + 'file or the field when that is the answer — roughly how, and what came of it. No receipts: no line '
   + 'numbers, no citation trail, and never 证据 / evidence / proof / 行号.',
+  '- Never spend a node on checking another node. No review node, no independent re-derivation, no hardening '
+  + 'pass: a node is trusted to do what its task said, and its result is used as it comes back. When a result '
+  + 'is incomplete, the missing work is new work — not a re-check of what already came back.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',

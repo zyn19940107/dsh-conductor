@@ -32,7 +32,9 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'result comes back. (4) Only then judge the request: if those results answer it, write the conclusion, '
   + 'which ends the loop; if they do not, the next round designs the next plan. The results are used as they '
   + 'come back — the standard for a node lives in its task, not in a check after the fact, so a node is '
-  + 'trusted to do what it was told. There is no dependency between the nodes of one round: work that needs '
+  + 'trusted to do what it was told. Do not spend a node on checking another node: no review node, no '
+  + 'independent re-derivation, no hardening pass over what already worked. When a result is incomplete, the '
+  + 'missing work is new work, never a re-check of work that came back. There is no dependency between the nodes of one round: work that needs '
   + 'another node output belongs to the next round, and work that must happen in order belongs inside one '
   + 'node. "worker" is a leaf: it does the work itself and can hand none of it to anyone else. "forker" is '
   + 'a leader: it inherits this conversation and dispatches its own sub-agents. "spawner" is that same '
@@ -205,17 +207,20 @@ export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
     // a task that says "15 minutes" cannot be budgeted against. The session knows
     // when it started; a round is where the budget decision is made, so the
     // elapsed time rides with the round's message.
+    // Two messages, not one: the doctrine is what to do, the clock is what is
+    // true right now. Mixing them makes a reading of the world look like a rule.
+    const messages = [...decision.messages, createUserMessage({
+      content: [{ type: 'text', text: ROUND_LOOP }],
+      source: { kind: 'system-prompt' },
+    })]
     const elapsed = elapsedSince(payload.agent.session)
-    const clock = elapsed === undefined
-      ? ''
-      : ` This conversation has been running for ${formatElapsed(elapsed)}.`
-    return {
-      ...decision,
-      messages: [...decision.messages, createUserMessage({
-        content: [{ type: 'text', text: `${ROUND_LOOP}${clock}` }],
+    if (elapsed !== undefined) {
+      messages.push(createUserMessage({
+        content: [{ type: 'text', text: `This conversation has been running for ${formatElapsed(elapsed)}.` }],
         source: { kind: 'system-prompt' },
-      })],
+      }))
     }
+    return { ...decision, messages }
   })
 }
 
