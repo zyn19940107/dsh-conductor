@@ -95,7 +95,7 @@ function median(values) {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
 }
 
-for (const [label, dir] of [['pre2.5', join(RESULTS, 'pre-v2.5')], ['v2.5', RESULTS]]) {
+for (const [label, dir] of [['pre2.5', join(RESULTS, 'pre-v2.5-baseline')], ['v2.5', RESULTS]]) {
   const runs = []
   for (let index = 1; index <= RUNS; index += 1) {
     let record

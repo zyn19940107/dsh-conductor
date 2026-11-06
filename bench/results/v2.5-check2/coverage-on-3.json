@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 59806,
+  "timedOut": false,
+  "sessionId": "session-3ade4725-1f30-48b2-8e8d-19692bf97a9e",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 4390,
+    "outputTokens": 3472,
+    "cacheReadTokens": 24832,
+    "totalTokens": 32694
+  },
+  "formation": {
+    "agents": 3,
+    "input": 65172,
+    "output": 18434,
+    "cacheRead": 439808,
+    "total": 523414,
+    "steps": 20
+  },
+  "mainPrompt": 17755,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 5583,
+  "thinkingPreview": "The user wants a read-only analysis of a directory D:\\code\\vibe\\dsh-refine-loop (paths given with missing backslashes: \"D:codeibedsh-refine-looperify\" — the \"\\v\" was interpreted... Actually \"D:\\code\\vibe\\dsh-refine-loop\\verify\" became \"D:codeibedsh-refine-looperify\" because backslash-v is vertical tab and backslash-v... hmm, \"\\vibe\" → \"vibe\" but the v was eaten? Actually \\v is vertical tab, so \"\\vibe\" would be \"\\v\" + \"ibe\"... The displayed shows \"D:codeibedsh...\" — hmm, that suggests \"\\vibe\" → \"ibe\"? No, it shows \"D:code\" then \"ibedsh\". Wait: \"D:\\code\\vibe\\dsh-refine-loop\\verify\" → removing backslashes: \"D:code\" + \"\\vibe\" → vertical tab + \"ibe\"... but display shows \"ibedsh\" so \"v\" became vertical tab (invisible) and \"ibe\" visible. Yes! And \"\\verify\" → \"\\v\" vertical tab + \"erify\" → shows \"erify\" preceded by invisible VT. And \"dsh-refine-loop\\verify\" → \"dsh-refine-loop\" + VT + \"erify\" → di",
+  "finalText": "## 结论\n\n### 1. `verify` 下每个 `.spec.ts` 实际测的入口函数\n\nverify 下共 **8 个 `.spec.ts`**（另有 `run-specs.mjs` 运行器、`dump-sandbox-turn.mjs` / `dump-sandbox-log.mjs` 两个脚本，不是 spec）：\n\n| spec | 源模块 | 实际测试的入口函数 |\n|---|---|---|\n| `batch.spec.ts` | `src/batch.ts` | **`runBatch`**（主入口：并发调度、独占工具、失败上报）+ 单测 `capOutput` / `capNodeOutput` / `scrubConclusion` |\n| `concurrency.spec.ts` | `src/concurrency.ts` | **`isReadOnlyCommand`**（主测）+ `mayRunTogether`、`buildOverrides`；末尾用 `runBatch` 验证批内调用顺序 |\n| `fork.spec.ts` | `src/fork.ts` | **`buildSeedFromNow`**（种子/合成结果）+ `openTurnClosers` |\n| `plan.spec.ts` | `src/plan.ts` + `src/tool.ts` | **`parsePlanArgs`、`buildGroups`**（常量 `WORKER_MARKER`）+ **`runPlan`、`renderPlan`** |\n| `refine.spec.ts` | `src/batch.ts` + `src/policy.ts` | **`parseBatchArgs`、`renderBatch`** + **`parsePolicyCommand`** |\n| `repair.spec.ts` | `src/repair.ts` + `src/batch.ts` | **`parseRepair`** + **`runBatch`**（带修复钩子的失败→修复→重跑） |\n| `retain.spec.ts` | `src/index.ts` + `src/tool.ts` | **`applyReportRetention`**（插件 `tools/post-execute` 钩子）+ 常量 `PLAN_TOOL` |\n| `rounds.spec.ts` | `src/rounds.ts` | 类 **`Rounds`**（used/bump/reset）、类 **`Workers`**（mark）、**`isWorkerConversation`**、**`applyTurnDoctrine`**、**`applyWorkerRule`**（常量 `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN`） |\n\n注意：`plan.spec.ts` 是唯一一个跨两个模块的 spec，也是最重的一个（409 行）。\n\n### 2. 哪些模块没有对应的 spec\n\n先纠正一个前提：`src` 下实际是 **9 个 `.ts` 文件** —— 8 个逻辑模块（batch、concurrency、fork、plan、policy、repair、rounds、tool）+ `index.ts`（插件入口）。\n\n- **按「有没有同名 spec 文件」的口径**（通常问的就是这个）：缺 **`policy.ts`**（测试寄生在 `refine.spec.ts` 里，只测 `parsePolicyCommand`）和 **`tool.ts`**（测试分散在 `plan.spec.ts` 的 `runPlan`/`renderPlan` 与 `retain.spec.ts` 的 `PLAN_TOOL`）。若把 `index.ts` 也算进这 8 个，则还缺 **`index.ts`**（由 `retain.spec.ts` 覆盖 `applyReportRetention`）。\n- **按「有没有被任何 spec import」的口径**：**一个都没有**——8 个模块全部被至少一个 spec 直接引用。policy、tool、index 只是没有专属同名文件。\n\n补充一层更值得注意的：模块内部大量导出在任何 spec 里都没出现过，例如 `fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`（549 行文件只测了两个小函数）、`tool.ts` 真正对外暴露的 `applyPlanTool`、`policy.ts` 的 `SessionPolicy`/`runPolicyCommand`/`applyPolicyCommand`、`rounds.ts` 的 `applyRounds`/`applyJudgementGuard`、以及 `index.ts` 的 `apply`。\n\n### 3. 行数最多的模块\n\n**`src/tool.ts`，607 行**（去空行去注释约 450 行）。完整排行（物理行 / 纯代码行）：\n\n| 模块 | 物理行 | 纯代码行 |\n|---|---|---|\n| **tool.ts** | **607** | 450 |\n| fork.ts | 549 | 346 |\n| batch.ts | 476 | 229 |\n| rounds.ts | 390 | 163 |\n| index.ts | 358 | 152 |\n| policy.ts | 241 | 115 |\n| concurrency.ts | 234 | 116 |\n| plan.ts | 225 | 97 |\n| repair.ts | 173 | 88 |\n\n只算 8 个逻辑模块的话冠军同样是 `tool.ts`。\n\n---\n\n全程只读，未修改任何文件。行数用「换行符计数 vs 文本切分」两法互校（差异仅为文件末尾是否带换行）。"
+}

@@ -2,12 +2,16 @@
  * What a child session's time actually went into: per step, the wait before the
  * model answered, how many tokens it wrote, and the exact calls it made.
  *
+ * Only the steps after the seed boundary are the child's own: before that the
+ * log holds the parent's conversation, and reading it as the child's attributed
+ * the parent's plan call to a worker that never made it.
+ *
  * Usage: node bench/child-what.mjs <child-session-prefix>
  */
 
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { decodeLog } from './sessions.mjs'
+import { ownEvents } from './child-events.mjs'
 
 const SESSIONS = 'D:/code/vibe/dsh-sandbox/home/sessions/--D-code-vibe--'
 const LF = String.fromCharCode(10)
@@ -19,20 +23,9 @@ if (session === undefined) {
   process.exit(1)
 }
 
-const events = []
-for (const file of readdirSync(join(SESSIONS, session)).filter(entry => entry.endsWith('.zstd')).sort()) {
-  try {
-    events.push(...decodeLog(join(SESSIONS, session, file)).split(LF).filter(Boolean).map(line => {
-      try {
-        return JSON.parse(line)
-      } catch {
-        return null
-      }
-    }).filter(Boolean))
-  } catch {
-    // torn segment
-  }
-}
+const { inherited, own: events } = ownEvents(session)
+console.log(`会话 ${session.slice(18, 30)}  继承 ${inherited} 条事件，自己的 ${events.length} 条
+`)
 
 const stamp = event => event.timestamp ?? event.time ?? 0
 const base = Math.min(...events.map(stamp).filter(value => value > 0))

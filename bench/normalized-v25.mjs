@@ -158,7 +158,7 @@ function median(values) {
 }
 
 const groups = [
-  ['pre2.5', join(RESULTS, 'pre-v2.5'), 'on'],
+  ['pre2.5', join(RESULTS, 'pre-v2.5-baseline'), 'on'],
   ['v2.5', RESULTS, 'on'],
 ]
 
