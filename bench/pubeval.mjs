@@ -426,7 +426,7 @@ export const QUIXBUGS = {
       '1. 只允许改各个目录下的 program.py。',
       '2. 不许改 cases.json 和 check.py —— 那是判据,改了不算。',
       '3. 用 `python check.py` 自检,一直跑到输出 RESULT 4/4。',
-      '4. 报告:每个 bug 是什么、改了哪一行,加上 check.py 的完整最终输出。',
+      '4. 报告:每个 bug 是什么、改了哪个文件,加上 check.py 的完整最终输出。',
       '',
       `不要修改本仓库(${REPO})本身的任何文件。`,
     ].join('\n')

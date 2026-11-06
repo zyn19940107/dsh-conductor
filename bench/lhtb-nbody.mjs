@@ -13,7 +13,7 @@
  *
  * The task's assets live outside this repository, in the sandbox:
  *
- *   D:\code\vibe\dsh-sandbox\lhtb\nbody\
+ *   D:\\code\\vibe\\dsh-sandbox\\lhtb\\nbody\\
  *     harness\           the upstream harness (world API, world generator,
  *                        numpy baseline, the public bench CLI)
  *     simulator_starter.py   the upstream starter, slow but correct

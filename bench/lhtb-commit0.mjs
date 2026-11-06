@@ -14,7 +14,7 @@
  *
  * The task's assets live outside this repository, in the sandbox:
  *
- *   D:\code\vibe\dsh-sandbox\lhtb\commit0\
+ *   D:\\code\\vibe\\dsh-sandbox\\lhtb\\commit0\\
  *     template\        the workspace: three stubbed libraries + docs + gate.py
  *     hidden-tests\    the upstream test suites, overlaid at grading time
  *     pristine-manifest.json  sha256 of the pristine upstream sources

@@ -14,7 +14,7 @@
  *
  * The task's assets live outside this repository, in the sandbox:
  *
- *   D:\code\vibe\dsh-sandbox\lhtb\matpower\
+ *   D:\\code\\vibe\\dsh-sandbox\\lhtb\\matpower\\
  *     template\        the workspace: the skeleton, the manifest, the CLI
  *     tests\           upstream's verifier, unmodified (it reads the workspace
  *                      through APP_DIR, so nothing had to be patched)

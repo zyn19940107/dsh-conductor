@@ -9,7 +9,7 @@
  *
  * The task's own assets live outside this repository, in the sandbox:
  *
- *   D:\code\vibe\dsh-sandbox\lhtb\2048\
+ *   D:\\code\\vibe\\dsh-sandbox\\lhtb\\2048\\
  *     game2048_engine.py   the upstream engine, unmodified (Apache-2.0)
  *     g2048.py             the local CLI, written for this benchmark
  *     reference_player.py  a known-good player: the probe's "correct answer"

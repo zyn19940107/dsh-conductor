@@ -144,7 +144,7 @@ export const LEAD_PROBE = {
     '把下面这件事交给**同一个负责人**整体负责：',
     '  对 3 个互不相干的模块做并行审查：src/plan.ts、src/batch.ts、src/concurrency.ts',
     '  要求三份审查同时进行、互相独立、互不参考；',
-    '  每个模块给出：它的职责、一个最容易被误用的地方（带行号）、结论。',
+    '  每个模块给出：它的职责、一个最容易被误用的地方（点出那个函数或字段的名字）、结论。',
     '  最后由他把三份结论汇总成一段话交给我。',
     '',
     '注意：这件事必须由**同一个负责人**整体负责 —— 你不能直接派三个互不相干的人，',
@@ -152,7 +152,7 @@ export const LEAD_PROBE = {
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
     { what: '三个模块都提到了', needles: ['plan.ts', 'batch.ts', 'concurrency.ts'] },
-    { what: '有行号', any: [':1', ':2', ':3', ':4', ':5', ':6', ':7', ':8', ':9', 'L1', 'L2', 'L3'] },
+    { what: '有汇总', any: ['综上', '汇总', '总结', '三段结论'] },
   ]),
 }
 
@@ -176,7 +176,7 @@ export const FORKER_PROBE = {
 export const GOAL_PROBE = {
   text: [
     '请用 create_goal 建立一个持久目标，目标是：',
-    '"读完 D:\code\vibe\dsh-refine-loop 的 src/plan.ts 和 src/tool.ts，说明计划的数据结构和四种节点分别是什么，',
+    '"读完 D:\\code\\vibe\\dsh-refine-loop 的 src/plan.ts 和 src/tool.ts，说明计划的数据结构和四种节点分别是什么，',
     '并给出 refine_plan 的执行入口在哪个文件哪个函数里。"',
     '',
     '要求：',

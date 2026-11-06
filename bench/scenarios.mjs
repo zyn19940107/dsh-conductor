@@ -167,8 +167,8 @@ export const COVERAGE = {
   text: [
     '回答下面三个问题,只读不改:',
     '',
-    '1. D:\code\vibe\dsh-refine-loop\verify 下每个 .spec.ts 实际测的入口函数是什么?',
-    '2. D:\code\vibe\dsh-refine-loop\src 下所有 .ts 模块里,哪些没有对应的 spec?',
+    '1. D:\\code\\vibe\\dsh-refine-loop\\verify 下每个 .spec.ts 实际测的入口函数是什么?',
+    '2. D:\\code\\vibe\\dsh-refine-loop\\src 下所有 .ts 模块里,哪些没有对应的 spec?',
     '3. 这些模块里行数最多的是哪一个?多少行?',
     '',
     '只读不改。不要修改任何文件。',
@@ -198,7 +198,7 @@ export const SWEEP = {
     `src 下:${list(SRC_MODULES)}`,
     `verify 下:${list(SPEC_FILES)}`,
     '',
-    '都在 D:\code\vibe\dsh-refine-loop 下。只读不改。',
+    '都在 D:\\code\\vibe\\dsh-refine-loop 下。只读不改。',
   ].join('\n'),
   judge: judgeBy([
     MODULE_NEEDLES,
@@ -220,13 +220,13 @@ export const SWEEP = {
  */
 export const BIGREAD = {
   text: [
-    '读 D:\code\vibe\deepseek-harness 下这四个大文件,每个写 3 条要点(它是什么、主要导出什么、关键结构),',
+    '读 D:\\code\\vibe\\deepseek-harness 下这四个大文件,每个写 3 条要点(它是什么、主要导出什么、关键结构),',
     '最后用一段话说明它们之间的关系:',
     '',
-    '1. packages\extensions\tool-cordis\src\api-catalog.ts',
-    '2. packages\extensions\cordis-client-runner\src\client\slot-catalog.ts',
-    '3. packages\typert\generator\src\analyzer.ts',
-    '4. packages\core\tools\src\index.ts',
+    '1. packages/extensions/tool-cordis/src/api-catalog.ts',
+    '2. packages/extensions/cordis-client-runner/src/client/slot-catalog.ts',
+    '3. packages/typert/generator/src/analyzer.ts',
+    '4. packages/core/tools/src/index.ts',
     '',
     '只读不改。不要修改任何文件。',
   ].join('\n'),
@@ -253,9 +253,9 @@ export const COVERAGEWIDE = {
   text: [
     '对这个插件的测试覆盖做一次盘点,只读不改:',
     '',
-    '1. 读 D:\code\vibe\dsh-refine-loop\verify 下全部 .spec.ts,每个用一句话说明它实际测的是什么,',
+    '1. 读 D:\\code\\vibe\\dsh-refine-loop\\verify 下全部 .spec.ts,每个用一句话说明它实际测的是什么,',
     '   注明它主要调用的那个函数/入口的名字。',
-    '2. 读 D:\code\vibe\dsh-refine-loop\src 下全部 .ts,判断哪些模块没有对应的 spec。',
+    '2. 读 D:\\code\\vibe\\dsh-refine-loop\\src 下全部 .ts,判断哪些模块没有对应的 spec。',
     '3. 行数最多的那个模块是哪个?多少行?',
     '4. 给出补测优先级:先补哪个,为什么(一句话)。',
     '',
@@ -284,7 +284,7 @@ export const COVERAGEWIDE = {
  */
 export const PANEL = {
   text: [
-    '对 D:\code\vibe\dsh-refine-loop 这个插件的「核心规则」做一次三方独立评审,只读不改:',
+    '对 D:\\code\\vibe\\dsh-refine-loop 这个插件的「核心规则」做一次三方独立评审,只读不改:',
     '',
     '核心规则指:每轮必须交一张图,交完图判断能不能给结论;派发只能走图里的节点。',
     '',
@@ -293,7 +293,7 @@ export const PANEL = {
     '2. 是否可被绕过:模型有没有办法不交图就拿到结论?',
     '3. 与 harness 原生能力是否冲突:和 subagent / plan 模式 / 工具并发是否打架?',
     '',
-    '每份评审都要读相关源码并给出证据行号,最后汇总:三方在哪些点上一致、在哪些点上分歧。',
+    '每份评审都要读相关源码并点出实现所在的文件,最后汇总:三方在哪些点上一致、在哪些点上分歧。',
     '',
     '只读不改。不要修改任何文件。',
   ].join('\n'),
@@ -303,7 +303,7 @@ export const PANEL = {
     { what: '第二种视角(可绕过)', needles: ['绕过'] },
     { what: '第三种视角(与原生能力冲突)', needles: ['冲突'] },
     { what: '汇总了一致与分歧', needles: ['一致', '分歧'] },
-    { what: '引用了源码行号证据', needles: ['rounds.ts'] },
+    { what: '点到了实现所在的文件', needles: ['rounds.ts'] },
   ]),
 }
 
@@ -420,9 +420,9 @@ export const GREENSPECS = {
     '1. 只允许改 src/ 下的文件。',
     '2. 不允许改 verify/ 下的任何文件 —— 那是判据,改了也不算。',
     '3. 用 `node verify/run-specs.mjs` 自己检查,一直跑到输出 all checks passed。',
-    '4. 报告:每个 bug 是什么、在哪个文件、改了哪一行、最后 runner 的完整输出。',
+    '4. 报告:每个 bug 是什么、在哪个文件、改成了什么、最后 runner 的完整输出。',
     '',
-    '不要修改本仓库(D:\code\vibe\dsh-refine-loop)本身的任何文件。',
+    '不要修改本仓库(D:\\code\\vibe\\dsh-refine-loop)本身的任何文件。',
   ].join('\n'),
   setup() {
     plant()
