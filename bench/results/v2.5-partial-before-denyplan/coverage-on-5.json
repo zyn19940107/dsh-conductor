@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 115584,
+  "timedOut": false,
+  "sessionId": "session-608b7125-c04f-4f1a-9e0c-07a1b7eb3243",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 3517,
+    "outputTokens": 2917,
+    "cacheReadTokens": 24569,
+    "totalTokens": 31003
+  },
+  "formation": {
+    "agents": 4,
+    "input": 109457,
+    "output": 24749,
+    "cacheRead": 763556,
+    "total": 897762,
+    "steps": 30
+  },
+  "mainPrompt": 16729,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 3869,
+  "thinkingPreview": "The user asks three read-only questions about D:\\code\\vibe\\dsh-refine-loop. Let me plan.\n\nWait — the path mentioned: \"D:codeibedsh-refine-looperify\" — clearly the \\v and \\t got mangled. So it's D:\\code\\vibe\\dsh-refine-loop\\verify and D:\\code\\vibe\\dsh-refine-loop\\src.\n\nPlan: I need to find spec files under verify/, determine the entry function each tests (i.e., what function each spec imports/calls). Then list src/ modules (8 of them) and check which have corresponding specs. Then line counts of those modules, find max.\n\nLet me design a plan. The plan must be my first message... Actually the instruction: \"your first message of the round IS the plan: you hand it over before you call anything else\". So I should call refine_plan first (as my first tool call) — well, \"first message of the round IS the plan\" — hmm, it says hand it over with refine_plan. So my first tool call should be refine_p",
+  "finalText": "三个节点已把三问都查实，结论如下（全程只读，未改动任何文件）。\n\n## 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n共 8 个 spec，全部 `import` 自 `../src`，没有只测脚本/fixture 的：\n\n| spec | 实际驱动的入口 | 所在源文件 |\n|---|---|---|\n| `batch.spec.ts` | `runBatch`（辅以 `capOutput`/`capNodeOutput`/`scrubConclusion`） | `src/batch.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`（并用 `runBatch` 验批次顺序） | `src/concurrency.ts` + `src/batch.ts` |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch` | `src/batch.ts`；另有 `parsePolicyCommand`（`src/policy.ts`） |\n| `repair.spec.ts` | `parseRepair`（主路径经 `runBatch` 的 repair 回调） | `src/repair.ts` + `src/batch.ts` |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers` | `src/fork.ts` |\n| `plan.spec.ts` | `runPlan`、`renderPlan`；辅以 `parsePlanArgs`、`buildGroups`、`WORKER_MARKER` | `src/tool.ts` + `src/plan.ts` |\n| `rounds.spec.ts` | `Rounds`、`Workers`、`isWorkerConversation`、`applyTurnDoctrine`、`applyWorkerRule` | `src/rounds.ts` + `src/plan.ts` |\n| `retain.spec.ts` | `applyReportRetention`（用常量 `PLAN_TOOL`） | `src/index.ts` + `src/tool.ts` |\n\n## 2. `src/` 下哪些模块没有对应 spec\n\n`src/` 实为 **9 个 `.ts`**：`index.ts`（插件入口）+ 8 个功能模块（batch、concurrency、fork、plan、policy、repair、rounds、tool）。\n\n- **没有同名专属 spec 的模块有两个**：\n  - `src/policy.ts` —— 只有 `parsePolicyCommand` 在 `refine.spec.ts` 里被碰了一下；`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全部无测试。\n  - `src/tool.ts` —— `runPlan`/`renderPlan` 在 `plan.spec.ts`、`PLAN_TOOL` 在 `retain.spec.ts`；真正注册 `refine_plan` 的 `applyPlanTool` 无测试。\n- **一个更隐蔽的缺口**：`verify/repair.spec.ts` 存在，但 `verify/run-specs.mjs` 的 spec 列表只列了 refine/batch/concurrency/plan/rounds/fork/retain **7 个**，`repair.spec.ts` 没被接进去 —— 跑 `npm run specs` 从不执行它，所以 `repair.ts` 在真正跑的套件里等于没测。\n- 其余 6 个模块都有同名 spec：`batch`/`concurrency`/`fork`/`plan`/`repair`/`rounds`。\n- 附带：`src/index.ts` 作为入口只测了 `applyReportRetention`，`apply(ctx, config)`、`Config` 默认值、`REFINE_GUIDANCE` 均无测试。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，599 行**（文件总行数，含空行注释；577 非空行）。无论是否把 `index.ts` 计入 8 个模块，答案都一样。\n\n| 模块 | 行数 |\n|---|---|\n| `tool.ts` | **599** |\n| `fork.ts` | 549 |\n| `batch.ts` | 476 |\n| `rounds.ts` | 390 |\n| `index.ts`（入口，非 8 模块之一） | 358 |\n| `policy.ts` | 241 |\n| `concurrency.ts` | 234 |\n| `plan.ts` | 225 |\n| `repair.ts` | 173 |"
+}

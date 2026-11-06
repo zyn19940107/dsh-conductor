@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 176100,
+  "timedOut": false,
+  "sessionId": "session-b37fe87b-e2f8-4d60-83f7-077904f7cd06",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 3772,
+    "outputTokens": 3425,
+    "cacheReadTokens": 24956,
+    "totalTokens": 32153
+  },
+  "formation": {
+    "agents": 3,
+    "input": 61301,
+    "output": 24954,
+    "cacheRead": 752573,
+    "total": 838828,
+    "steps": 29
+  },
+  "mainPrompt": 17371,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 3987,
+  "thinkingPreview": "The user asks three read-only questions about D:\\code\\vibe\\dsh-refine-loop. Let me explore the directory structure first.\n\nThe path in the prompt has mangled backslashes: \"D:codeibedsh-refine-loop\" → likely \"D:\\code\\vibe\\dsh-refine-loop\".\n\nLet me plan: my first message must be the plan handed over to refine_plan. But actually I need to explore. Let me design the plan with tools nodes.\n\nLet me think about the structure. I'll do:\n- Node A: glob all .spec.ts under verify dir, and list src dir modules.\n- Node B: for each spec, determine the entry function tested.\n\nActually better: first discover file lists (tools node with glob + pwsh ls), then read files.\n\nLet me start with a plan that has tools nodes that gather the file inventory, plus workers to analyze.\n\nRound 1 plan:\n- node \"inventory\": tools node — glob for verify/**/*.spec.ts and src/**/* files, list directories.\n- Actually the analy",
+  "finalText": "## 结论\n\n调查口径先说明：`src` 下实为 **9 个 `.ts` 文件**，其中 `index.ts` 是插件装配入口（导出 `apply`/`applyReportRetention`），所以「8 个模块」= `batch / concurrency / fork / plan / policy / repair / rounds / tool`。\n\n---\n\n### 1. 每个 `.spec.ts` 实际测的入口函数\n\n| spec | 实际入口函数 | 定义位置 | 同文件附带测的符号 |\n|---|---|---|---|\n| `batch.spec.ts` | **`runBatch`** | `src/batch.ts` | `capOutput`、`capNodeOutput`、`scrubConclusion`、`MAX_CALL_OUTPUT_CHARS`、`MAX_NODE_OUTPUT_CHARS` |\n| `concurrency.spec.ts` | **`isReadOnlyCommand`** | `src/concurrency.ts` | `mayRunTogether`、`buildOverrides`；末尾用 `runBatch` 验批内顺序 |\n| `fork.spec.ts` | **`buildSeedFromNow`** | `src/fork.ts` | `openTurnClosers`（`SessionEventLike` 为类型） |\n| `plan.spec.ts` | **`runPlan`** | `src/tool.ts` | `renderPlan`、`parsePlanArgs`、`buildGroups`（`src/plan.ts`）、`WORKER_MARKER`（`BatchRunner` 仅类型导入，运行时被擦除） |\n| `refine.spec.ts` | **`parseBatchArgs`** | `src/batch.ts` | `renderBatch`（batch.ts）、`parsePolicyCommand`（policy.ts）——文件名里的 \"refine\" 与模块无关 |\n| `repair.spec.ts` | **`runBatch`** | `src/batch.ts` | `parseRepair`（`src/repair.ts`） |\n| `retain.spec.ts` | **`applyReportRetention`** | `src/index.ts` | `PLAN_TOOL`（`src/tool.ts`） |\n| `rounds.spec.ts` | **`applyTurnDoctrine` + `applyWorkerRule`** | `src/rounds.ts` | `Rounds`、`Workers` 类、`isWorkerConversation`、`ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN` |\n\n> 关键发现：`verify/run-specs.mjs` 的清单只列了 **7 个** spec（refine、batch、concurrency、plan、rounds、fork、retain），**漏掉 `repair.spec.ts`**。该文件 14 条断言本身全部通过，但 `pnpm specs` 根本不会执行它。\n\n### 2. 哪些模块没有对应的 spec\n\n两种口径结论不同，都给出：\n\n- **按「有专属同名 spec 文件」**：缺 **`src/policy.ts`** 和 **`src/tool.ts`**。`policy.ts` 无 `policy.spec.ts`，只有 `refine.spec.ts` 里一个小节碰到 `parsePolicyCommand`，`SessionPolicy`/`runPolicyCommand`/`policyConfirmation`/`applyPolicyMessage`/`applyPolicyCommand` 无任何 spec 引用；`tool.ts` 无 `tool.spec.ts`，由 `plan.spec.ts` 顺带驱动 `runPlan`/`renderPlan`，而注册函数 `applyPlanTool` 无人测。\n- **按「有 spec import 它」**：8 个模块**全部**被覆盖，无完全裸奔者。\n\n**实质缺口在 `src/repair.ts`**：它唯一对应的 `repair.spec.ts` 没被 runner 接线，所以常规 spec 流程跑完之后 `repair.ts` 实际一次都没被执行；连带 `parseRepair`/`repairSystem`/`askForRepair` 只在 `index.ts` 里被用到。其余模块也有大块未触及导出：`rounds.ts` 的 `Plans`/`applyRounds`/`applyDelegationRule`/`applyJudgementGuard`，`fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`。\n\n### 3. 行数最多的模块\n\n**`src/tool.ts`，599 个物理行**（非空 577），无并列，次位 `fork.ts` 549 行。\n\n完整计数（物理行 / 非空行）：\n\n| 模块 | 物理行 | 非空行 |\n|---|---|---|\n| `tool.ts` | **599** | 577 |\n| `fork.ts` | 549 | 520 |\n| `batch.ts` | 476 | 444 |\n| `rounds.ts` | 390 | 362 |\n| `policy.ts` | 241 | 228 |\n| `concurrency.ts` | 234 | 224 |\n| `plan.ts` | 225 | 207 |\n| `repair.ts` | 173 | 162 |\n\n（`index.ts` 358 / 330，一并计入也不改变第一名的归属。）\n\n---\n\n全程只读：仓库内未写入、未修改任何文件；行数用 `Get-Content` 计数并与 LF 切分口径交叉核对一致。"
+}

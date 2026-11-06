@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 148881,
+  "timedOut": false,
+  "sessionId": "session-01171a73-74b5-4d6f-857f-b961cff9a11e",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 14481,
+    "outputTokens": 3650,
+    "cacheReadTokens": 14049,
+    "totalTokens": 32180
+  },
+  "formation": {
+    "agents": 5,
+    "input": 167576,
+    "output": 32208,
+    "cacheRead": 1148865,
+    "total": 1348649,
+    "steps": 47
+  },
+  "mainPrompt": 17173,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 4,
+  "thinkingChars": 4778,
+  "thinkingPreview": "The user asks three read-only questions about D:\\code\\vibe\\dsh-refine-loop. Let me plan.\n\nQuestion 1: In `dsh-refine-loop/verify` directory, each `.spec.ts` — what entry function does it actually test?\nQuestion 2: In `dsh-refine-loop/src`, 8 modules — which ones have no corresponding spec?\nQuestion 3: Which of these modules has the most lines, and how many lines?\n\nI need to explore the repo. Let me start with a plan. The instruction says: my first message of the round IS the plan — hand it over before calling anything else.\n\nLet me design: nodes that can run in parallel:\n- Node A: list verify/*.spec.ts files and read them to determine entry functions tested.\n- Node B: list src modules (8 modules) and map to specs.\n- Node C: count lines of each module in src.\n\nBut B and C depend on knowing the file list. Actually all can be done independently via glob/pwsh.\n\nLet me use tools nodes for rea",
+  "finalText": "三个问题都已有实测答案，四个节点的结论彼此一致。以下是最终结论（全程只读，未改动任何文件）。\n\n---\n\n## 1. `verify` 下每个 `.spec.ts` 实际测的入口函数\n\n`verify` 里共 8 个 `.spec.ts`，各自真正被调用/断言的入口函数如下：\n\n| spec | 实际测试的入口函数（所在 src 文件） |\n|---|---|\n| `batch.spec.ts` | `runBatch`、`capOutput`、`capNodeOutput`、`scrubConclusion`（batch.ts） |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`（concurrency.ts）+ `runBatch`（batch.ts） |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers`（fork.ts） |\n| `plan.spec.ts` | `parsePlanArgs`、`buildGroups`（plan.ts）+ `runPlan`、`renderPlan`（tool.ts） |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch`（batch.ts）+ `parsePolicyCommand`（policy.ts） |\n| `repair.spec.ts` | `parseRepair`（repair.ts）+ 带 repair hook 的 `runBatch` 重试路径（batch.ts） |\n| `retain.spec.ts` | `applyReportRetention`（index.ts）；`PLAN_TOOL` 只是常量 |\n| `rounds.spec.ts` | `Rounds`（used/bump/reset）、`Workers`（mark）、`isWorkerConversation`、`applyTurnDoctrine`、`applyWorkerRule`（rounds.ts） |\n\n⚠️ 附带发现：`verify/run-specs.mjs` 的 spec 清单是硬编码的，**只列了 7 个文件（refine/batch/concurrency/plan/rounds/fork/retain）**，`repair.spec.ts` 虽在磁盘上，但 `pnpm specs` 从来不跑它 —— 它是孤儿 spec。\n\n## 2. `src` 下 8 个模块里没有对应 spec 的\n\n`src` 实际是 9 个 `.ts`：`index.ts` 是插件入口（导出 `apply`/`applyReportRetention`），**8 个模块**为 batch、concurrency、fork、plan、policy、repair、rounds、tool。\n\n- **按\"同名 spec 文件\"口径，缺的是 `policy.ts` 和 `tool.ts`** —— 它们没有自己的 spec，policy 的 `parsePolicyCommand` 在 `refine.spec.ts` 里测，tool 的 `runPlan`/`renderPlan` 在 `plan.spec.ts` 里测。\n- 按\"spec 有没有碰到过该模块的符号\"口径，8 个模块都被碰到过；但按\"模块主要入口有没有被测\"口径，真正零覆盖的是：`policy.ts` 的 `runPolicyCommand`/`SessionPolicy`/`applyPolicyMessage`/`applyPolicyCommand`、`tool.ts` 的 `applyPlanTool`、`repair.ts` 的 `askForRepair`/`repairSystem`/`describeFailure`、`fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`、`rounds.ts` 的 `applyRounds`/`applyDelegationRule`/`applyJudgementGuard`、`index.ts` 的 `apply` —— 这些名字在整个 verify 目录里一次都没出现。\n- 综合起来最刺眼的一个：**`repair.ts` 处于实际无验证状态**（唯一 spec 没被 runner 收录）。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，599 行**（物理行，含空行与注释）。完整排名：\n\n`tool.ts` 599 · `fork.ts` 549 · `batch.ts` 476 · `rounds.ts` 390 · `index.ts` 358 · `policy.ts` 241 · `concurrency.ts` 234 · `plan.ts` 225 · `repair.ts` 173\n\n把入口 `index.ts` 也算作模块，它排第 5，最大仍是 `tool.ts`。\n\n---\n\n**环境补充**：`verify` 不是 vitest/jest 工程（devDependencies 只有 esbuild + typescript + harness），跑法是自建 runner `pnpm specs` → `node verify/run-specs.mjs`，用 esbuild 打包后**每个 spec 单起一个 node 进程**执行。另外 `MAX_REPAIRS = 2` 在 `batch.ts` 与 `repair.ts` 中各定义了一份，属重复常量。\n\n全程只读，未修改任何文件。"
+}

@@ -1,0 +1,42 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 164557,
+  "timedOut": false,
+  "sessionId": "session-9237a810-0024-4e39-9fd7-f78b54faeb19",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 7639,
+    "outputTokens": 3821,
+    "cacheReadTokens": 42240,
+    "totalTokens": 53700
+  },
+  "formation": {
+    "agents": 4,
+    "input": 144305,
+    "output": 32327,
+    "cacheRead": 1155456,
+    "total": 1332088,
+    "steps": 35
+  },
+  "mainPrompt": 20193,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 2968,
+  "thinkingPreview": "The three nodes all converged. Let me write the conclusion. There's a minor discrepancy: spec-entries says rounds.spec.ts tests `applyTurnDoctrine`/`applyWorkerRule` and also `WORKER_NO_PLAN` constant, while module-coverage says `WORKER_MARKER` from src/plan.ts. Let me note that carefully — but both agree on the main entry. The answer is complete.\n\nLet me write the conclusion directly, no more tools needed. Actually, there's one small conflict worth resolving: rounds.spec.ts's imports — one says constants `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN` from rounds.ts, the other says `WORKER_MARKER` from src/plan.ts. That's a detail about the entry function question #1. It'd be good to be accurate. But both node results are consistent enough on the primary entry functions. I could do one more small round to resolve that detail. It's a minor detail though.\n\nLet me consider: the question asks \"每",
+  "finalText": "三个问题都已查清,全程只读,未修改任何文件。\n\n---\n\n## 1. `verify/` 下 8 个 spec 实际测的入口函数\n\n| spec 文件 | 实际入口函数 | 导入来源 |\n|---|---|---|\n| `batch.spec.ts` | **`runBatch(runner, args, agent, signal, respectConcurrencySafety, rootCallId?, overrides?, repair?) → Promise<BatchOutput>`** — 主体 | `../src/batch.js` |\n| `concurrency.spec.ts` | **`isReadOnlyCommand(command): boolean`** — 主体；另测 `mayRunTogether`、`buildOverrides`，末尾用 `runBatch` 验调用顺序 | `../src/concurrency.js` + `../src/batch.js` |\n| `fork.spec.ts` | **`buildSeedFromNow(events) → SessionEventLike[]`** — 主体；另测 `openTurnClosers` | `../src/fork.ts` |\n| `plan.spec.ts` | **`runPlan(...) → Promise<PlanOutput>`** — 主体；另测 `renderPlan` | `../src/tool.js` + `../src/plan.js` |\n| `refine.spec.ts` | **`parseBatchArgs(value) → BatchArgs \\| undefined`** — 主体；另测 `renderBatch` | `../src/batch.js` + `../src/policy.js` |\n| `repair.spec.ts` | **`parseRepair(text, name)`**；主体用 `runBatch` 带 repair 钩子跑\"失败→询问→重跑\"整条链 | `../src/repair.js` + `../src/batch.js` |\n| `retain.spec.ts` | **`applyReportRetention(ctx)`** — 主体 | `../src/index.js` + `../src/tool.js`(取 `PLAN_TOOL`) |\n| `rounds.spec.ts` | **`applyTurnDoctrine(ctx, workers)` / `applyWorkerRule(ctx, workers)`** 两个 hook 安装器；另测 `Rounds`、`Workers`、`isWorkerConversation`、常量 `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN` | `../src/rounds.ts` + `../src/plan.ts`(取 `WORKER_MARKER`) |\n\n两个名不副实之处:`refine.spec.ts` 真正测的是 batch/policy 的参数解析,`retain.spec.ts` 测的是插件入口 `src/index.ts` 的报告保留 hook,而不是 8 个模块里的任何一个。\n\n## 2. 没有对应 spec 的模块\n\n`src/` 实际有 **9** 个 `.ts`:`index.ts` 是 DSH 插件入口(`apply`/`Config`/`applyReportRetention`),其余 8 个即你说的 8 个模块 —— batch、concurrency、fork、plan、policy、repair、rounds、tool。\n\n**没有同名 spec 的是 `policy.ts` 和 `tool.ts`**。它们只是被别的 spec 顺带覆盖:`policy.ts` 的 `parsePolicyCommand` 在 `refine.spec.ts` 里,`tool.ts` 的 `runPlan`/`renderPlan` 在 `plan.spec.ts`、`PLAN_TOOL` 在 `retain.spec.ts`。按\"完全没有任何 spec 触及\"来读,则是空集 —— 8 个模块都被至少一个 spec 导入过。但函数级缺口是实打实的:`tool.ts` 的 `applyPlanTool`(真正的工具注册)、`policy.ts` 的 `runPolicyCommand`/`SessionPolicy`/`policyConfirmation`/`applyPolicyMessage`/`applyPolicyCommand`、`fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`、`repair.ts` 的 `askForRepair`/`repairSystem`/`describeFailure`/`collectText`、`rounds.ts` 的 `applyRounds`/`applyJudgementGuard`/`applyDelegationRule`/`Plans` 全都没有测试。\n\n**另外两个值得记一笔的事实:**\n- `repair.spec.ts` 文件存在且完整,但 **`verify/run-specs.mjs` 的清单里没有它** —— 套件只跑 refine、batch、concurrency、plan、rounds、fork、retain 这 7 个,所以 `pnpm specs` 这条标准验收入口根本不执行 repair.spec.ts。repair.ts 是唯一有专属 spec 却游离在套件之外的模块。\n- 导入写法不统一:`../src/batch.js` / `../src/tool.js` 用 `.js` 后缀,`../src/fork.ts` / `../src/rounds.ts` / `../src/plan.ts` 用 `.ts`。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`,607 行**(非空行 585;两种算法下都是第一)。完整排名:\n\n| 文件 | 物理行 | 非空行 |\n|---|---|---|\n| **tool.ts** | **607** | 585 |\n| fork.ts | 549 | 520 |\n| batch.ts | 476 | 444 |\n| rounds.ts | 390 | 362 |\n| *index.ts*(插件入口) | 358 | 330 |\n| policy.ts | 241 | 228 |\n| concurrency.ts | 234 | 224 |\n| plan.ts | 225 | 207 |\n| repair.ts | 173 | 162 |\n\n计数方式:`System.IO.File::ReadAllLines` 与 LF 正则计数两种独立方法互相印证(所有文件均以换行结尾,两者相等),无 shell 重定向。"
+}

@@ -247,8 +247,10 @@ console.log('runPlan')
   // The contract has to be the last thing a child reads, and it has to say it
   // wins over a task that asks for a report — the task sits above it and would
   // otherwise be what the child follows.
-  check('every child prompt ends with the conclusion contract',
-    prompts.every(prompt => prompt.trim().endsWith('the parent composes the final answer.')))
+  check('every child prompt carries the conclusion contract',
+    prompts.every(prompt => prompt.includes('the parent composes the final answer.')))
+  check('a worker prompt ends with the ban on the plan tool',
+    prompts.some(prompt => prompt.trim().endsWith('禁止使用 refine_plan，不要做和任务不相关的事情。')))
   check('the contract says it overrides a report-shaped task',
     prompts.every(prompt => prompt.includes('even when the task above asks for a fuller report')))
   check('the contract comes after the criteria',

@@ -128,7 +128,15 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
       + 'report what you found. Do not draw a plan and do not delegate.'
       + String.fromCharCode(10) + String.fromCharCode(10)
     : ''
-  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}${contract}`.trim()
+  // The last line a worker reads, and the one that has to survive the system
+  // prompt above it: that prompt describes the plan tool as this conversation's
+  // opening move, so a worker that only reads the top still tries to plan. Two
+  // rules, in the language most tasks are written in.
+  const workerBan = node.kind === 'worker'
+    ? String.fromCharCode(10) + String.fromCharCode(10)
+      + '禁止使用 refine_plan，不要做和任务不相关的事情。'
+    : ''
+  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}${contract}${workerBan}`.trim()
 }
 
 /**

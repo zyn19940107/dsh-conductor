@@ -1,0 +1,42 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 372836,
+  "timedOut": false,
+  "sessionId": "session-7394c862-6da7-42d2-a69e-a576dac117a9",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 5691,
+    "outputTokens": 6068,
+    "cacheReadTokens": 41323,
+    "totalTokens": 53082
+  },
+  "formation": {
+    "agents": 6,
+    "input": 232441,
+    "output": 56697,
+    "cacheRead": 2353850,
+    "total": 2642988,
+    "steps": 67
+  },
+  "mainPrompt": 19844,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 3515,
+  "thinkingPreview": "The `enforced-rule` node failed — it hit its budget. I need to re-run that piece. Let me design the next round: a single node (or a couple of nodes) to determine the enforced rule.\n\nI have partial info from tool-ts: `applyWorkerRule` in `src/rounds.ts` — worker is a leaf, no plan, no delegation. And `applyDelegationRule` denies hidden tools and re-registers subagent/subagent_fork to throw DELEGATE_IN_GRAPH for direct model calls. But the question asks \"这个插件强制的那条规则是什么\" — the ONE rule this plugin forcibly enforces. This is likely the \"delegation goes through the plan\" rule — i.e., the model must not call subagent directly; it must go through refine_plan. Or it could be the worker-leaf rule.\n\nLet me check: the plugin is \"dsh-refine-loop\". The system prompt in this very session says: \"Not called directly: delegation happens inside refine_plan, as a node of kind worker/forker/spawner.\" So the",
+  "finalText": "三个部分都已独立审完（全程只读，未改动 `dsh-refine-loop` 下任何文件）。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构、节点种类、调用参数处理\n\n**数据结构**（该文件自包含、无 import，整个计划模型都在这一处）：\n\n- `PlanArgs = { criteria: string[]; nodes: PlanNode[] }`\n- `PlanNode` 七个字段全部必填：`id: string`、`kind: PlanNodeKind`、`calls: PlanToolCall[]`、`task: string`、`order: PlanNodeOrder`、`writes: string[]`、`budgetMs: number`\n- `PlanToolCall = { name: string; arguments: unknown }`\n- `PlanNodeKind = 'tools' | 'worker' | 'spawner' | 'forker'`，`PlanNodeOrder = 'parallel' | 'sequential'`\n- 常量：`AGENT_NODE_KINDS` / `NODE_AGENT_KINDS`（均为 `['worker','spawner','forker']`）、`WORKER_NODE_KINDS`（`['worker']`）、`MAX_NODE_BUDGET_MS = 3_600_000`、`WORKER_MARKER = '[refine-loop worker]'`\n\n**节点四种**：`tools`（已决定好的调用批次，`calls` 必须非空，解析器把 `task` 强制为 `''`）；`worker`（叶子，自己干活、在自己的回合里跑完，**不能画图、不能再派发**）；`spawner`（空手套白式的领导者，不继承本对话）；`forker`（继承本对话的领导者）。三种 agent 节点都要求 `task` 非空，解析器把它们的 `calls` 强制为 `[]`。\n\n**调用参数的处理**：把关全在 `parsePlanArgs(value: unknown): PlanArgs | undefined`，且**失败即全盘拒绝**（返回 `undefined`，绝不返回\"部分接受的节点列表\"）——`criteria`/`nodes` 必须是数组；空白 criterion丢弃、其余 trim，全空则整体 undefined；每个节点必须是非空对象、带非空且去重后的 `id`、`kind` 必须是四个字面量之一；`budgetMs` 只在是有限正数时保留并被钳到 `MAX_NODE_BUDGET_MS`，否则记为 `0`（即\"未声明\"）；`order`精确匹配才为 `sequential`，否则 `parallel`；`writes` 过滤掉空串并 trim，非数组则 `[]`。\n\n关键一点：**`calls[].arguments` 插件自身完全不校验、不做 schema 检查、不做类型转换或规范化**——字段类型是 `unknown`，原样透传，唯一例外是 `undefined` 变 `{}`（比工具声明的 `required: true, type: 'json'` 还宽松）。真正的参数校验发生在 DSH 工具注册表执行调用时；调用失败后由 `src/batch.ts` 调 `RepairHook`/`askForRepair`（`src/repair.ts`），让**本对话自己的模型**依据报错加工具 schema重新推导整个调用（名字+参数），每个调用最多 `MAX_REPAIRS = 2` 次。\n\n**分组与顺序**：`buildGroups(nodes)` 把节点切成可同跑的组，`canRunTogether` 拒绝把声明了同一 `writes` 文件的两个节点放进同组；组内和组间都保持声明顺序。`tools` 节点内部的 `order` 交给 `runBatch`：`parallel` 按并发安全检查并行、`sequential` 按书写顺序逐个执行。\n\n---\n\n## 2. 插件强制的那条规则\n\n**规则本体：一轮就是一张图。** 干活只能发生在图里——模型不能用自己的工具调用一步一步地干，也不能直接派子代理；派发只能是图里的节点（`worker`/`forker`/`spawner`），图跑完模型只能写结论或交下一张图。`src/index.ts` 的原话是\"the rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over — what the plan did not settle belongs to the next round.\"\n\n**拆成三道闸门，全在 `src/rounds.ts`，由 `src/index.ts` 的 `apply()` 依次注册：**\n\n1. **派发只能走图** —— `applyDelegationRule(ctx)`（`agent/created` 钩子）：`agent.ctx.tools.restrict({ deny: HIDDEN_TOOLS })` 把 `list_agents`/`send_message`/`interrupt_agent` 从工具表整个摘掉；再把 harness 自带的 `subagent`/`subagent_fork` 用插件自己的描述重新注册（\"Not called directly: delegation happens inside refine_plan, as a node of kind worker/forker/spawner\"），其 `execute` 里 `if (exec.callId === exec.rootCallId) throw new Error(DELEGATE_IN_GRAPH)`。\n   **触发条件 = 模型自己发起的直调**。图里发起的嵌套调用放行，因为 plan 工具把自己的 `exec.callId` 一路传下去当 `rootCallId`（`tool.ts execute → runPlan → runNode → runBatch → runOne` 的 `runner.execute({ callId: nextCallId(), rootCallId, ... })`），嵌套调用 `callId !== rootCallId`。判定辅助函数 `isModelCall(execution)`。这是唯一一处改写 harness 既有工具并直接拒调的地方，也是这条规则最核心的强制点。\n\n2. **图跑完只能判断** —— `applyJudgementGuard(ctx, plans)`（`ctx.tools.guard`）：返回 `JUDGE_ONLY`，条件是「模型自己发起的调用（`isModelCall`）+ 工具名不是 `refine_plan` + `plans.waiting(session.id)` 为 false」。`plans.expect` 在新用户消息时置位（`applyRounds`），`plans.done` 在 `onPlanFinished` 里清掉，所以第一张图跑完后的那一轮，所有直调工具都被拒。\n\n3. **worker 不能画图** —— `applyWorkerRule(ctx, workers)`（`ctx.tools.guard`）：返回 `WORKER_NO_PLAN`，条件是「模型发起的调用 + 工具名 `refine_plan` + `workers.has(agent.session.id)`」。worker 会话由 `onWorker` → `Workers.mark` 在子会话创建时就登记（早于 `createAgent` resolve），所以 worker 第一次画图就撞上。工具**故意留在表里**——摘掉会改请求头、让继承前缀的 KV cache 失效。\n\n**分清\"提示\"与\"强制\"**：`applyTurnDoctrine` 把 `ROUND_LOOP` 教条作为**最后一条消息**塞给模型（仅 `payload.step === 1`，且对 worker 会话跳过）；README 明确写\"每轮开始就想图\"只是教条，**\"必须交图\"不在强制之列**——插件不拦第一张图之前的工具调用，也不把没交图的一轮拉回来。README 与代码口径一致。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**跑起来的路径**：`applyPlanTool` 用 `defineTool` 注册唯一工具 `PLAN_TOOL = 'refine_plan'`，计划级上限 `timeoutMs` = `maxBatchTimeoutMs`（默认 900000）。`execute` 四步：`parsePlanArgs(args)`（undefined → 抛 `refine_plan needs criteria, and nodes that each have an id and a kind`）→ 节点数超 `maxBatchSize`（默认 8）则抛 "
+}
