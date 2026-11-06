@@ -104,13 +104,17 @@ function buildAgentPrompt(node: PlanNode, criteria: readonly string[]): string {
     : `What this plan is judged on:
 ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
 ` + String.fromCharCode(10) + String.fromCharCode(10)
-  // What the parent needs back is the judgement itself: the parent composes the
-  // final answer. The contract is the last thing the child reads, and it says
-  // outright that it wins over a task written to ask for a report — the parent's
-  // own wording is what the child would otherwise follow.
-  const contract = 'What comes back from you is used as it stands: give your conclusion — the verdict and at '
-    + 'most the one or two facts it rests on. Do not quote source, do not write a report, and do not build a '
-    + 'citation trail, even when the task above asks for one; the parent composes the final answer.'
+  // What the parent needs back is the judgement itself, and now the knowledge
+  // behind it: the parent reads the raw tool output of the round through a small
+  // cap, so a bare verdict leaves it unable to judge. The contract is the last
+  // thing the child reads, and it says outright that it wins over a task written
+  // to ask for a fuller report.
+  const contract = 'What comes back from you is used as it stands, and it is what the parent judges from. '
+    + 'Keep it compact and structure it in three short parts: (1) what you found out that matters — the facts '
+    + 'or behaviour you established; (2) roughly how — the method in a line or two, not a transcript; (3) what '
+    + 'came of it — the result, whether it worked, and what is still open. Do not quote source and do not '
+    + 'build a citation trail, even when the task above asks for a fuller report: the parent composes the '
+    + 'final answer.'
     + String.fromCharCode(10) + String.fromCharCode(10)
   // A worker is told what it is: it does the work, it does not draw a graph of
   // its own. The marker is also how the plugin recognises the worker's own

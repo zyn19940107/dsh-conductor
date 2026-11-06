@@ -250,7 +250,7 @@ console.log('runPlan')
   check('every child prompt ends with the conclusion contract',
     prompts.every(prompt => prompt.trim().endsWith('the parent composes the final answer.')))
   check('the contract says it overrides a report-shaped task',
-    prompts.every(prompt => prompt.includes('even when the task above asks for one')))
+    prompts.every(prompt => prompt.includes('even when the task above asks for a fuller report')))
   check('the contract comes after the criteria',
     prompts.every(prompt => prompt.indexOf('What this plan is judged on') < prompt.indexOf('What comes back from you')))
   if (prompts[0] !== undefined) {

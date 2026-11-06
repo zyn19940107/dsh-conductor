@@ -68,9 +68,10 @@ export const REFINE_GUIDANCE = [
   '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
   + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
   + '"order": "sequential", or a worker.',
-  '- An agent node answers with its conclusion, and that conclusion goes into your answer as it stands: give '
-  + 'it a task that says what to decide. The standard it has to meet goes into its task; asking it afterwards '
-  + 'for a report, or for proofs of what it found, is you doing the work twice.',
+  '- An agent node answers with its conclusion, and that conclusion is what you judge from and what goes '
+  + 'into your answer as it stands. Ask for three things, compactly: what it found out, roughly how it did '
+  + 'it, and what came of it. The raw tool output of a round is capped, so a bare verdict leaves you unable '
+  + 'to judge.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',

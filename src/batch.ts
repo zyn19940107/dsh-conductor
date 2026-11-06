@@ -200,11 +200,16 @@ export type RepairCall = (
  * is capped: the head, the tail and a marker that says how much was left out.
  * The dropped middle is recoverable on purpose, with `read` and its offset or a
  * narrower `grep`, which is a cheaper follow-up than a summarising model call.
+ *
+ * The cap is deliberately small: the parent reads every result of every round,
+ * and raw tool output is the bulk of its context. What the parent needs from a
+ * node is the fact that it ran and the shape of what it found, not the whole
+ * file — the dropped part stays one cheap call away.
  */
-export const MAX_CALL_OUTPUT_CHARS = 10000
+export const MAX_CALL_OUTPUT_CHARS = 5000
 
 /** How much of the head survives the cap; the tail gets the rest. */
-const OUTPUT_HEAD_CHARS = 6000
+const OUTPUT_HEAD_CHARS = 3000
 const OUTPUT_TAIL_CHARS = MAX_CALL_OUTPUT_CHARS - OUTPUT_HEAD_CHARS
 
 /**
@@ -232,7 +237,7 @@ export function capOutput(output: string): string {
  * marker lists every call so none of them disappears from the report, and the
  * dropped middle is recoverable by running the call again in a later round.
  */
-export const MAX_NODE_OUTPUT_CHARS = 10000
+export const MAX_NODE_OUTPUT_CHARS = 5000
 
 /**
  * Cap one tools node's combined output, keeping its head and its tail.
