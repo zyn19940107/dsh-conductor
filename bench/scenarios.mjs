@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process'
-import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -17,6 +17,35 @@ import { fileURLToPath } from 'node:url'
  * - `multihop`: each step needs the previous step's answer. A static plan cannot
  *   write the second call, so this is where the plugin is expected to lose.
  */
+
+/**
+ * The files the coverage tasks are written against.
+ *
+ * Read from the tree itself, not typed into the prose: the counts in these tasks
+ * went stale once (a module and two specs were added, the text still said eight
+ * and six), and a worker that is told "eight modules" when there are nine spends
+ * its rounds working out which one to leave out instead of answering.
+ */
+const SRC_ROOT = 'D:/code/vibe/dsh-refine-loop/src'
+const VERIFY_ROOT = 'D:/code/vibe/dsh-refine-loop/verify'
+const SRC_MODULES = readdirSync(SRC_ROOT).filter(name => name.endsWith('.ts')).sort()
+const SPEC_FILES = readdirSync(VERIFY_ROOT).filter(name => name.endsWith('.spec.ts')).sort()
+
+/** The module with the most lines, right now. */
+const LARGEST_MODULE = SRC_MODULES
+  .map(name => ({ name, lines: readFileSync(join(SRC_ROOT, name), 'utf8').split(String.fromCharCode(10)).length }))
+  .sort((left, right) => right.lines - left.lines)[0]
+
+/**
+ * @param {string[]} files - file names.
+ * @returns them joined for prose.
+ */
+const list = files => files.join('、')
+
+/** Criterion: every module under src is named. */
+const MODULE_NEEDLES = { what: `src 的 ${SRC_MODULES.length} 个模块`, needles: SRC_MODULES }
+/** Criterion: every spec under verify is named. */
+const SPEC_NEEDLES = { what: `verify 的 ${SPEC_FILES.length} 个 spec`, needles: SPEC_FILES }
 
 /**
  * Build a criterion checker from a list of requirements.
@@ -128,52 +157,52 @@ export const MULTIHOP = {
   ]),
 }
 /**
- * Six specs against eight modules, then a judgement about what is untested.
+ * Every spec against every module, then a judgement about what is untested.
  *
- * Reading all fourteen files is ~3,600 lines. A plain agent carries every one of
- * them in its own context; a plan can hand the files out and keep only the
- * conclusions. This is the shape the plugin claims to be for.
+ * A plain agent carries all of them in its own context; a plan can hand the
+ * files out and keep only the conclusions. This is the shape the plugin claims
+ * to be for.
  */
 export const COVERAGE = {
   text: [
     '回答下面三个问题,只读不改:',
     '',
     '1. D:\code\vibe\dsh-refine-loop\verify 下每个 .spec.ts 实际测的入口函数是什么?',
-    '2. D:\code\vibe\dsh-refine-loop\src 下 8 个模块里,哪些没有对应的 spec?',
+    '2. D:\code\vibe\dsh-refine-loop\src 下所有 .ts 模块里,哪些没有对应的 spec?',
     '3. 这些模块里行数最多的是哪一个?多少行?',
     '',
     '只读不改。不要修改任何文件。',
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
-    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'rounds.ts', 'tool.ts'] },
-    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts'] },
+    MODULE_NEEDLES,
+    SPEC_NEEDLES,
     { what: 'concurrency.spec 测的入口', needles: ['isreadonlycommand'] },
     { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
     // tool.ts grows with the plugin; the criterion is that the answer names the
     // largest module and a line count that matches one of its two counts.
     // The line count is an implementation detail that moves with every edit; the
     // task asks which module is largest, and that is what the answer must name.
-    { what: '行数最多的模块是 tool.ts', needles: ['tool.ts'] },
+    { what: `行数最多的模块是 ${LARGEST_MODULE.name}`, needles: [LARGEST_MODULE.name] },
   ]),
 }
 
 /**
- * One sentence per file, fourteen files, nothing skipped.
+ * One sentence per file, nothing skipped.
  *
  * Embarrassingly parallel: the answer for one file does not inform any other.
  */
 export const SWEEP = {
   text: [
-    '给下面 14 个文件各写一句话,说明它负责什么,一个都不要漏:',
+    `给下面 ${SRC_MODULES.length + SPEC_FILES.length} 个文件各写一句话,说明它负责什么,一个都不要漏:`,
     '',
-    'src 下:batch.ts、concurrency.ts、index.ts、plan.ts、policy.ts、repair.ts、rounds.ts、tool.ts',
-    'verify 下:batch.spec.ts、concurrency.spec.ts、plan.spec.ts、refine.spec.ts、repair.spec.ts、rounds.spec.ts',
+    `src 下:${list(SRC_MODULES)}`,
+    `verify 下:${list(SPEC_FILES)}`,
     '',
     '都在 D:\code\vibe\dsh-refine-loop 下。只读不改。',
   ].join('\n'),
   judge: judgeBy([
-    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'rounds.ts', 'tool.ts'] },
-    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts'] },
+    MODULE_NEEDLES,
+    SPEC_NEEDLES,
     { what: 'repair.ts 的职责(失败后修一次)', needles: ['修'] },
     { what: 'concurrency.ts 的职责(并发判定)', needles: ['并发'] },
     { what: 'plan.ts 的职责(图的节点)', needles: ['节点'] },
@@ -224,24 +253,24 @@ export const COVERAGEWIDE = {
   text: [
     '对这个插件的测试覆盖做一次盘点,只读不改:',
     '',
-    '1. 读 D:\code\vibe\dsh-refine-loop\verify 下全部 6 个 .spec.ts,每个用一句话说明它实际测的是什么,',
+    '1. 读 D:\code\vibe\dsh-refine-loop\verify 下全部 .spec.ts,每个用一句话说明它实际测的是什么,',
     '   注明它主要调用的那个函数/入口的名字。',
-    '2. 读 D:\code\vibe\dsh-refine-loop\src 下全部 8 个 .ts,判断哪些模块没有对应的 spec。',
+    '2. 读 D:\code\vibe\dsh-refine-loop\src 下全部 .ts,判断哪些模块没有对应的 spec。',
     '3. 行数最多的那个模块是哪个?多少行?',
     '4. 给出补测优先级:先补哪个,为什么(一句话)。',
     '',
     '只读不改。不要修改任何文件。',
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
-    { what: 'src 的八个模块', needles: ['batch.ts', 'concurrency.ts', 'index.ts', 'plan.ts', 'policy.ts', 'repair.ts', 'rounds.ts', 'tool.ts'] },
-    { what: 'verify 的六个 spec', needles: ['batch.spec.ts', 'concurrency.spec.ts', 'plan.spec.ts', 'refine.spec.ts', 'repair.spec.ts', 'rounds.spec.ts'] },
+    MODULE_NEEDLES,
+    SPEC_NEEDLES,
     { what: 'concurrency.spec 测的入口', needles: ['isreadonlycommand'] },
     { what: 'refine.spec 实际测的入口', needles: ['parsebatchargs'] },
     // tool.ts grows with the plugin; the criterion is that the answer names the
     // largest module and a line count that matches one of its two counts.
     // The line count is an implementation detail that moves with every edit; the
     // task asks which module is largest, and that is what the answer must name.
-    { what: '行数最多的模块是 tool.ts', needles: ['tool.ts'] },
+    { what: `行数最多的模块是 ${LARGEST_MODULE.name}`, needles: [LARGEST_MODULE.name] },
   ]),
 }
 
