@@ -39,7 +39,7 @@ function median(records, pick) {
 
 const scenarios = process.argv.slice(2).length > 0
   ? process.argv.slice(2)
-  : ['coverage', 'review', 'humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower', 'lhtb-commit0']
+  : ['coverage', 'review', 'humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower']
 
 const rows = []
 for (const scenario of scenarios) {

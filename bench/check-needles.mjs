@@ -32,7 +32,6 @@ const TASK_SOURCES = [
   'bench/pubeval.mjs',
   'bench/lhtb.mjs',
   'bench/lhtb-nbody.mjs',
-  'bench/lhtb-commit0.mjs',
   'bench/lhtb-matpower.mjs',
 ]
 

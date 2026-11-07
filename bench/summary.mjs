@@ -20,7 +20,7 @@ process.env.SPEED = speed
 
 const TASKS = [
   'coverage', 'review', 'humeval', 'humeval-hard', 'quixbugs',
-  'panel', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower', 'lhtb-commit0',
+  'panel', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower',
 ]
 
 /**

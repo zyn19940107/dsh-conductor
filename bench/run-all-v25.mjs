@@ -35,7 +35,6 @@ const PLAN = [
   ['lhtb-2048', 5],
   ['lhtb-nbody', 3],
   ['lhtb-matpower', 2],
-  ['lhtb-commit0', 2],
 ]
 
 const build = ensureBuild()

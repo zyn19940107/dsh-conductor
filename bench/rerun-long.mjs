@@ -2,7 +2,7 @@
  * Re-run the long-horizon tasks the plan report was truncated on, on the current
  * build (v2.1), and print the v2.0 / v2.1 comparison.
  *
- * Only `lhtb-matpower` and `lhtb-commit0` are re-run: they are the long-horizon
+ * Only `lhtb-matpower` is re-run: it is the long-horizon
  * tasks the plugin wins, and matpower is the one whose reports were being cut
  * (3 of 8). `lhtb-nbody` had none, so it is left alone.
  *
@@ -21,7 +21,7 @@ const V20 = join(RESULTS, 'v2.0')
 const SESSIONS = 'D:/code/vibe/dsh-sandbox/home/sessions/--D-code-vibe--'
 const LF = String.fromCharCode(10)
 const RUNS = Number(process.argv[2] ?? '2')
-const TASKS = ['lhtb-matpower', 'lhtb-commit0']
+const TASKS = ['lhtb-matpower']
 
 mkdirSync(V20, { recursive: true })
 for (const task of TASKS) {

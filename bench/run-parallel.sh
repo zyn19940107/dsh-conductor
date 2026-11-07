@@ -6,7 +6,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-TASKS=(coverage review humeval humeval-hard quixbugs panel lhtb-commit0 lhtb-matpower lhtb-2048 lhtb-nbody)
+TASKS=(coverage review humeval humeval-hard quixbugs panel lhtb-matpower lhtb-2048 lhtb-nbody)
 MAX_JOBS=4
 
 run_task() {

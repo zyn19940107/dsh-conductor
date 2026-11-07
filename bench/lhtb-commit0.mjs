@@ -1,6 +1,19 @@
 /**
  * The LHTB commit0-multilib task, run locally.
  *
+ * RETIRED from the suite. The task asks for three well-known libraries to be
+ * implemented from their docstrings, and for an agent that already knows them
+ * the shortest path is to reproduce the upstream source from memory. Every one
+ * of the ten runs that were measured did that: all ten had at least two
+ * libraries flagged as byte-identical to upstream, six had all three (their
+ * self-written score was 0), so the raw score measured how much of a library was
+ * recalled rather than how well one was written. Both arms meet the same
+ * conditions, so the comparison is not unfair — it is simply not about the
+ * plugin. Re-enable it only with libraries the model cannot reconstruct, or with
+ * docstrings rewritten far enough that memory no longer answers.
+ *
+ * The records of that last measurement are in bench/results/retired-commit0/.
+ *
  * `silrlab/commit0-multilib-tdd` is a long-horizon design task from
  * Long-Horizon Terminal-Bench: three real Python libraries are stubbed out
  * (every function body raises NotImplementedError), the grading test suites

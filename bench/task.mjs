@@ -16,7 +16,6 @@ import { BIGREAD, COVERAGE, COVERAGEWIDE, DISCOVERY, FANOUT, GREENSPECS, GREENSP
 import { PUBLIC_TASKS } from './pubeval.mjs'
 import { LHTB_TASKS } from './lhtb.mjs'
 import { LHTB_NBODY_TASKS } from './lhtb-nbody.mjs'
-import { LHTB_COMMIT0_TASKS } from './lhtb-commit0.mjs'
 import { LHTB_MATPOWER_TASKS } from './lhtb-matpower.mjs'
 
 /**
@@ -194,7 +193,7 @@ export const GOAL_PROBE = {
 }
 
 export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE, leadprobe: LEAD_PROBE,
-  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_COMMIT0_TASKS, ...LHTB_MATPOWER_TASKS }
+  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

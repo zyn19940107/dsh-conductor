@@ -12,7 +12,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const DIR = 'bench/results'
-const TASKS = ['humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody', 'lhtb-commit0', 'lhtb-matpower', 'greenspecs', 'greenspecs-hard']
+const TASKS = ['humeval', 'humeval-hard', 'quixbugs', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower', 'greenspecs', 'greenspecs-hard']
 
 /**
  * The median of a list of numbers.
@@ -120,19 +120,9 @@ for (const task of TASKS) {
   console.log(`| 做对的运行数 | ${offSolved.good}/${offSolved.total} | ${onSolved.good}/${onSolved.total} `
     + `| ${offSolved.good === onSolved.good ? '—' : (onSolved.good > offSolved.good ? '✅' : '❌')} |`)
   const scaled = task.startsWith('lhtb-')
-  const label = task === 'lhtb-commit0'
-    ? '命中的判据(隐藏测试)'
-    : (scaled ? '通过的档(加权分见下)' : '正确性(通过的判据)')
+  const label = scaled ? '通过的档(加权分见下)' : '正确性(通过的判据)'
   console.log(`| ${label} `
     + `| ${offCorrect}/${offTotal} | ${onCorrect}/${onTotal} | — |`)
-  // A judge may report a second score: the commit0 task reports the score the
-  // agent's own code earns, with the libraries it copied dropped.
-  const offVoided = pick(task, 'off', record => record.correctness.voidedScore ?? Number.NaN)
-  const onVoided = pick(task, 'on', record => record.correctness.voidedScore ?? Number.NaN)
-  if (Number.isFinite(offVoided) || Number.isFinite(onVoided)) {
-    console.log(`| 自写分(去掉抄来的库) | ${Number.isFinite(offVoided) ? offVoided.toFixed(3) : '—'} `
-      + `| ${Number.isFinite(onVoided) ? onVoided.toFixed(3) : '—'} | ${delta(offVoided, onVoided)} |`)
-  }
   const offScore = pick(task, 'off', record => record.correctness.score ?? Number.NaN)
   const onScore = pick(task, 'on', record => record.correctness.score ?? Number.NaN)
   if (Number.isFinite(offScore) || Number.isFinite(onScore)) {
