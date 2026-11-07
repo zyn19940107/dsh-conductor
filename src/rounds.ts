@@ -187,7 +187,11 @@ export function applyRounds(ctx: Context, rounds: Rounds, plans: Plans): void {
 /** The conversations that have already been told when they started. */
 const started = new Set<string>()
 
-export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
+export function applyTurnDoctrine(
+  ctx: Context,
+  workers?: Workers,
+  nodeLimit?: () => number,
+): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter') return decision
@@ -212,8 +216,16 @@ export function applyTurnDoctrine(ctx: Context, workers?: Workers): void {
     // cannot find out by itself is when this conversation started, so that is
     // said once, in the first round, and the elapsed time is left to be worked
     // out from there.
+    // The plan tool refuses more nodes than its configured limit, but the model
+    // used to learn that by being refused — a whole round's plan written and
+    // thrown away, then a round of re-deriving how to fit inside the cap. The
+    // limit is a fact about the tool, so it arrives before the plan is drawn.
+    const limit = nodeLimit?.() ?? 0
+    const doctrine = limit > 0
+      ? `${ROUND_LOOP} This round's plan carries at most ${limit} nodes; a larger one is refused.`
+      : ROUND_LOOP
     const messages = [...decision.messages, createUserMessage({
-      content: [{ type: 'text', text: ROUND_LOOP }],
+      content: [{ type: 'text', text: doctrine }],
       source: { kind: 'system-prompt' },
     })]
     const sessionId = payload.agent.session.id

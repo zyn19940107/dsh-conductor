@@ -284,7 +284,7 @@ export function apply(ctx: Context, config: Config): void {
   // The doctrine is registered before the rounds hook: a pre-step hook's next()
   // runs the hooks registered after it, and the doctrine has to be the last
   // message the model reads before it speaks.
-  applyTurnDoctrine(ctx, workers)
+  applyTurnDoctrine(ctx, workers, () => config.maxBatchSize.get())
   applyRounds(ctx, rounds, plans)
   applyJudgementGuard(ctx, plans)
   applyWorkerRule(ctx, workers)

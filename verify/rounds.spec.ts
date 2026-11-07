@@ -38,14 +38,16 @@ function check(what: string, ok: boolean): void {
  *
  * @returns the handler.
  */
-function captureDoctrine(): (payload: unknown, next: () => Promise<unknown>) => Promise<{ messages: unknown[] }> {
+function captureDoctrine(
+  nodeLimit?: () => number,
+): (payload: unknown, next: () => Promise<unknown>) => Promise<{ messages: unknown[] }> {
   let handler: ((payload: unknown, next: () => Promise<unknown>) => Promise<{ messages: unknown[] }>) | undefined
   const ctx = {
     on: (event: string, registered: typeof handler) => {
       if (event === 'agent/pre-step') handler = registered
     },
   } as unknown as Context
-  applyTurnDoctrine(ctx)
+  applyTurnDoctrine(ctx, undefined, nodeLimit)
   if (handler === undefined) throw new Error('the doctrine registered no pre-step hook')
   return handler
 }
@@ -154,6 +156,25 @@ console.log('the doctrine hook skips the worker, and the plan tool stays in its 
     .join(' ')
   check('the next round gets the doctrine but not the start again',
     secondText.includes(ROUND_LOOP) && secondText.includes('started at') === false)
+
+  // The plan tool refuses a plan with more nodes than its limit. The model used
+  // to learn that by having a whole round's plan refused, then spend a round
+  // working out how to fit; the limit belongs in the message that asks for the
+  // plan.
+  const limited = captureDoctrine(() => 8)
+  const limitedDecision = await limited(payload('draw me a plan', []), enter)
+  const limitedText = limitedDecision.messages
+    .map(message => (message as { content?: Array<{ text?: string }> }).content?.map(part => part.text ?? '').join('') ?? '')
+    .join(' ')
+  check('the round message states the plan node limit',
+    limitedText.includes('at most 8 nodes') && limitedText.includes('refused'))
+
+  const unlimited = captureDoctrine(() => 0)
+  const unlimitedDecision = await unlimited(payload('draw me a plan', []), enter)
+  const unlimitedText = unlimitedDecision.messages
+    .map(message => (message as { content?: Array<{ text?: string }> }).content?.map(part => part.text ?? '').join('') ?? '')
+    .join(' ')
+  check('with no limit configured nothing is claimed', unlimitedText.includes('at most') === false)
 }
 
 console.log('the worker rule refuses the plan tool where it is called')
