@@ -112,6 +112,31 @@ export const BUDGET_PROBE = {
 }
 
 /**
+ * A probe for a call that outlives its node's budget.
+ *
+ * The node's budget is 20 seconds; the call it must run blocks for 180. The
+ * budget stops the driving at 20 seconds, but the call itself is already paid
+ * for and must be allowed to return — killing it loses the one piece of evidence
+ * the report exists to carry. So the worker keeps running to 180 seconds and only
+ * then reports what the command printed.
+ */
+export const TOOL_PROBE = {
+  text: [
+    '这是一个机制验证任务，只做一件事：验证「工具调用跑到一半预算到期时，不杀工具，等它跑完再要报告」。',
+    '',
+    '请交一张图，criteria 写「worker 在 20 秒预算用尽后仍然等到命令跑完，并报告了命令的实际输出」，nodes 原样照抄：',
+    '{"id": "slow", "kind": "worker", "budgetMs": 20000,',
+    ` "task": "用 pwsh 跑这条命令，等它结束，然后把它的完整输出写进你的结论：python -c \\"import time; time.sleep(180); print('SLEPT 180')\\""}`,
+    '',
+    '等它回来之后，把 refine_plan 报告里 slow 节点的 output 原样复述给我，',
+    '并说明它是在预算内完成中还是被预算打断的。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '报告里有命令跑完的证据', any: ['SLEPT 180'] },
+  ]),
+}
+
+/**
  * A probe for running under a persisted goal.
  *
  * The harness keeps a session working across automatic continuation rounds while
@@ -193,7 +218,7 @@ export const GOAL_PROBE = {
 }
 
 export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE, leadprobe: LEAD_PROBE,
-  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
+  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, toolprobe: TOOL_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

@@ -81,6 +81,7 @@ function fakeFork(
   behavior: 'answer' | 'never' | 'report' = 'answer',
 ) {
   let created = 0
+  let cancelled = 0
   const agentLoop = {
     async createAgent(_owner: unknown, _options: Record<string, unknown>) {
       created += 1
@@ -88,48 +89,73 @@ function fakeFork(
       const events: Array<Record<string, unknown>> = []
       let turn = 0
       let release: (() => void) | undefined
-      // A child in the 'report' behaviour stays busy through its work turn and
-      // only goes idle once the report is asked for — which is what the plugin
-      // now waits for without a time limit.
+      // A child in the 'report' behaviour stays busy through its work turn. The
+      // plugin no longer kills the turn: it asks for the report at the next step
+      // boundary, which the fake models as the inbox delivering it.
       const busy = new Promise<void>((resolve) => { release = resolve })
+      const pending: { nextTurn: Array<Record<string, unknown>>, nextStep: Array<Record<string, unknown>> } = {
+        nextTurn: [],
+        nextStep: [],
+      }
+      const answer = (): void => {
+        events.push({
+          type: 'assistant/message',
+          seq: events.length + 1,
+          time: 1,
+          data: {
+            message: {
+              content: [{
+                type: 'text',
+                text: behavior === 'report'
+                  ? 'report: 3 of 5 files are written; check.py still fails'
+                  : `done by ${id}`,
+              }],
+            },
+          },
+        })
+        release?.()
+      }
       const child = {
+        status: 'idle' as 'idle' | 'running',
         session: {
           id,
           header: { delegationDepth: 2, cwd: '/tmp' },
           snapshotEvents: () => events,
         },
+        inbox: {
+          get nextTurn() { return pending.nextTurn },
+          get nextStep() { return pending.nextStep },
+          append(target: 'next-turn' | 'next-step', message: Record<string, unknown>) {
+            const key = target === 'next-turn' ? 'nextTurn' : 'nextStep'
+            pending[key].push(message)
+            // The step boundary the request was waiting for: the call that was in
+            // flight has returned, so the child speaks.
+            if (key === 'nextStep' && behavior === 'report') {
+              pending.nextStep.length = 0
+              answer()
+            }
+          },
+        },
         followup(message: { content?: Array<{ text?: string }> }) {
           const text = (message.content ?? []).map(block => block.text ?? '').join('')
           prompts.push(text)
           turn += 1
+          child.status = 'running'
           const answered = behavior === 'answer' || (behavior === 'report' && turn >= 2)
           if (!answered) return
-          events.push({
-            type: 'assistant/message',
-            seq: events.length + 1,
-            time: 1,
-            data: {
-              message: {
-                content: [{
-                  type: 'text',
-                  text: behavior === 'report' ? 'report: 3 of 5 files are written; check.py still fails' : `done by ${id}`,
-                }],
-              },
-            },
-          })
-          release?.()
+          answer()
         },
         whenIdle: () => {
           if (behavior === 'answer') return Promise.resolve()
           if (behavior === 'report') return busy
           return new Promise<void>(() => {})
         },
-        cancel: () => {},
+        cancel: () => { cancelled += 1 },
       }
       return { agent: child as unknown as Agent, dispose: async () => {} }
     },
   }
-  return { host: { agentLoop }, onWorker: undefined }
+  return { host: { agentLoop }, onWorker: undefined, cancelled: () => cancelled }
 }
 
 console.log('parsePlanArgs')
@@ -399,6 +425,7 @@ console.log('a node that runs out of time is reported, and the plan carries on')
       return { isError: false, value: exec.name, content: [{ type: 'text', text: 'ok' }] }
     },
   }
+  const fork = fakeFork([], 'report')
   const output = await runPlan(
     runner,
     {
@@ -416,13 +443,15 @@ console.log('a node that runs out of time is reported, and the plan carries on')
     1,
     120,
     undefined,
-    fakeFork([], 'report'),
+    fork,
   )
   check('the slow node failed', output.nodes[0]?.ok === false)
   check('the failure says the budget was spent',
     (output.nodes[0]?.error ?? '').toLowerCase().includes('budget'))
   check('what the node reported is kept as its output',
     (output.nodes[0]?.output ?? '').includes('3 of 5 files are written'))
+  check('the turn was not killed: the call in flight was allowed to finish',
+    fork.cancelled() === 0)
   check('the other node still ran', output.nodes[1]?.ok === true)
   clearTimeout(keepAlive)
 }

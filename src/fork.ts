@@ -323,8 +323,8 @@ export class Reporters {
  */
 export function reportPrompt(budgetMs: number): string {
   const spent = Math.round(budgetMs / 1000)
-  return `Your node's time budget of ${spent} seconds is spent, and the work in flight was just stopped. `
-    + 'It is not started again: the rest of the work belongs to whoever reads your report.'
+  return `Your node's time budget of ${spent} seconds is spent. The call that was in flight was allowed to `
+    + 'finish; nothing new is started, and the rest of the work belongs to whoever reads your report.'
     + String.fromCharCode(10) + String.fromCharCode(10)
     + 'Write the report now, as your answer. No tool calls — the report is the whole answer.'
     + String.fromCharCode(10)
@@ -546,20 +546,36 @@ async function spawnChild(
           : (output.trim() === '' ? 'the child produced no answer' : undefined),
       }
     }
-    // The budget is spent, so the work is over: stop what is running — the
-    // in-flight tool included — and ask for the record of it. The report has no
-    // time limit of its own. A slow API must not be able to turn a finished job
-    // into a silent one, which is exactly what a bounded window did: the child
-    // spent it working, and was then disposed before it could say what it had.
-    // Tools are refused while this phase is on, so the only thing left to do is
-    // answer; the plan's own cancellation is the single bound.
-    child.cancel({ kind: 'hook', reason: 'the node used its time budget' })
+    // The budget is spent, so no new work starts — but the call that is already
+    // running is not killed. Its time has already been paid, and it may be one
+    // line away from the number the report exists to carry: a benchmark that was
+    // 227 seconds into a timed run when the budget landed reports nothing if it
+    // dies, and the next round repeats it. So the report is asked for at the next
+    // step boundary, after that call has returned, and no time limit is put on
+    // the asking: a slow API must not be able to turn a finished job into a
+    // silent one. Tools are refused from the moment the report is asked for, so
+    // the call in flight finishes and the next thing the child does is answer.
     options.reporters?.mark(sessionId)
-    child.followup(createUserMessage({
+    const report = createUserMessage({
       content: [{ type: 'text', text: reportPrompt(budget) }],
       source: { kind: 'user' },
-    }))
-    const second = await waitForIdle(child, undefined, options.signal)
+    })
+    const reportIsPending = (): boolean =>
+      child.inbox.nextStep.some(message => message.id === report.id)
+    if (child.status === 'idle') {
+      // Nothing is in flight, so there is no boundary to wait for.
+      child.followup(report)
+    } else {
+      child.inbox.append('next-step', report)
+    }
+    let second = await waitForIdle(child, undefined, options.signal)
+    // The turn can end on the step that was already in flight, before the
+    // boundary that would have delivered the request. The message is still
+    // pending in that case: hand it over as the next turn and wait again.
+    if (second === 'idle' && reportIsPending()) {
+      child.followup(report)
+      second = await waitForIdle(child, undefined, options.signal)
+    }
     const output = snapshotText(child)
     if (second === 'cancelled') return { output, error: 'the plan was cancelled' }
     if (output.trim() === '') {
