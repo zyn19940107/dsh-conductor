@@ -515,6 +515,11 @@ export function applyPlanTool(
         properties: {
           criteria: { type: 'array', items: { type: 'string' }, required: true },
           groups: { type: 'number', required: true },
+          // The budget warning is carried in the value, so it has to be declared
+          // here: the harness refuses a result with an undeclared property, and a
+          // refused result is a plan whose nodes ran and whose output the model
+          // never sees — it then draws the same plan again.
+          budgetWarn: { type: 'string' },
           nodes: {
             type: 'array',
             required: true,

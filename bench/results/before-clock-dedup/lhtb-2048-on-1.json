@@ -1,0 +1,51 @@
+{
+  "task": "lhtb-2048",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 874457,
+  "timedOut": false,
+  "sessionId": "session-35d99f37-b39f-4e1b-9bfb-d1e9e658a0f5",
+  "stderr": "",
+  "steps": 8,
+  "toolCalls": 7,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 50359,
+    "outputTokens": 31694,
+    "cacheReadTokens": 237312,
+    "totalTokens": 319365
+  },
+  "formation": {
+    "agents": 5,
+    "input": 277784,
+    "output": 158869,
+    "cacheRead": 3580672,
+    "total": 4017325,
+    "steps": 87
+  },
+  "mainPrompt": 64373,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 400 步"
+    ],
+    "score": 4.7852,
+    "moves": 400
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 40378,
+  "thinkingPreview": "Let me start by exploring the workspace to understand the setup.\n\nThe task: play 2048 with a 15-minute budget, 400 steps, using the provided g2048.py CLI in D:\\code\\vibe\\dsh-sandbox\\bench-workspace-on-lhtb2048.\n\nKey insight: the engine has a fixed seed, so if I write my own solver, I could simulate forward and find the best sequence of moves. But wait — the game is deterministic given the seed? If the seed is fixed and the RNG is deterministic, then I could compute the optimal sequence offline... but 2048 with 400 steps requires search. Actually, a well-known trick: since the seed is fixed, I could do a search over move sequences using the engine directly (import it) — expectimax. But the engine's spawn positions depend on RNG, which is deterministic given the seed and the sequence of moves. So the game tree is deterministic! I can do a full search offline with expectimax where \"expectat",
+  "finalText": "## 完成报告\n\n**策略**：读引擎源码发现随机源是自带的 splitmix64，且只有真正改变棋盘的那一步才消耗随机数（每次 spawn 恰好抽 2 次：位置 + 2/4），所以**整局是走法字母序列的确定性函数，概率节点根本不存在**——下一个 tile 的落点和数值都可精确预测。于是我写了一个与引擎逐位一致的扁平模拟器（300 步自检 board / rng.state / score 全等，`SELFTEST PASS`），在上面跑**确定性 beam search**（评估含 log2(最大 tile)、空位数、蛇形单调性、平滑度、可合并对数，最大 tile 锚定左下角），逐字把最优序列喂给 `python g2048.py move`，由 CLI 自己写进 `moves.log`。另外独立算出本局天花板：spawn 数值只取决于抽样序号，400 步共 402 次 spawn 的**总物料仅 914**，合并又守恒总和 ⇒ 1024 在 400 步内数学上不可能，**512(band 4) 就是上限**，所以没有浪费步数去 reset 重开。\n\n**总步数**：**400 步**（moves.log 400 行，全为 U/D/L/R，400 步全部有效改变棋盘）\n\n**结果**：峰值 max_tile = **512**，band = **4**，连续分 4.7852（band 4 + (914−512)/512），终局未死；用全新同种子引擎重放 moves.log 独立复核，与 status 逐位一致。另有一条 496 步的候选能把连续分推到 4.9990，但已超 400 步预算、band 仍是 4，故弃用。\n\n**最后一次 `python g2048.py status` 的完整输出**：\n\n```\nscore=6196  max_tile=512  band=4  best_band=4  moves=400  empty=1  game_over=False\nboard (4x4, .=empty, row 0 = top):\n    4     2     2     .\n   16     4     4     2\n  256     2     8     4\n  512    64    32     2\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\n**交付物**（工作区 `D:\\code\\vibe\\dsh-sandbox\\bench-workspace-on-lhtb2048`）：`moves.log`（评分器唯一读取项，400 行合规）、`state.pkl`、`solver_a.py` / `solver_b.py`（beam search 求解器）、`verify.py`（全新引擎重放复核）、`ceiling.py`（物料天花板证明）。`g2048.py` 与 `game2048_engine.py` 未改动（mtime 仍为原始的 2026/11/3），`D:\\code\\vibe\\dsh-refine-loop` 未触碰。"
+}

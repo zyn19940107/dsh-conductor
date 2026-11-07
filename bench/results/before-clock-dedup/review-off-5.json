@@ -1,0 +1,61 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 5,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 103306,
+  "timedOut": false,
+  "sessionId": "session-0fc19f7d-8f5a-4761-8fc6-fb676056cc81",
+  "stderr": "",
+  "steps": 13,
+  "toolCalls": 21,
+  "tools": [
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 99672,
+    "outputTokens": 10971,
+    "cacheReadTokens": 774350,
+    "totalTokens": 884993
+  },
+  "formation": {
+    "agents": 1,
+    "input": 99672,
+    "output": 10971,
+    "cacheRead": 774350,
+    "total": 884993,
+    "steps": 13
+  },
+  "mainPrompt": 99875,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 17159,
+  "thinkingPreview": "The project has src files. Let me read the key files: src/plan.ts, src/tool.ts, src/policy.ts (likely where the enforced rule lives), plus README/AGENTS.md in the project.\n\nLet me read them directly.\nNow let me read src/tool.ts, src/index.ts, src/repair.ts, src/rounds.ts to find the enforced rule. The rule is \"a turn is one plan\" — one plan per turn. Let me read the rest.\nNow, the enforced rule: \"the rule makes a turn one plan\". Let me look at src/rounds.ts to see how it is implemented and its trigger conditions.\n\nAlso need src/fork.ts to understand child agent restrictions, and src/batch.ts for how tool calls are executed.\n\nLet me read rounds.ts and fork.ts.\nNow let me read batch.ts to understand how tool calls are executed (arguments handling, concurrency, repair) and concurrency.ts briefly. Also check AGENTS.md / README in the project for the \"rule\" description.\n\nAlso I want to double",
+  "finalText": "已完成三部分审查（只读，未修改任何文件）。\n\n---\n\n# 一、`src/plan.ts` —— 计划的数据结构、节点种类、调用参数\n\n## 结论\n计划是一个**扁平单层**的 JSON：`{criteria: string[], nodes: PlanNode[]}`，节点有**四种 kind**，其中只有 `tools` 节点携带\"调用参数\"，而这些参数**插件自己完全不看、不改、不校验**——参数原样透传给目标工具，校验由目标工具自己的 schema 做；参数错了由插件用同一模型就地\"修一次调用\"再重试。\n\n## 1. 数据结构\n- `PlanArgs`（plan.ts:93-98）= `criteria`（可观测的成功判据）+ `nodes`（可为空数组，空计划合法，用来直接进入结论）。\n- `PlanNode`（plan.ts:65-87）= `id`（节点名，去空白、不可重复）、`kind`、`calls`、`task`、`order`、`writes`、`budgetMs`。\n  - `calls: PlanToolCall[]` = `{name: string, arguments: unknown}`（plan.ts:57-62），只有 `tools` 节点有。\n  - `task: string` 只有 agent 节点有。\n  - `order: 'parallel' | 'sequential'`，默认 `parallel`（plan.ts:54、151），只对 `tools` 节点有意义。\n  - `writes: string[]` 声明本节点要写的文件（plan.ts:76-77）。\n  - `budgetMs`，0 = 未声明；非有限数或 ≤0 归 0，否则 `min(round(budget), MAX_NODE_BUDGET_MS=3_600_000)`（plan.ts:90、147-150）。\n- **没有 `after`、没有依赖字段、没有分层**——结构上就不表达 DAG；需要别的节点产出的工作属于下一轮（plan.ts:15-18）。\n\n## 2. 四种节点（plan.ts:24-44）\n| kind | 上下文 | 是否再画图 | 内容 |\n|---|---|---|---|\n| `tools` | 就是本 agent | — | 一批**参数已定**的调用，额外模型调用 0 |\n| `worker` | 继承本对话（含本轮） | **否** | 自己边想边做的叶子执行者 |\n| `spawner` | 空 | 是 | 从零开始、继续走本插件循环的新领导 |\n| `forker` | 继承本对话（含本轮） | 是 | 继承上下文、继续走本插件循环的领导 |\n\n常量：`AGENT_NODE_KINDS = [worker, spawner, forker]`、`WORKER_NODE_KINDS = [worker]`。\n\n## 3. 调用参数怎么处理\n- **不解析、不校验**：`PlanToolCall.arguments` 类型就是 `unknown`；`parsePlanArgs` 只做三件事——确认 `call` 是对象、`name` 是非空字符串（去空白）、`arguments === undefined` 时补 `{}`（plan.ts:158-171）。参数里写的是什么就存什么。\n- **schema 层只要求是 JSON**：工具参数表里 `arguments: {type: 'json', required: true}`（tool.ts:471-476），节点和调用对象都是 `additionalProperties: false`。\n- **真正的校验在下游**：调用执行时走 `ctx.tools` 注册表自己的管线（batch.ts:332-339），参数合不合目标工具的 schema 由那个工具自己判。\n- **失败就地修**：调用失败 → `runOne` 捕获错误 → 调 `repair` 钩子（batch.ts:316-358），最多 `MAX_REPAIRS = 2` 次修复（即最多 3 次尝试）。修复走**本对话自己的模型/路由**（index.ts:340-362），让模型回 `{\"name\":…,\"arguments\":{…}}`，`parseRepair` 只接受 `arguments` 是非数组对象的答案（repair.ts:139-158），然后用修好的 name+arguments 重跑。**只有失败的那一个调用会被送去问模型**，计划里其它调用不动。\n- **参数还参与并发判定**：`mayRunTogether(call.name, call.arguments, …)`（concurrency.ts:222-234）——例如 `ops_bash` 只有当 `command` 被判定为纯读（白名单可执行文件、无 shell 元字符、无 `find -exec`/`sort -o` 之类危险 flag）时才允许并行。\n\n## 4. 解析的整体失败策略\n`parsePlanArgs` 一旦不合法就整份计划作废（返回 `undefined` → 工具抛 \"refine_plan needs criteria, and nodes that each have an id and a kind\"）：criteria 缺失/过滤后为空、节点非对象、id 空、kind 不在四种之内、id 重复、`tools` 节点 calls 为空、agent 节点 task 为空，都拒绝。\n\n---\n\n# 二、这个插件强制的那条规则\n\n## 结论\n被强制的是**\"一轮 = 一张图\"**（原文：\"The rule makes a turn one plan\"）：一次请求里**第一件事必须是交计划**，计划跑完后**这一轮就只剩\"写结论\"或\"交下一张图\"**两种走法，不允许再一个一个直接调工具。实现是**三层叠加**：一条每轮头部注入的教义消息 + 一道 `tools.guard` 硬拦截 + 计划跑完即 `concludeTurn()` 结束本轮；并带一个按会话生效的 `/dsh-conductor off` 总开关。\n\n## 1. 规则原文\n- index.ts:19-21：`refine_plan` 一次调用承载整轮形状；**\"The rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over\"**。\n- 教义正文 `ROUND_LOOP`（rounds.ts:23-39）：\"your first message of the round IS the plan: you hand it over before you call anything else, no tool call comes first\"。\n\n## 2. 现在代码里怎么实现\n| 层 | 位置 | 做什么 |\n|---|---|---|\n| 教义（软） | `applyTurnDoctrine` rounds.ts:190-232 | `agent/pre-step` 时（`step === 1`）在消息尾部追加 `ROUND_LOOP`；首次还追加\"本对话的起始时刻\"（模型自己读不到时钟） |\n| 状态 | `Plans` rounds.ts:123-154 | 用户消息到达时 `expect(sessionId)`（`applyRounds` rounds.ts:165-176）；计划跑完 `done(sessionId)`（index.ts:272） |\n| 硬拦截 | `applyJudgementGuard` rounds.ts:433-441 | `ctx.tools.guard`：模型**自己发起**的调用（`callId === rootCallId`）、名字不是 `refine_plan`、且该请求已交过计划 → 返回拒绝文案 `JUDGE_ONLY`：\"The graph has run … write the conclusion … or hand over the next graph with refine_plan. Direct tool calls belong inside a graph, not after one.\" |\n| 轮次收束 | `onPlanFinished` index.ts:270-279 + tool.ts:594-596 | 计划跑完 → `rounds.bump()`；未超 `maxRounds`（默认 16）就 `agent.followup(NEXT_ROUND)` 并返回 true → 工具执行 `exec.concludeTurn()`，本轮结束、下一轮被 harness 打开；超限则本轮直接结束，等人说话 |\n| 旁路关闭 | `SessionPolicy` policy.ts:45-88 | `/dsh-conductor off` → `tools.restrict({deny:['refine_plan']})`，工具从工具表消失；引导语随之为空（index.ts:248 以 `ctx.tools.get(PLAN_TOOL, scope) === undefined`"
+}

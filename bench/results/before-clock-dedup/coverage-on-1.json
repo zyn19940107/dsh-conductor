@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 80381,
+  "timedOut": false,
+  "sessionId": "session-d5a80980-2769-41be-ba60-3608b8b5904a",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 14604,
+    "outputTokens": 2702,
+    "cacheReadTokens": 12600,
+    "totalTokens": 29906
+  },
+  "formation": {
+    "agents": 4,
+    "input": 122851,
+    "output": 26489,
+    "cacheRead": 699873,
+    "total": 849213,
+    "steps": 32
+  },
+  "mainPrompt": 16162,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 1004,
+  "thinkingPreview": "The results are consistent across three workers. Let me write the conclusion.\n\nKey answers:\n1. Entry functions per spec — 8 specs in verify/.\n2. src modules without a corresponding spec — depends on the matching rule. By name: index.ts, policy.ts, tool.ts. By import touch: none orphaned. I should report both, plus the uncovered exports.\n3. Largest module: src/tool.ts, 606 physical lines (583 non-blank).\n\nNote the glob tools returned \"No files found\" — probably because glob path handling; but workers confirmed files exist via read-only shell. The workers' results are consistent, so fine.\n\nAlso note the discrepancy: worker said `repair.spec.ts` is not in run-specs.mjs. That's a valuable finding but reported by two workers — it's a finding, not something I should re-check (no review node).\n\nLet me write the final answer in Chinese since the user asked in Chinese.\n\nLine count caveat: tool.ts",
+  "finalText": "## 结论\n\n`verify/` 下共 **8 个** `.spec.ts`，`src/` 下共 **9 个** `.ts` 模块（平铺，无子目录、无 `.d.ts`）。\n\n---\n\n### 1. 每个 spec 实际测的入口函数\n\n| spec 文件 | 实际被调用的入口函数 | 来源模块 |\n|---|---|---|\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch` | `src/batch.ts` |\n| | `parsePolicyCommand` | `src/policy.ts` |\n| `batch.spec.ts` | `runBatch`（主入口，4 次调用）、`capOutput`、`capNodeOutput`、`scrubConclusion` | `src/batch.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides` | `src/concurrency.ts` |\n| | `runBatch`（1 次，用来验证 batch 保持 plan 顺序） | `src/batch.ts` |\n| `plan.spec.ts` | `parsePlanArgs`、`buildGroups` | `src/plan.ts` |\n| | `runPlan`（5 次）、`renderPlan` | `src/tool.ts` |\n| | `REFINE_GUIDANCE`（字符串常量，仅 `.includes()` 断言） | `src/index.ts` |\n| `rounds.spec.ts` | `Rounds`(`used`/`bump`/`reset`)、`Workers`(`mark`)、`applyTurnDoctrine`、`applyWorkerRule`、`isWorkerConversation`、`startOf`、`formatClock` | `src/rounds.ts` |\n| | `WORKER_MARKER`（标记常量） | `src/plan.ts` |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers` | `src/fork.ts` |\n| `retain.spec.ts` | `applyReportRetention`（注册到假 ctx 后手动触发 `tools/post-execute`） | `src/index.ts` |\n| `repair.spec.ts` | `parseRepair` | `src/repair.ts` |\n| | `runBatch`（3 次，走 repair-hook 参数路径） | `src/batch.ts` |\n\n两点值得注意：\n- `refine.spec.ts` 名字叫 refine，但 `src/` 下**没有 `refine.ts`**——它测的是 batch 参数解析 + policy 命令。\n- `verify/run-specs.mjs`（`pnpm specs` 入口）只列了 7 个 spec，**漏掉 `repair.spec.ts`**，所以这个 spec 从来没被执行过。\n\n---\n\n### 2. `src/` 下没有对应 spec 的模块\n\n判定规则不同，答案不同，两种都给出：\n\n**按同名 spec 对应（`src/X.ts` ↔ `verify/X.spec.ts`）—— 3 个没有自己的同名 spec：**\n- `src/index.ts`\n- `src/policy.ts`\n- `src/tool.ts`\n\n**按\"是否被某个 spec import\"—— 0 个是孤儿**：9 个模块全部至少被一个 spec 触及（`index.ts` ← `plan`/`retain`，`policy.ts` ← `refine`，`tool.ts` ← `plan`/`retain`）。\n\n**按\"导出面是否真的被测\"—— 缺口集中在注册/接线类导出上：**\n\n| 模块 | 完全没被测的导出 |\n|---|---|\n| `src/index.ts` | `apply`（插件真正的入口）、`inject`、全部 `DEFAULT_*` / `Config` |\n| `src/tool.ts` | `applyPlanTool`（工具注册） |\n| `src/policy.ts` | `applyPolicyCommand`、`applyPolicyMessage`、`runPolicyCommand`、`policyConfirmation`、`SessionPolicy` |\n| `src/repair.ts` | `askForRepair`、`repairSystem`、`describeFailure`、`collectText` |\n| `src/fork.ts` | `spawnForkedChild`、`spawnEmptyChild` |\n| `src/rounds.ts` | `applyRounds`、`applyJudgementGuard`、`applyDelegationRule`、`Plans`、`isModelCall` |\n\n一句话：spec 测的都是纯函数，真正把插件接到 Cordis 上的那层装配代码基本裸奔。\n\n---\n\n### 3. 行数最多的模块\n\n**`src/tool.ts` —— 606 行**（其中非空行 583）。\n\n完整排名：\n\n| 排名 | 文件 | 总行数 | 非空行 |\n|---|---|---|---|\n| 1 | `src/tool.ts` | **606** | 583 |\n| 2 | `src/fork.ts` | 549 | 520 |\n| 3 | `src/batch.ts` | 476 | 444 |\n| 4 | `src/rounds.ts` | 442 | 411 |\n| 5 | `src/index.ts` | 363 | 335 |\n| 6 | `src/policy.ts` | 241 | 228 |\n| 7 | `src/concurrency.ts` | 234 | 224 |\n| 8 | `src/plan.ts` | 225 | 207 |\n| 9 | `src/repair.ts` | 173 | 162 |\n\n（`lib/index.js` 有 1433 行，但那是构建产物，不在 `src/` 内。）\n\n全程只读，未修改任何文件。"
+}

@@ -1,0 +1,57 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 2,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 121271,
+  "timedOut": false,
+  "sessionId": "session-7903f925-734a-405f-bed6-872cfa094a01",
+  "stderr": "",
+  "steps": 9,
+  "toolCalls": 17,
+  "tools": [
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "glob",
+    "read",
+    "grep",
+    "glob",
+    "grep",
+    "glob",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 64590,
+    "outputTokens": 11578,
+    "cacheReadTokens": 350976,
+    "totalTokens": 427144
+  },
+  "formation": {
+    "agents": 1,
+    "input": 64590,
+    "output": 11578,
+    "cacheRead": 350976,
+    "total": 427144,
+    "steps": 9
+  },
+  "mainPrompt": 70617,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 16190,
+  "thinkingPreview": "Let me read the source files. Let me start with the main ones requested: plan.ts, tool.ts, and also index.ts to understand the plugin's enforced rule.\n\nLet me set up a todo list first since this is a multi-part review.\n\nLet me read the files.\nNow I need to look at rounds.ts to find the enforced rule (\"the rule that makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over\"). Let me read rounds.ts, and also fork.ts, batch.ts for the subagent limits.\n\nLet me read rounds.ts, fork.ts, batch.ts.\n\nLet me set up todos too. Actually, the task is a review with three parts. Let me use todo_write to track.\n\nLet me read the remaining files in parallel.\nNow I have a good understanding. Let me also check the policy.ts and concurrency.ts, and the README/docs for the \"forced rule\". The question 2 asks: \"这个插件强制的那条规则是什么?它在现在的代码里怎么实现、触发条件是什么?\" — The forced rul",
+  "finalText": "审查完成，全程只读，未修改任何文件。\n\n---\n\n# 一、`src/plan.ts` —— 计划的数据结构\n\n## 数据结构\n\n```\nPlanArgs  { criteria: string[], nodes: PlanNode[] }\nPlanNode  { id, kind, calls: PlanToolCall[], task, order, writes, budgetMs }\nPlanToolCall { name: string, arguments: unknown }\n```\n\n`criteria` 是\"这一轮凭什么算成功\"的可观测判据；`nodes` 是这一轮的活。**图只有一层**：节点之间没有依赖字段（没有 `after`、没有 `dependsOn`），需要别人结果的工作属于下一轮。\n\n## 节点有哪几种（4 种，`plan.ts:24`）\n\n| kind | 含义 | 是否起子代理 | 是否自己画图 |\n|---|---|---|---|\n| `tools` | 参数**已定**的一批工具调用 | 否 | — |\n| `worker` | 继承本对话（含本轮 plan），自己干活 | 是 | **否**（`refine_plan` 被拒） |\n| `spawner` | 空起点，从零开始 | 是 | 是 |\n| `forker` | 继承本对话（含本轮 plan） | 是 | 是 |\n\n`plan.ts:27/35/44` 导出三组常量，其中 `AGENT_NODE_KINDS` 与 `NODE_AGENT_KINDS` 内容完全相同（都是 `['worker','spawner','forker']`），且**两组都没有任何代码使用**；`WORKER_NODE_KINDS` 被 `tool.ts:38` 导入后也未使用。\n\n## 调用参数是怎么处理的\n\n**参数是完全不透明的 `unknown`，原样透传**（`plan.ts:61`）。解析时（`parsePlanArgs`，`plan.ts:121`）只做结构校验，**不按目标工具的 schema 校验参数**：\n\n- `name` 必须是非空字符串；`arguments` 缺失则补 `{}`（`plan.ts:168`）。\n- 因此参数写错**要到执行期才暴露**，由 `batch.ts` 的 repair 机制兜底：用**本会话自己的 provider/model**问\"这条调用应该是什么\"，用修好的参数重跑那一条，最多 2 次（`MAX_REPAIRS`），其余节点不受影响（`batch.ts:296,316-359`）。\n- 其余字段的规范化：`criteria` 过滤空白并 trim，**全空则整个计划被拒**；节点 `id` 去空白、**重复即拒**；`budgetMs` 非有限或 ≤0 → 归 0（\"未声明\"），超 `MAX_NODE_BUDGET_MS`（1 小时）截断；`order` 只有精确等于 `'sequential'` 才生效，其余一律 `'parallel'`；`writes` 过滤非字符串/空串。\n\n**全有或全无**：`parsePlanArgs` 任何一个节点结构不对就返回 `undefined`，整个 `refine_plan` 调用抛错（`tool.ts:543`），没有部分接受。`criteria` 非空 + `nodes: []` 的**空计划是合法的**（`plan.ts:178-182`）。\n\n**`buildGroups`（`plan.ts:200`）**：声明了相同 `writes` 的节点不能同组（第二次写会落在第一次的结果上）；未声明 `writes` 的节点按\"不写文件\"处理。**注意**：组之间是**串行**的（`tool.ts:329` 的 `for` 循环里逐组 `await`），只有组内才是 `Promise.all` 并行——这与 `plan.ts:4` \"every node starts at the same time\" 和 `tool.ts:363` 渲染出的 \"run in parallel\" 的措辞并不完全一致。\n\n---\n\n# 二、插件强制的那条规则\n\n## 规则是什么\n\n**一轮 = 一张图 = 一次 `refine_plan` 调用；图跑完之后，\"判断\"阶段只能写结论或交下一张图，不许再一个个直接调工具。**\n\n关键在于这一条规则的**两半待遇不同**：\n\n| 半边 | 是机制还是提示 | 实现 |\n|---|---|---|\n| 「每轮第一条消息就是图，交图前不调工具」 | **只是教条** | `rounds.ts:190` `applyTurnDoctrine` 把 `ROUND_LOOP` 作为**最后一条消息**塞进 step 1 |\n| 「图跑完只能判断」 | **是机制** | `rounds.ts:433` `applyJudgementGuard` → `ctx.tools.guard` |\n\nREADME（第 152-158、568-570 行）说得很明白：v1.0 曾有过\"没交图就拉回\"的闸门，已随闸门删除；这一版**没有** `agent/turn-stopping` 拉回规则（我在 `src/` 下 grep 确认过，确实没有这个 hook）。所以\"必须交图\"靠的是教条 + 39/39 的实测，不是拦截。\n\n## 「图跑完只能判断」的触发条件\n\n`applyJudgementGuard`（`rounds.ts:433-441`）注册的 guard，**四个条件同时满足**才拦截：\n\n1. `execution.agent !== undefined`——有会话上下文；\n2. `isModelCall(execution)`——即 `execution.callId === execution.rootCallId`，**模型自己发起的调用**；计划内部的嵌套调用（`batch.ts` 用的是新 callId + 父 callId 作 rootCallId）不受影响；\n3. `execution.name !== 'refine_plan'`——**交下一张图是允许的**；\n4. `!plans.waiting(agent.session.id)`——**本请求已经交过图**。\n\n命中后返回 `JUDGE_ONLY` 文案作为拒绝理由（`rounds.ts:405`）。\n\n状态机很简单：`Plans` 类（`rounds.ts:123`）——`applyRounds` 的 pre-step hook 看到消息里有 `source.kind === 'user'` 的消息时 `plans.expect(sessionId)`；`tool.ts` 的 `onPlanFinished` 回调里 `plans.done(sessionId)`（`index.ts:272`）。**\"已经交过图\"这个状态只由\"计划工具被调用过\"这一件事翻转。**\n\n## 其它被强制的机制（README「插件强制了什么」表）\n\n| 强制 | 实现 | 位置 |\n|---|---|---|\n| 每轮开头就想图 | 四步循环作为最后一条消息 | `rounds.ts:190` |\n| 图跑完只能判断 | `tools.guard` 拒绝模型自发的工具调用 | `rounds.ts:433` |\n| 派发只能走图 | 重写 harness 的 `subagent`/`subagent_fork`，**顶层直调抛错**（嵌套调用放行）；`list_agents`/`send_message`/`interrupt_agent` 从工具表**整个移除** | `rounds.ts:369` |\n| worker 不得画图 | guard 在 worker 会话里拒 `refine_plan`；**工具仍留在表里**（摘掉会改请求头、让继承前缀的 KV cache 失效） | `rounds.ts:347` |\n| 报告不截断 | `tools/post-execute` 用带 `value` 的决定返回，绕过 harness 的 spill 策略 | `index.ts:312` |\n| 节点到点先收尾 | 四种节点各自的 budgetMs 处理 | `tool.ts`/`fork.ts` |\n| 每会话开关 | `/dsh-conductor off` → deny 掉 `refine_plan` | `policy.ts` |\n\n**两个值得记下的实现细节**：\n\n- **关掉开关后规则随之失效，靠的是隐式耦合**：`turnOff` 只把工具从 agent scope 里 deny 掉，并没有显式查 `SessionPolicy.appliesTo()`。规则失效是因为\"没有工具就永远不会 `plans.done()`，于是 `plans.waiting()` 恒为 true，judgement guard 永不触发\"。能工作，但耦合是隐式的。\n- **`tool.ts:424` 的 `onPlanStarted` 选项是死代码**：`execute` 里第 551 行确实调用了它，但 `index.ts:251-281` 从不提供这个回调，所以它永远是 no-op。\n\n---\n\n# 三、`src/tool.ts` —— 计划怎么跑起来 + 子代理的限制\n\n## 计划是怎么被跑起来的\n\n1"
+}

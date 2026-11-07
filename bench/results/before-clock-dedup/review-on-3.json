@@ -1,0 +1,44 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 272069,
+  "timedOut": false,
+  "sessionId": "session-d38b0e27-7318-4516-8d90-3e6b85955546",
+  "stderr": "",
+  "steps": 4,
+  "toolCalls": 4,
+  "tools": [
+    "refine_plan",
+    "read",
+    "glob",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 18559,
+    "outputTokens": 6575,
+    "cacheReadTokens": 47660,
+    "totalTokens": 72794
+  },
+  "formation": {
+    "agents": 6,
+    "input": 265711,
+    "output": 40523,
+    "cacheRead": 2205590,
+    "total": 2511824,
+    "steps": 70
+  },
+  "mainPrompt": 21241,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 9312,
+  "thinkingPreview": "Part 1 failed (plan.ts review). I need to get the plan.ts content myself. The repo-map node did read plan.ts but output was truncated. Let me just read plan.ts directly with the read tool — that's cheap and gives me what I need for part 1.\n\nLet me read src/plan.ts directly.\nRight — the plugin's own rule applies to me. I need to hand over the next graph. Let me create a plan with a tools node to read plan.ts (plus maybe related files like concurrency.ts, and the policy for the forced rule confirmation).\n\nActually the part2 and part3 results are good. I just need part1. Let me hand over a graph with a tools node reading plan.ts, and a worker node that analyzes it. But the tools node output might get truncated as before. Better: a worker node that reads the file itself with an adequate budget. The previous worker failed because 120s budget was consumed — possibly the subagent was slow. Let ",
+  "finalText": "三个部分都审完了（只读源码，未改动任何文件；以下结论均出自源码，未在沙盒实跑验证）。\n\n---\n\n## 1. `src/plan.ts` —— 数据结构 / 节点种类 / 调用参数\n\n**数据结构**（全是 TypeScript 接口，没有运行时 schema）：\n- `PlanArgs`：`criteria: string[]`（判定计划成功的可观测标准）+ `nodes: PlanNode[]`\n- `PlanNode`：`id: string`、`kind: PlanNodeKind`、`calls: PlanToolCall[]`、`task: string`、`order: PlanNodeOrder`、`writes: string[]`、`budgetMs: number`\n- `PlanToolCall`：`name: string`、`arguments: unknown`\n- 嵌套关系：`PlanArgs.nodes[] → PlanNode.calls[] → PlanToolCall.arguments`；`writes` 是**节点级**声明的写文件路径，用于避免两节点并行写同一文件。\n\n**节点四种**（`PlanNodeKind`）：`tools`（参数已定好的调用序列）、`worker`（以本对话为种子起子代理，自己干活、不画自己的计划）、`spawner`（空种子起子代理）、`forker`（以本对话为种子起子代理）。配套常量 `AGENT_NODE_KINDS` / `NODE_AGENT_KINDS = ['worker','spawner','forker']`、`WORKER_NODE_KINDS = ['worker']`。必填差异在解析时才体现：`tools` 节点必须有非空 `calls` 且 `task` 被强制为 `''`；agent 节点必须有非空 `task` 且 `calls` 被强制为 `[]`。\n\n**调用参数的处理**：唯一入口 `parsePlanArgs(value): PlanArgs | undefined`，**不抛异常**，不合格一律折叠成 `undefined`，由 `tool.ts` 转成错误文案。逐层收紧：`criteria` 必须是数组并过滤空白项；节点 `id` 必须非空且不重复（重复 id 否掉整张计划）；`kind` 必须是那四个字面量之一；`budgetMs` 只采纳有限正数，`Math.round` 后被 `MAX_NODE_BUDGET_MS = 3_600_000` 截顶，否则归 0；`order` 只有字面量 `'sequential'` 被保留，其余**一律回落为 `'parallel'`**；`writes` 过滤空串并 trim；`tools` 节点的每个 call 必须有非空 `name`，而 **`arguments` 原样透传 —— 只把 `undefined` 换成 `{}`，不校验 schema、不改结构**；参数合法性最终由宿主工具自己判。同文件冲突由 `buildGroups` / 私有的 `canRunTogether` 在**节点之间**分组隔离，与节点内的 `order` 无关。空 `nodes` 的空计划是允许的（注释写明由模型自己决定）。\n\n## 2. 插件强制的那条规则\n\n**规则 = 「一轮 = 一张图」**：一轮里第一个动作必须是交图（`refine_plan`），图跑完之后这一轮只许判断——要么写结论，要么交下一张图。原文在 `src/index.ts` 模块注释：“*The rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over*”，教条版是 `src/rounds.ts` 的 `ROUND_LOOP`（由 `applyTurnDoctrine` 塞为最后一条消息）。\n\n**代码里真正强制的部分**（`src/rounds.ts` 三个 guard + `src/index.ts` 的 `applyReportRetention`）：\n- `applyJudgementGuard(ctx, plans)`：用 `ctx.tools.guard` 拒绝。触发条件四件套：`execution.agent` 存在、`isModelCall(execution)`（即 `callId === rootCallId`，图内嵌套调用一律放行）、`execution.name !== 'refine_plan'`（下一张图永远允许）、`plans.waiting(sessionId) === false`。`Plans.done()` 由计划工具的 `onPlanFinished` 置位，`Plans.expect()` 由 `applyRounds` 置位。所以时机是：**本轮第一张图一跑完，模型自己发起的工具调用立刻被拒**，理由文本 `JUDGE_ONLY`。\n- `applyDelegationRule(ctx)`：在 `agent/created` 里重注册 harness 的 `subagent` / `subagent_fork`，其 `execute` 在 `exec.callId === exec.rootCallId`（模型直调）时 `throw new Error(DELEGATE_IN_GRAPH)`；嵌套在图里的调用放行。同时 `ctx.tools.restrict({ deny: HIDDEN_TOOLS })` 移除 `list_agents` / `send_message` / `interrupt_agent`。\n- `applyWorkerRule(ctx, workers)`：worker 会话里调 `refine_plan` 被拒（`WORKER_NO_PLAN`），但工具仍留在表里以保住继承前缀的 KV cache。worker 身份由 `Workers.mark(sessionId)`（子代理创建前登记）或 `WORKER_MARKER` 判定。\n- `applyReportRetention(ctx)`：在 `tools/post-execute` 上对 `PLAN_TOOL` 用带 `value` 的决定返回，harness 的 spill 策略跳过它 —— **计划报告永远不截断**。\n\n**没被强制的那一半**：「必须交图」只是提示（`REFINE_GUIDANCE`），插件不在 `agent/turn-stopping` 上做拉回；`/dsh-conductor off`（`src/policy.ts` 的 `SessionPolicy.turnOff` → `ctx.tools.restrict({ deny: [PLAN_TOOL] })`）把计划工具摘掉，图跑不成、规则随之失效。轮转机制：`onPlanFinished` 先 `plans.done(sessionId)`，再 `rounds.bump(sessionId)` 与 `maxRounds` 比；未用尽则 `agent.followup(NEXT_ROUND)`，由 `src/tool.ts` 调 `exec.concludeTurn()` 结束本轮、让排队的 `NEXT_ROUND` 消息打开下一轮。\n\n## 3. `src/tool.ts` —— 计划怎么跑起来 / 子代理的限制\n\n**入口与调用链**：`PLAN_TOOL = 'refine_plan'`，由 `applyPlanTool(ctx, options)` 用 `ctx.tools.register(defineTool(...))` 注册。`execute` 依次：`parsePlanArgs(args)`（失败抛 “refine_plan needs criteria, and nodes that each have an id and a kind”）→ `maxBatchSize()` 节点数闸门（“This plan has N nodes and the limit is M”）→ `options.onPlanStarted?.(session.id, callId)` → `runPlan(ctx.tools, parsed, agent, exec.signal, respectConcurrencySafety(), exec.callId, overrides(), maxAgentDepth(), agentNodeTimeoutMs(), repair, fork)`。计划跑完后 `options.onPlanFinished?.(agent)`：还有轮次就排 `NEXT_ROUND` 并返回 true（配合 `exec.concludeTurn()`），轮次用尽则返回 false。`budgetWarn` 由各节点 `budgetMs` 之和与计划上限 `timeoutMs()` 比较得出。\n\n**调度**：`runPlan` 用 `buildGroups(plan.nodes)` 分组——声明相同 `writes` 的两个节点不进同一组；组按书写顺序处理，**组内 `Promise.all` 同时起跑，组间 await 串行**。`runNo"
+}

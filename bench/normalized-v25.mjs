@@ -109,7 +109,12 @@ function normalise(record) {
     const header = events.find(event => event.type === 'session')
     const owner = header?.parentSession ?? header?.header?.parentSession ?? header?.data?.parentSession
     if (owner !== record.sessionId) continue
-    children.push(spanOf(events))
+    // A forked child's log starts with the parent's conversation. Running
+    // spanOf over all of it counts the parent's model time as the child's and
+    // shrinks the child's normalised span; only what the child did from the seed
+    // boundary on belongs to it.
+    const boundary = events.findIndex(event => String(event.type).includes('end-seed'))
+    children.push(spanOf(boundary < 0 ? events : events.slice(boundary + 1)))
   }
 
   let blockActual = 0

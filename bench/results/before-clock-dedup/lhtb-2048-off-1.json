@@ -1,0 +1,65 @@
+{
+  "task": "lhtb-2048",
+  "condition": "off",
+  "index": 1,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 388954,
+  "timedOut": false,
+  "sessionId": "session-8fab9984-1058-468f-9e4d-6f7a369c254f",
+  "stderr": "",
+  "steps": 21,
+  "toolCalls": 21,
+  "tools": [
+    "pwsh",
+    "read",
+    "read",
+    "pwsh",
+    "write",
+    "write",
+    "pwsh",
+    "pwsh",
+    "write",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "write",
+    "pwsh",
+    "pwsh",
+    "write",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "pwsh",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 64269,
+    "outputTokens": 45752,
+    "cacheReadTokens": 874120,
+    "totalTokens": 984141
+  },
+  "formation": {
+    "agents": 1,
+    "input": 64269,
+    "output": 45752,
+    "cacheRead": 874120,
+    "total": 984141,
+    "steps": 21
+  },
+  "mainPrompt": 64457,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 400 步"
+    ],
+    "score": 4.7852,
+    "moves": 400
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 68174,
+  "thinkingPreview": "Now let's read the engine.\nNow let me understand the setup:\n- 15 minute time budget, 400 move budget\n- Moves go into moves.log\n- Scoring: replay move log in a fresh engine, read the max tile\n\nKey insight: I can write my own solver program that simulates the engine (importing game2048_engine) and plays a long sequence of moves, then append those moves to moves.log. That's explicitly allowed: \"如果你自己写了对局程序来出招,就把走法按这个格式写进同一个文件\".\n\nBut wait — there's a subtlety. The `best_band_of` function replays the log. And the judge replays the move log in a fresh engine. So the moves.log is the source of truth. If I simulate offline with the same seed and the same rules, the moves will replay exactly.\n\nActually even simpler: I could write an offline solver that uses the engine's Game2048 class directly (with the same seed), plays a long game with a good AI (expectimax), and then writes all the moves to mo",
+  "finalText": "完成。最终棋盘出现 **512（band 4）**，走法日志正好 400 步。\n\n## 策略\n\n关键洞察：`game2048_engine` 的 PRNG 是 splitmix64，而**每次真正改变棋盘的操作恰好消耗 2 个随机数**（位置 + 2/4），所以第 k 步的落子位置和数值在开局时就已经完全确定——未来是走法序列的**确定性函数**，不需要 expectimax，可以直接搜索。我据此写了一个离线求解器（`solver.py`/`solver2.py`/`solver3.py`），用「蛇形单调权重 + 空格子奖励 + 相邻可合并奖励 + 平滑度惩罚」的启发式做 beam search 枚举走法序列，按引擎真实的 `value_for()`（band + 素材连续分）挑最优，再交给真实引擎 `g2048.py move` 落盘。四个角落（左下/右下/左上/右上）与多种 beam 宽度/随机重启都收敛到 512，实测 400 步是 1024 不可达的边界，故把全部 400 步预算押在一条经验证的最优线上。\n\n## 关键数据\n\n- **总步数：400**（`moves.log` 400 行，全部为单字母 U/D/L/R；未超预算，未使用 RESET）\n- 独立复核：用未修改的 `game2048_engine` 从新种子重放该日志 → `PEAK value=4.7852 max_tile=512 band=4`（与 `g2048.py status` 自带的日志回放 `best_band` 一致，进度无法伪造）\n- 过程中发现并修正了一个自写求解器的 spawn 索引 bug（`solver2/solver3` 少推进了随机数流），其结果经 `verify.py` 对拍后已全部丢弃，最终落盘的是对拍通过的序列\n\n## 最后一次 status 输出\n\n```\nscore=5824  max_tile=512  band=4  best_band=4  moves=400  empty=1  game_over=False\nboard (4x4, .=empty, row 0 = top):\n     2     .     8     2\n     4     4     4     8\n    64    64    16    32\n   512   128    64     2\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=slide down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\n最大 tile 停在左下角 512（角落锚定 + 相邻 128/64 的蛇形阶梯），第 316 步合成 512 后剩余步数全部用于堆积素材，把连续分推到 4.7852（band 4 + 0.785），距离该 band 的理论上限 4.999 只差最后一点素材。"
+}

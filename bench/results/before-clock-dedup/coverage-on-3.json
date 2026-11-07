@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 3,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 173259,
+  "timedOut": false,
+  "sessionId": "session-f9df8e67-bbe1-4b28-a455-82ac7fdc6148",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 16247,
+    "outputTokens": 5011,
+    "cacheReadTokens": 14592,
+    "totalTokens": 35850
+  },
+  "formation": {
+    "agents": 4,
+    "input": 170919,
+    "output": 29899,
+    "cacheRead": 590080,
+    "total": 790898,
+    "steps": 27
+  },
+  "mainPrompt": 19796,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 8988,
+  "thinkingPreview": "Let me start by designing a plan. The task is read-only analysis of a directory structure.\n\nLet me plan: I need to:\n1. List files in verify/*.spec.ts and src/**/*.ts\n2. Read the spec files to determine entry functions tested\n3. Count lines of src modules\n\nLet me do a plan with tools nodes. But first I should explore the directory structure. Actually per the protocol, my first message IS the plan — but I can also use tool calls? The instruction says: \"(1) Design the plan — and your first message of the round IS the plan: you hand it over before you call anything else, no tool call comes first.\"\n\nHmm, so I should hand over a refine_plan first. But I need to know what files exist. Well, the plan can include discovery as nodes.\n\nLet me design a plan with:\n- Node A (tools): glob for verify/*.spec.ts and src/**/*.ts, and read all the spec files. Actually reading unknown file list requires disc",
+  "finalText": "三个问题都已得到答案。以下是结论（全程只读，未创建/修改/删除任何文件）。\n\n---\n\n## 1. verify 下每个 `.spec.ts` 实际测的入口函数\n\n`verify/` 根目录下共 8 个 spec（无子目录）。注意：**文件名 ≠ 被测模块**，有三个 spec 的主入口在别的文件里。\n\n| spec 文件 | 主入口函数（源文件） | 顺带被断言的其他导出 |\n|---|---|---|\n| `batch.spec.ts` | `runBatch`（`src/batch.ts`） | `capOutput`、`capNodeOutput`、`scrubConclusion` |\n| `plan.spec.ts` | `runPlan`（**`src/tool.ts`**，非 `plan.ts`） | `renderPlan`、`PLAN_TOOL_DESCRIPTION`（tool.ts）；`parsePlanArgs`、`buildGroups`、`WORKER_MARKER`（plan.ts）；`REFINE_GUIDANCE`（index.ts） |\n| `refine.spec.ts` | `parseBatchArgs`（`src/batch.ts`） | `renderBatch`（batch.ts）、`parsePolicyCommand`（`src/policy.ts`） |\n| `repair.spec.ts` | `runBatch`（`src/batch.ts`，走 repair 回调路径） | `parseRepair`（`src/repair.ts`） |\n| `concurrency.spec.ts` | `isReadOnlyCommand` / `mayRunTogether` / `buildOverrides`（`src/concurrency.ts`） | 末段借 `runBatch` 验证批次内 exclusive 顺序 |\n| `retain.spec.ts` | `applyReportRetention`（`src/index.ts`） | `PLAN_TOOL`（tool.ts，仅作参数常量） |\n| `fork.spec.ts` | `buildSeedFromNow`（`src/fork.ts`） | `openTurnClosers` |\n| `rounds.spec.ts` | `applyTurnDoctrine`（`src/rounds.ts`） | `applyWorkerRule`、`Rounds`/`Workers` 类、`isWorkerConversation`、`startOf`、`formatClock`、`ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN`；`WORKER_MARKER` 取自 `src/plan.ts` |\n\n## 2. src 下没有对应 spec 的 `.ts` 模块\n\n`src/` 只有 9 个 `.ts` 模块（无子目录）：`batch` / `concurrency` / `fork` / `index` / `plan` / `policy` / `repair` / `rounds` / `tool`。\n\n两种口径结论不同，需分清：\n\n- **按同名映射（`src/X.ts` ↔ `verify/X.spec.ts`）**——没有同名 spec 的是这 3 个：\n  - **`src/tool.ts`**（主入口 `runPlan` 实际被 `plan.spec.ts` 测）\n  - **`src/policy.ts`**（`parsePolicyCommand` 被 `refine.spec.ts` 测）\n  - **`src/index.ts`**（`applyReportRetention` 被 `retain.spec.ts` 测）\n  \n  其余 6 个有同名 spec：batch、concurrency、fork、plan、repair、rounds。\n  \n- **按\"spec 实际 import 了哪个模块\"**——9 个模块**全部**至少被某个 spec import 过，没有完全没被触及的模块。\n\n两个补充事实（比\"模块有无 spec\"更值得关注）：\n- `verify/plan.spec.ts` 主入口在 `tool.ts`，`plan.ts` 只通过常量 `WORKER_MARKER` 被触及；`plan.ts` 里的 `parsePlanArgs`/`buildGroups` 确有断言。\n- **`verify/repair.spec.ts` 存在，但不在 `verify/run-specs.mjs` 的运行数组里**（该脚本只列 refine、batch、concurrency、plan、rounds、fork、retain 七个），所以 `npm run specs` 实际从不执行 repair spec —— `src/repair.ts` 等于没有真正跑过。\n- 还有一批\"模块有 spec 但导出从未被调用\"：`index.ts` 的 `apply`、`policy.ts` 的 `SessionPolicy`/`runPolicyCommand`/`applyPolicyCommand`、`tool.ts` 的 `applyPlanTool`、`repair.ts` 的 `askForRepair`/`collectText`、`fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`、`rounds.ts` 的 `applyRounds`/`applyJudgementGuard`/`applyDelegationRule`。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，606 行**（物理行数，含空行与注释；非空行 583）。\n\n无论\"这些模块\"指全部 src 模块、还是指第 2 问里无同名 spec 的那批（tool 606 / index 363 / policy 241），答案都指向同一个文件 `src/tool.ts`。\n\n完整排名（物理行数）：\n\n| 模块 | 行数 | 非空行 |\n|---|---|---|\n| `src/tool.ts` | **606** | 583 |\n| `src/fork.ts` | 549 | 520 |\n| `src/batch.ts` | 476 | 444 |\n| `src/rounds.ts` | 442 | 411 |\n| `src/index.ts` | 363 | 335 |\n| `src/policy.ts` | 241 | 228 |\n| `src/concurrency.ts` | 234 | 224 |\n| `src/plan.ts` | 225 | 207 |\n| `src/repair.ts` | 173 | 162 |"
+}

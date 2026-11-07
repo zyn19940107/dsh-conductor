@@ -1,0 +1,61 @@
+{
+  "task": "coverage",
+  "condition": "off",
+  "index": 1,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 43782,
+  "timedOut": false,
+  "sessionId": "session-0d12f8d2-281a-4d55-aaa1-6f7c2af7effb",
+  "stderr": "",
+  "steps": 10,
+  "toolCalls": 21,
+  "tools": [
+    "glob",
+    "glob",
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "grep",
+    "pwsh",
+    "glob",
+    "read",
+    "pwsh",
+    "read",
+    "read",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 35655,
+    "outputTokens": 6169,
+    "cacheReadTokens": 272320,
+    "totalTokens": 314144
+  },
+  "formation": {
+    "agents": 1,
+    "input": 35655,
+    "output": 6169,
+    "cacheRead": 272320,
+    "total": 314144,
+    "steps": 10
+  },
+  "mainPrompt": 45106,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 13757,
+  "thinkingPreview": "The glob is dominated by node_modules. Let me use pwsh to list files excluding node_modules.\n\nActually, I should use the glob tool with more specific patterns: `dsh-refine-loop/src/**/*.ts` and `dsh-refine-loop/verify/**/*.ts`.\nNow let me read each spec file to see what entry function it tests. Let me read them all.\n\nAlso read the src files to find exports and line counts.\n\nLet me use grep for imports in the specs, and read them.\nNow I have all 8 specs. Now let me get the src modules' exports and line counts. Let me check each src file's exports and line counts.\n\nLet me use pwsh to get line counts and grep for exports.\nNow, I need to determine which src modules have corresponding specs. Let me map:\n\nSpecs:\n1. `concurrency.spec.ts` — imports from `../src/batch.js` (runBatch) and `../src/concurrency.js` (buildOverrides, isReadOnlyCommand, mayRunTogether). Main target: `src/concurrency.ts`.",
+  "finalText": "已读完所有文件，未做任何修改。以下是三个问题的答案。\n\n## 1. 每个 `.spec.ts` 实际测的入口函数\n\n全部是手写 `check()` 断言脚本（无 vitest/jest），每个 spec 一个独立进程，失败时 `process.exit(1)`。\n\n| spec 文件 | 主入口函数（被测对象） | 附带被测 | 来源模块 |\n|---|---|---|---|\n| `batch.spec.ts` | `runBatch` | `capOutput`、`capNodeOutput`、`scrubConclusion` | `src/batch.ts` |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides` | `runBatch`（只为验批次顺序） | `src/concurrency.ts` |\n| `fork.spec.ts` | `buildSeedFromNow` | `openTurnClosers` | `src/fork.ts` |\n| `plan.spec.ts` | `runPlan`、`renderPlan` | `parsePlanArgs`、`buildGroups`、`PLAN_TOOL_DESCRIPTION`、`REFINE_GUIDANCE` | `src/tool.ts` + `src/plan.ts` + `src/index.ts` |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch` | `parsePolicyCommand` | `src/batch.ts` + `src/policy.ts` |\n| `repair.spec.ts` | `parseRepair` | `runBatch`（修复路径） | `src/repair.ts` |\n| `retain.spec.ts` | `applyReportRetention` | `PLAN_TOOL` 常量 | `src/index.ts` |\n| `rounds.spec.ts` | `applyTurnDoctrine`、`applyWorkerRule` | `Rounds`、`Workers`、`isWorkerConversation`、`startOf`、`formatClock` | `src/rounds.ts` |\n\n**一个实锤问题**：`verify/run-specs.mjs` 第 21 行的 spec 列表是 `['refine','batch','concurrency','plan','rounds','fork','retain']` —— **`repair.spec.ts` 不在里面**。也就是说 `src/repair.ts` 的这份 spec 从来没被执行过，改坏了也不会报警。\n\n## 2. 哪些模块没有对应的 spec\n\n先说结论：**按模块粒度，9 个模块没有一个是完全无 spec 的**（每个都被至少一份 spec import 到了）。但按\"一个模块配一份同名 spec\"的约定，以及按**入口函数粒度**，缺口很大：\n\n**完全没有专属 spec 的模块（3 个）**：`src/index.ts`、`src/policy.ts`、`src/tool.ts`\n\n其中真正的主入口函数从未被测过：\n\n| 模块 | 未被任何 spec 触达的入口/导出 |\n|---|---|\n| `src/index.ts` | **`apply()`** —— 插件总装配入口（注册 systemPrompt、plan tool、各类 hook），零覆盖 |\n| `src/tool.ts` | **`applyPlanTool()`** —— 注册 plan 工具本体，零覆盖 |\n| `src/policy.ts` | `SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` —— 整个\"按会话开关\"机制只测了一个纯字符串解析 `parsePolicyCommand` |\n| `src/repair.ts` | `askForRepair`、`repairSystem`、`describeFailure`、`collectText` —— 整个\"问模型怎么修\"的链路零覆盖（且 spec 未被 runner 执行） |\n| `src/fork.ts` | `spawnForkedChild`、`spawnEmptyChild` —— 真正 fork 子进程的路径零覆盖，只测了纯函数拼种子 |\n| `src/rounds.ts` | `Plans`、`applyRounds`、`applyDelegationRule`、`applyJudgementGuard`、`isModelCall` |\n\n完全覆盖的是：`src/batch.ts`、`src/concurrency.ts`、`src/plan.ts`（导出面基本全覆盖）。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts` —— 606 行**（物理行数，含空行注释）。\n\n| 排名 | 文件 | 行数 | 非空行 |\n|---|---|---|---|\n| 1 | `src/tool.ts` | **606** | 583 |\n| 2 | `src/fork.ts` | 549 | 520 |\n| 3 | `src/batch.ts` | 476 | 444 |\n| 4 | `src/rounds.ts` | 442 | 411 |\n| 5 | `src/index.ts` | 363 | 335 |\n| 6 | `src/policy.ts` | 241 | 228 |\n| 7 | `src/concurrency.ts` | 234 | 224 |\n| 8 | `src/plan.ts` | 225 | 207 |\n| 9 | `src/repair.ts` | 173 | 162 |\n\n`tool.ts` 是 606 行 / 24106 字节，包含 `PLAN_TOOL` 工具定义、`runPlan`、`renderPlan`、`PLAN_TOOL_DESCRIPTION` 和 `applyPlanTool` 五块。值得注意的是：这个最长的文件里，**唯一没被测的正是 `applyPlanTool`** —— 也就是注册 plan 工具的那段胶水代码，而不是它的核心逻辑。\n\n（顺带一提：AGENTS.md 提到的 `dsh-plugin-sandbox` skill 只在改插件时才需要，本次纯只读盘点未调用。）"
+}
