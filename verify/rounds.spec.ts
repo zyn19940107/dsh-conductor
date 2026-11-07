@@ -11,7 +11,9 @@ import {
   NEXT_ROUND,
   ROUND_LOOP,
   WORKER_NO_PLAN,
+  REPORT_ONLY,
   Workers,
+  applyReportGuard,
   applyTurnDoctrine,
   applyWorkerRule,
   formatClock,
@@ -19,6 +21,7 @@ import {
   isWorkerConversation,
 } from '../src/rounds.ts'
 import { WORKER_MARKER } from '../src/plan.ts'
+import { Reporters } from '../src/fork.ts'
 
 let failures = 0
 
@@ -175,6 +178,35 @@ console.log('the doctrine hook skips the worker, and the plan tool stays in its 
     .map(message => (message as { content?: Array<{ text?: string }> }).content?.map(part => part.text ?? '').join('') ?? '')
     .join(' ')
   check('with no limit configured nothing is claimed', unlimitedText.includes('at most') === false)
+}
+
+console.log('the report guard refuses every tool while the report is written')
+{
+  const reporters = new Reporters()
+  reporters.mark('session-reporting')
+  let guard: ((execution: unknown) => string | undefined) | undefined
+  const ctx = {
+    tools: { guard: (registered: typeof guard) => { guard = registered } },
+  } as unknown as Context
+  applyReportGuard(ctx, reporters)
+  if (guard === undefined) throw new Error('the report guard registered nothing')
+
+  const call = (name: string, sessionId: string) => ({
+    name,
+    agent: { session: { id: sessionId } },
+    callId: 'root',
+    rootCallId: 'root',
+  })
+
+  check('a tool call from a reporting conversation is refused',
+    guard(call('read', 'session-reporting')) === REPORT_ONLY)
+  check('a reporting conversation cannot plan either',
+    guard(call('refine_plan', 'session-reporting')) === REPORT_ONLY)
+  check('another conversation is untouched',
+    guard(call('read', 'session-working')) === undefined)
+  reporters.unmark('session-reporting')
+  check('once the report is written the tools come back',
+    guard(call('read', 'session-reporting')) === undefined)
 }
 
 console.log('the worker rule refuses the plan tool where it is called')

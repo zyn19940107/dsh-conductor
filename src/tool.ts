@@ -31,7 +31,7 @@ import {
   type RepairCall,
 } from './batch.js'
 import { mayRunTogether, type ConcurrencyOverride } from './concurrency.js'
-import { spawnEmptyChild, spawnForkedChild, type SpawnResult } from './fork.js'
+import { spawnEmptyChild, spawnForkedChild, type Reporters, type SpawnResult } from './fork.js'
 import {
   AGENT_NODE_KINDS,
   WORKER_MARKER,
@@ -58,6 +58,8 @@ export interface PlanForkOptions {
   host: Record<string, unknown>
   /** Told the child's session id when a worker starts, so the loop leaves it alone. */
   onWorker?: (sessionId: string) => void
+  /** Where a child that is writing its report is recorded. */
+  reporters?: Reporters
 }
 
 /** What one node of a plan produced. */
@@ -253,6 +255,7 @@ async function runNode(
         ...(node.budgetMs > 0 ? { budgetMs: node.budgetMs } : {}),
         signal,
         ...(node.kind === 'worker' && fork.onWorker !== undefined ? { onCreated: fork.onWorker } : {}),
+        ...(fork.reporters !== undefined ? { reporters: fork.reporters } : {}),
       },
     )
     return {
@@ -284,6 +287,7 @@ async function runNode(
       timeoutMs: agentNodeTimeoutMs,
       ...(node.budgetMs > 0 ? { budgetMs: node.budgetMs } : {}),
       signal,
+      ...(fork.reporters !== undefined ? { reporters: fork.reporters } : {}),
     },
   )
   return {
@@ -420,6 +424,8 @@ export function applyPlanTool(
     host?: () => Record<string, unknown>
     /** Told a worker's session id, so the loop leaves that conversation alone. */
     onWorker?: (sessionId: string) => void
+    /** Where a child that is writing its report is recorded. */
+    reporters?: Reporters
     /** Told when a plan starts running, so a rule can know the turn handed its plan over. */
     onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
     /** Build the repair for one conversation, from its own call configuration. */
@@ -567,6 +573,7 @@ export function applyPlanTool(
         : {
             host: options.host(),
             ...(options.onWorker === undefined ? {} : { onWorker: options.onWorker }),
+            ...(options.reporters === undefined ? {} : { reporters: options.reporters }),
           }
       // The model has no clock, so it cannot tell how much of a stated budget is
       // already gone. The node budgets it wrote are one thing it can be checked

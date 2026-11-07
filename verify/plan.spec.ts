@@ -76,13 +76,22 @@ function node(id: string, writes: string[] = []): PlanNode {
  * @param behavior - whether a child answers, or never goes idle.
  * @returns the plan tool's fork options.
  */
-function fakeFork(prompts: string[], behavior: 'answer' | 'never' = 'answer') {
+function fakeFork(
+  prompts: string[],
+  behavior: 'answer' | 'never' | 'report' = 'answer',
+) {
   let created = 0
   const agentLoop = {
     async createAgent(_owner: unknown, _options: Record<string, unknown>) {
       created += 1
       const id = `child-${created}`
       const events: Array<Record<string, unknown>> = []
+      let turn = 0
+      let release: (() => void) | undefined
+      // A child in the 'report' behaviour stays busy through its work turn and
+      // only goes idle once the report is asked for — which is what the plugin
+      // now waits for without a time limit.
+      const busy = new Promise<void>((resolve) => { release = resolve })
       const child = {
         session: {
           id,
@@ -92,16 +101,29 @@ function fakeFork(prompts: string[], behavior: 'answer' | 'never' = 'answer') {
         followup(message: { content?: Array<{ text?: string }> }) {
           const text = (message.content ?? []).map(block => block.text ?? '').join('')
           prompts.push(text)
-          if (behavior === 'answer') {
-            events.push({
-              type: 'assistant/message',
-              seq: events.length + 1,
-              time: 1,
-              data: { message: { content: [{ type: 'text', text: `done by ${id}` }] } },
-            })
-          }
+          turn += 1
+          const answered = behavior === 'answer' || (behavior === 'report' && turn >= 2)
+          if (!answered) return
+          events.push({
+            type: 'assistant/message',
+            seq: events.length + 1,
+            time: 1,
+            data: {
+              message: {
+                content: [{
+                  type: 'text',
+                  text: behavior === 'report' ? 'report: 3 of 5 files are written; check.py still fails' : `done by ${id}`,
+                }],
+              },
+            },
+          })
+          release?.()
         },
-        whenIdle: () => behavior === 'never' ? new Promise<void>(() => {}) : Promise.resolve(),
+        whenIdle: () => {
+          if (behavior === 'answer') return Promise.resolve()
+          if (behavior === 'report') return busy
+          return new Promise<void>(() => {})
+        },
         cancel: () => {},
       }
       return { agent: child as unknown as Agent, dispose: async () => {} }
@@ -394,11 +416,13 @@ console.log('a node that runs out of time is reported, and the plan carries on')
     1,
     120,
     undefined,
-    fakeFork([], 'never'),
+    fakeFork([], 'report'),
   )
   check('the slow node failed', output.nodes[0]?.ok === false)
   check('the failure says the budget was spent',
     (output.nodes[0]?.error ?? '').toLowerCase().includes('budget'))
+  check('what the node reported is kept as its output',
+    (output.nodes[0]?.output ?? '').includes('3 of 5 files are written'))
   check('the other node still ran', output.nodes[1]?.ok === true)
   clearTimeout(keepAlive)
 }

@@ -25,8 +25,9 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'are the pieces of work, which of them are independent enough to run at the same time, what each node is '
   + 'made of, what observable criteria decide it succeeded. Every node carries a budgetMs: your estimate of '
   + 'how long it should take. A node without one runs until the runner stops it, and then nobody learns where '
-  + 'it got to; a node with one is stopped at that point and asked to finish or to report its state, so the '
-  + 'parent still learns something. If you already have what you need, hand over the '
+  + 'it got to; a node with one is stopped at that point and told to report where it got to — what exists, '
+  + 'what is confirmed, what is missing — so the parent still learns something, and that report costs the '
+  + 'node no time it was not already spending. If you already have what you need, hand over the '
   + 'empty plan and go straight to the conclusion. (2) Hand it over with refine_plan: one layer, every node '
   + 'starts at the same time, every result comes back together. (3) It runs — the nodes together — and every '
   + 'result comes back. (4) Only then judge the request: if those results answer it, write the conclusion, '
@@ -340,6 +341,10 @@ export function isWorkerConversation(messages: readonly { content?: unknown }[])
  * the parent's for the inherited prefix to hit the cache; what changes is the
  * answer when the worker tries to use it.
  */
+export const REPORT_ONLY = 'The budget is spent and this conversation is writing its report now. Tools are '
+  + 'refused: say what exists on disk, what is confirmed, and what is still missing, from what you already '
+  + 'know. Do not start anything new.'
+
 export const WORKER_NO_PLAN = 'You are a worker: this conversation inherits the plan you are part of, and your '
   + 'job is to do the work yourself and report what you found. Do not draw a plan of your own — use the tools '
   + 'and answer.'
@@ -364,6 +369,27 @@ export function applyWorkerRule(ctx: Context, workers: Workers): void {
     if (execution.name !== PLAN_TOOL) return undefined
     if (!workers.has(agent.session.id)) return undefined
     return WORKER_NO_PLAN
+  })
+}
+
+/**
+ * Refuse every tool call while a child is writing its report.
+ *
+ * The budget bought work; the report is what the budget could not buy, and a
+ * child with tools available spends its last seconds working instead of saying
+ * where it got to. With no calls allowed the only thing left is the answer, and
+ * the answer is what the parent needs.
+ *
+ * @param ctx - the plugin context supplying the guard registry.
+ * @param reporters - the conversations that are writing their report.
+ */
+export function applyReportGuard(ctx: Context, reporters: { has: (sessionId: string) => boolean }): void {
+  ctx.tools.guard((execution) => {
+    const agent = execution.agent
+    if (agent === undefined) return undefined
+    if (!isModelCall(execution)) return undefined
+    if (!reporters.has(agent.session.id)) return undefined
+    return REPORT_ONLY
   })
 }
 

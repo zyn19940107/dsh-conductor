@@ -7,7 +7,7 @@
  * the harness closes it.
  */
 
-import { buildSeedFromNow, openTurnClosers, type SessionEventLike } from '../src/fork.ts'
+import { buildSeedFromNow, openTurnClosers, reportPrompt, Reporters, type SessionEventLike } from '../src/fork.ts'
 
 let failures = 0
 
@@ -113,6 +113,33 @@ console.log('an unanswered tool call gets a synthetic result')
   const order = seed.map(event => event.type)
   check('the result comes before the step closer',
     order.indexOf('tool/result') < order.lastIndexOf('step/end'))
+}
+
+console.log('the budget buys the report')
+{
+  // The budget buys the work; the report is what the budget could not buy, and
+  // the message that asks for it must not offer a way to keep working.
+  const report = reportPrompt(240_000)
+  check('the report is asked for outright', report.includes('Write the report now'))
+  check('tools are refused in words', report.includes('No tool calls'))
+  check('it asks what exists', report.includes('What exists on disk now'))
+  check('it asks what is confirmed', report.includes('What is confirmed'))
+  check('it asks what is missing', report.includes('What is still missing'))
+  check('it forbids intent', report.toLowerCase().includes('do not describe what you intend'))
+  check('it offers no second window to work in',
+    report.toLowerCase().includes('finish it by the shortest path') === false
+    && report.toLowerCase().includes('seconds more') === false)
+}
+
+console.log('a reporting conversation is recorded until its report is done')
+{
+  const reporters = new Reporters()
+  check('nothing is reporting to start with', reporters.has('session-1') === false)
+  reporters.mark('session-1')
+  check('a marked conversation reports', reporters.has('session-1') === true)
+  check('another one does not', reporters.has('session-2') === false)
+  reporters.unmark('session-1')
+  check('unmarking takes it back out', reporters.has('session-1') === false)
 }
 
 if (failures > 0) {

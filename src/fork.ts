@@ -274,41 +274,69 @@ function lastAssistantText(events: readonly SessionEventLike[]): string {
   return ''
 }
 
-/** How long a child gets to look at its state after its budget is spent. */
-const STATUS_WINDOW_MS = 45_000
+/**
+ * The conversations that are writing their report.
+ *
+ * When a node's budget is spent, the child is stopped and told to report where it
+ * got to. In that phase it must not call a tool: a call is either more work (the
+ * budget is gone) or a stall, and both keep the report from being written. The
+ * guard registered against this set refuses every tool call, which leaves the
+ * child one thing it can do — say what it has.
+ */
+export class Reporters {
+  private readonly reporting = new Set<string>()
+
+  /**
+   * @param sessionId - a conversation that is now reporting.
+   */
+  mark(sessionId: string): void {
+    this.reporting.add(sessionId)
+  }
+
+  /**
+   * @param sessionId - a conversation that is no longer reporting.
+   */
+  unmark(sessionId: string): void {
+    this.reporting.delete(sessionId)
+  }
+
+  /**
+   * @param sessionId - a conversation to check.
+   * @returns whether it is writing its report.
+   */
+  has(sessionId: string): boolean {
+    return this.reporting.has(sessionId)
+  }
+}
 
 /**
  * What the child is told when its budget runs out.
  *
- * It is not told to stop and it is not told to keep going. It is told the one
- * thing only it can weigh — how much work is left against how much time is left
- * — and what the two outcomes would be. Asked to "look at the status" without
- * those numbers it can only guess, and guessing is what the budget exists to
- * stop.
+ * The budget bought work; this message buys the record of that work. The child
+ * is not asked whether to finish or report — the budget already answered that —
+ * and the report is not given a time limit: a slow API must not be able to turn a
+ * finished job into a silent one. It reports what exists, what is confirmed and
+ * what is missing, and then it is done.
  *
  * @param budgetMs - the budget the node declared, now spent.
- * @param extensionMs - how much time this second look may take.
  * @returns the message.
  */
-function statusPrompt(budgetMs: number, extensionMs: number): string {
+export function reportPrompt(budgetMs: number): string {
   const spent = Math.round(budgetMs / 1000)
-  const left = Math.round(extensionMs / 1000)
   return `Your node's time budget of ${spent} seconds is spent, and the work in flight was just stopped. `
-    + `You now have at most ${left} seconds more. It is a window to finish or to report, not to start `
-    + 'anything new.'
+    + 'It is not started again: the rest of the work belongs to whoever reads your report.'
     + String.fromCharCode(10) + String.fromCharCode(10)
-    + 'Decide from what you can actually see:'
+    + 'Write the report now, as your answer. No tool calls — the report is the whole answer.'
     + String.fromCharCode(10)
-    + `- If the remaining work needs longer than ${left} seconds, stop now. Report what already exists and `
-    + 'where, what is done and confirmed, and what is still missing.'
+    + '- What exists on disk now, by file, and where.'
     + String.fromCharCode(10)
-    + `- If the remaining work fits inside ${left} seconds, finish it by the shortest path and report the `
-    + 'result — artifact, command output, and the conclusion.'
+    + '- What is confirmed: which command was run and what it printed.'
+    + String.fromCharCode(10)
+    + '- What is still missing, and what the next person should do first.'
     + String.fromCharCode(10)
     + String.fromCharCode(10)
-    + `When the window ends the node is stopped again, whether or not you answered, so start nothing you `
-    + 'cannot finish inside it. The parent only sees what you report: a clear status with wrong-looking '
-    + 'numbers beats an unfinished attempt.'
+    + 'Do not describe what you intend to do; only what is. If you got nothing done, say that in one line '
+    + 'and name what is missing: a clear status with wrong-looking numbers beats an unfinished attempt.'
 }
 
 /**
@@ -321,17 +349,20 @@ function statusPrompt(budgetMs: number, extensionMs: number): string {
  */
 async function waitForIdle(
   child: Agent,
-  ms: number,
+  ms: number | undefined,
   signal: AbortSignal,
 ): Promise<'idle' | 'timeout' | 'cancelled'> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
+    const bounded = ms !== undefined && Number.isFinite(ms)
     return await Promise.race([
       child.whenIdle().then((): 'idle' => 'idle'),
-      new Promise<'timeout'>((resolve) => {
-        timer = setTimeout(() => resolve('timeout'), ms)
-        ;(timer as { unref?: () => void }).unref?.()
-      }),
+      ...(bounded
+        ? [new Promise<'timeout'>((resolve) => {
+            timer = setTimeout(() => resolve('timeout'), ms)
+            ;(timer as { unref?: () => void }).unref?.()
+          })]
+        : []),
       new Promise<'cancelled'>((resolve) => {
         signal.addEventListener('abort', () => resolve('cancelled'), { once: true })
       }),
@@ -371,15 +402,17 @@ export async function spawnForkedChild(
     /**
      * What the node itself said it would take.
      *
-     * It is not a kill switch. When it is spent the child is stopped and then
-     * asked to look at where it got to and decide: finish by the shortest path,
-     * or report its state and stop. The ceiling still bounds the whole thing.
+     * It is where the work stops, not where the record of it stops: when it is
+     * spent the child is stopped and asked to report where it got to, and that
+     * report has no time limit of its own.
      */
     budgetMs?: number
     /** The signal that cancels the child. */
     signal: AbortSignal
     /** Told the child's session id as soon as the child exists. */
     onCreated?: (sessionId: string) => void
+    /** Where a child that is writing its report is recorded. */
+    reporters?: Reporters
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, true)
@@ -411,6 +444,8 @@ export async function spawnEmptyChild(
     budgetMs?: number
     /** The signal that cancels the child. */
     signal: AbortSignal
+    /** Where a child that is writing its report is recorded. */
+    reporters?: Reporters
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, false)
@@ -445,6 +480,8 @@ async function spawnChild(
     signal: AbortSignal
     /** Told the child's session id as soon as the child exists. */
     onCreated?: (sessionId: string) => void
+    /** Where a child that is writing its report is recorded. */
+    reporters?: Reporters
   },
   seeded: boolean,
 ): Promise<SpawnResult> {
@@ -494,7 +531,6 @@ async function spawnChild(
   const budget = options.budgetMs !== undefined && options.budgetMs > 0
     ? Math.min(options.budgetMs, options.timeoutMs)
     : options.timeoutMs
-  const extension = Math.min(Math.max(STATUS_WINDOW_MS, Math.round(budget / 4)), options.timeoutMs)
   try {
     child.followup(createUserMessage({
       content: [{ type: 'text', text: prompt }],
@@ -510,28 +546,35 @@ async function spawnChild(
           : (output.trim() === '' ? 'the child produced no answer' : undefined),
       }
     }
-    // The budget is spent. Stop what is running — the in-flight tool included —
-    // and hand the decision back to the child: it knows what it has, the parent
-    // does not. It finishes by the shortest path or reports its state, and the
-    // extension is what bounds that second look.
+    // The budget is spent, so the work is over: stop what is running — the
+    // in-flight tool included — and ask for the record of it. The report has no
+    // time limit of its own. A slow API must not be able to turn a finished job
+    // into a silent one, which is exactly what a bounded window did: the child
+    // spent it working, and was then disposed before it could say what it had.
+    // Tools are refused while this phase is on, so the only thing left to do is
+    // answer; the plan's own cancellation is the single bound.
     child.cancel({ kind: 'hook', reason: 'the node used its time budget' })
+    options.reporters?.mark(sessionId)
     child.followup(createUserMessage({
-      content: [{ type: 'text', text: statusPrompt(budget, extension) }],
+      content: [{ type: 'text', text: reportPrompt(budget) }],
       source: { kind: 'user' },
     }))
-    const second = await waitForIdle(child, extension, options.signal)
+    const second = await waitForIdle(child, undefined, options.signal)
     const output = snapshotText(child)
     if (second === 'cancelled') return { output, error: 'the plan was cancelled' }
     if (output.trim() === '') {
-      return { output, error: `the child used its ${budget}ms budget and produced no answer` }
+      return { output, error: `the child used its ${budget}ms budget and produced no report` }
     }
+    // The node did not finish its task — the budget stopped it — and the parent
+    // has to know that, so it is an error even though there is now a report.
     return {
       output,
-      error: second === 'idle' ? undefined : `the child used its ${budget}ms budget; this is where it got to`,
+      error: `the child used its ${budget}ms budget; this is what it reported`,
     }
   } catch (error: unknown) {
     return { output: snapshotText(child), error: error instanceof Error ? error.message : String(error) }
   } finally {
+    options.reporters?.unmark(sessionId)
     try {
       await handle.dispose()
     } catch {
