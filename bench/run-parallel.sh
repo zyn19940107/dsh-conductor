@@ -1,33 +1,36 @@
 #!/usr/bin/env bash
-# Run every task's five pairs, five tasks at a time.
-# Same task + same condition must be serial (the workspace is shared), so each
-# task owns one slot and runs its ten runs in order; tasks run in parallel.
+# Fill in whatever is still missing: 5 runs per condition per task.
+# Light tasks first (they finish fast and free a slot), heavy ones last.
+# Same task + same condition is serial (the workspace is shared); tasks run in
+# parallel, four at a time so the API is not flooded.
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-TASKS=(lhtb-commit0 lhtb-nbody lhtb-matpower panel lhtb-2048 quixbugs coverage humeval review humeval-hard)
-MAX_JOBS=5
+TASKS=(coverage review humeval humeval-hard quixbugs panel lhtb-commit0 lhtb-matpower lhtb-2048 lhtb-nbody)
+MAX_JOBS=4
 
 run_task() {
   local task=$1
-  local slot=$2
   local start
   start=$(date +%H:%M)
   for i in 1 2 3 4 5; do
     for cond in off on; do
       local f="bench/results/$task-$cond-$i.json"
       [ -f "$f" ] && continue
-      if ! node bench/run-one.mjs "$task" "$cond" "$i" >/dev/null 2>&1; then
-        echo "[$slot] $task $cond $i 失败"
+      node bench/run-one.mjs "$task" "$cond" "$i" >/dev/null 2>&1
+      if [ -f "$f" ]; then
+        echo "$(date +%H:%M) $task $cond $i 完成"
+      else
+        echo "$(date +%H:%M) $task $cond $i 失败"
       fi
     done
   done
-  echo "[$slot] $task 完成（$start → $(date +%H:%M)）"
+  echo "[$task] 收工（$start → $(date +%H:%M)）"
 }
 
 active=0
 for task in "${TASKS[@]}"; do
-  run_task "$task" "$task" &
+  run_task "$task" &
   active=$((active + 1))
   if [ "$active" -ge "$MAX_JOBS" ]; then
     wait -n

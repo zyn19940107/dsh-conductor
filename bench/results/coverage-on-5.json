@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 69801,
+  "timedOut": false,
+  "sessionId": "session-0b14e4f5-e620-4c49-b233-412aefd3a7bb",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 5680,
+    "outputTokens": 2189,
+    "cacheReadTokens": 20221,
+    "totalTokens": 28090
+  },
+  "formation": {
+    "agents": 3,
+    "input": 141062,
+    "output": 19382,
+    "cacheRead": 1160130,
+    "total": 1320574,
+    "steps": 30
+  },
+  "mainPrompt": 14749,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 2379,
+  "thinkingPreview": "The user asks three read-only questions about D:\\code\\vibe\\dsh-refine-loop. Let me plan.\n\nFirst, my first message of the round IS the plan. I need to hand over the plan via refine_plan.\n\nLet me think about what nodes I need:\n1. Find all .spec.ts under verify/, determine which entry function each actually tests.\n2. Find all .ts modules under src/, determine which have no corresponding spec.\n3. Among \"these modules\" (the ones without specs), which has the most lines and how many.\n\nNodes 2 and 3 depend on each other (3 needs the list from 2), but they can be combined in one worker node since it's sequential work inside a node. Actually node 1 is independent of node 2.\n\nSo: two worker nodes:\n- Node A: analyze verify/*.spec.ts → which entry function each tests.\n- Node B: analyze src/**/*.ts → which lack specs, and among those the one with the most lines and its line count.\n\nBoth are read-only",
+  "finalText": "两个只读分析节点已回，结论一致。全程未改动任何文件。\n\n## 1. verify 下每个 .spec.ts 实际测的入口函数\n\n| spec 文件 | 实际测的入口 |\n|---|---|\n| `plan.spec.ts` | 主入口 `src/tool.ts` 的 `runPlan`；另测 `renderPlan`、`PLAN_TOOL_DESCRIPTION`、`src/plan.ts` 的 `parsePlanArgs`/`buildGroups`/`WORKER_MARKER`、`src/index.ts` 的 `REFINE_GUIDANCE` |\n| `batch.spec.ts` | `src/batch.ts` 的 `runBatch`（主）、`capOutput`、`capNodeOutput`、`scrubConclusion` |\n| `rounds.spec.ts` | `src/rounds.ts` 的 `Rounds`、`Workers`、`applyTurnDoctrine`、`applyWorkerRule`、`isWorkerConversation`、`formatClock`、`startOf` + 文案常量；用 `src/plan.ts` 的 `WORKER_MARKER` 识别 worker 会话 |\n| `concurrency.spec.ts` | `src/concurrency.ts` 的 `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`（次要用到 `runBatch`） |\n| `fork.spec.ts` | `src/fork.ts` 的 `buildSeedFromNow`、`openTurnClosers`（唯一被测模块） |\n| `repair.spec.ts` | `src/batch.ts` 的 `runBatch` 带 repair 钩子的重跑路径（主）、`src/repair.ts` 的 `parseRepair` |\n| `refine.spec.ts` | `src/batch.ts` 的 `parseBatchArgs`、`renderBatch` + `src/policy.ts` 的 `parsePolicyCommand` |\n| `retain.spec.ts` | `src/index.ts` 的 `applyReportRetention`（主）；`src/tool.ts` 只贡献常量 `PLAN_TOOL` |\n| `output-schema.spec.ts` | `src/tool.ts` 的 `applyPlanTool`，取出其 output schema 交给 `validateJsonSchemaValue` 校验 |\n\n## 2. src 下没有对应 spec 的模块\n\nsrc 共 9 个模块（全在 `src/` 根，无子目录）：`tool.ts`、`fork.ts`、`batch.ts`、`rounds.ts`、`index.ts`、`policy.ts`、`concurrency.ts`、`plan.ts`、`repair.ts`。\n\n- 按「同���有专属 spec 文件」这一严格口径，**没有对应 spec 的是三个**：`src/tool.ts`、`src/index.ts`、`src/policy.ts` —— 它们只作为别的 spec 的依赖被顺带调用。\n- 按「是否有任何 spec 调用过它的导出符号」这一宽松口径，则9 个模块都被至少一个 spec 导入并调用过，没有整模块完全没被碰的。但覆盖不均：`policy.ts` 只有 `parsePolicyCommand` 被测（`SessionPolicy`、`runPolicyCommand`、`applyPolicyCommand`、`applyPolicyMessage`、`policyConfirmation` 无人测），`index.ts` 只有 `applyReportRetention`、`REFINE_GUIDANCE` 被测（插件自己的 `apply` 入口和 `Config` 未测），`tool.ts` 测了 `runPlan`/`renderPlan`/`applyPlanTool` 但工具注册后的实际执行路径未测。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，611 行**（含空行与注释；去掉空行 588 行）。它正是三个「无同名 spec」模块中最大的一个。\n\n完整行数排行：tool.ts 611、fork.ts 549、batch.ts 476、rounds.ts 442、index.ts 363、policy.ts 241、concurrency.ts 234、plan.ts 225、repair.ts 173。\n\n## 附带发现（值得留意）\n\n`verify/run-specs.mjs` 只列了 8 个 spec，**`repair.spec.ts` 不在其中** —— 即 `pnpm specs` 根本不会跑 repair 测试，`src/repair.ts` 唯一的覆盖来自一个被跳过的 spec。另外 `src/rounds.ts` 里 `applyRounds`、`applyJudgementGuard`、`applyDelegationRule`、`Plans` 类，以及 `src/repair.ts` 的 `askForRepair`/`repairSystem`/`describeFailure`、`src/plan.ts` 的 `budgetMs` 解析与上限，都还没有任何测试触及。"
+}
