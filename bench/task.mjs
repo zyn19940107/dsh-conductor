@@ -112,6 +112,32 @@ export const BUDGET_PROBE = {
 }
 
 /**
+ * A probe for a node that runs out of budget and is continued next round.
+ *
+ * The worker gets ten seconds for a thirty-second command: it reports when the
+ * budget lands, stays alive, and the next plan continues the same node id with a
+ * bigger budget. The child session must be the same one in both rounds — the work
+ * carried over, not restarted.
+ */
+export const PARK_PROBE = {
+  text: [
+    '这是一个机制验证任务：验证「节点到预算后不结束、写报告、下一轮用同 id 接回」。',
+    '',
+    '第 1 步：交一张图，nodes 只有一个 worker，id、budgetMs、task 原样照抄：',
+    '{"id": "slow", "kind": "worker", "budgetMs": 10000,',
+    ` "task": "用 pwsh 跑这条命令并等它结束：python -c \\"import time; time.sleep(30); print('DONE-OK')\\"。跑完把输出写进结论。"}`,
+    '',
+    '第 2 步：这张图返回后，报告里会出现 [parked] 段。再交一张图，**用同一个 id "slow"**、新的预算 120000、任务写成',
+    '"继续上一个节点：把命令的输出复述出来，并说明你是接着上一次的工作还是重头开始"。',
+    '',
+    '第 3 步：把最终结论告诉我，里面必须有 DONE-OK。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '接回后的节点完成了工作', any: ['DONE-OK'] },
+  ]),
+}
+
+/**
  * A probe for a call that outlives its node's budget.
  *
  * The node's budget is 20 seconds; the call it must run blocks for 180. The
@@ -218,7 +244,7 @@ export const GOAL_PROBE = {
 }
 
 export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE, leadprobe: LEAD_PROBE,
-  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, toolprobe: TOOL_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
+  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, toolprobe: TOOL_PROBE, parkprobe: PARK_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.

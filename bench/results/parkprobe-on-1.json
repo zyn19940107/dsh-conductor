@@ -1,0 +1,43 @@
+{
+  "task": "parkprobe",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 86544,
+  "timedOut": false,
+  "sessionId": "session-a1ab3024-6cf5-4e89-9321-11e16518f914",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "create_goal",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 14730,
+    "outputTokens": 4463,
+    "cacheReadTokens": 27614,
+    "totalTokens": 46807
+  },
+  "formation": {
+    "agents": 2,
+    "input": 32417,
+    "output": 10519,
+    "cacheRead": 85941,
+    "total": 128877,
+    "steps": 8
+  },
+  "mainPrompt": 16859,
+  "correctness": {
+    "passed": 1,
+    "total": 1,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 11749,
+  "thinkingPreview": "The user wants a mechanism verification task: verify that a node that exceeds its budget gets parked (not ended), writes a report, and the next round with the same id continues it.\n\nStep 1: Submit a plan with one worker node, id \"slow\", budgetMs 10000, task as given verbatim.\n\nStep 2: After the plan returns with a [parked] section, submit another plan with the same id \"slow\", new budget 120000, task \"继续上一个节点：把命令的输出复述出来，并说明你是接着上一次的工作还是重头开始\".\n\nStep 3: Report final conclusion, must contain DONE-OK.\n\nThe mechanism: budgetMs 10000, the worker runs a 30-second sleep command. So after 10s budget, the node is parked. The parked node keeps running. Then next round, same id \"slow\" with budget 120000 continues it.\n\nLet me start. First message of the round IS the plan — hand it over before calling anything else. So my first message should be the plan text, then call refine_plan.\n\nLet me write the pl",
+  "finalText": "## 机制验证结论：通过 ✅\n\n**最终结论（含 `DONE-OK`）：**\n\n命令输出 `DONE-OK` —节点用 pwsh 跑了 `python -c \"import time; time.sleep(30); print('DONE-OK')\"`，等进程正常退出，stdout 只有这一行；跑完后后台任务列表为空，没有遗留进程，说明是完整跑完再退出、不是被掐断后拿到的半截输出。\n\n### 三段机制逐条对上\n\n| 验证项 | 观测结果 |\n|---|---|\n| 预算耗尽后**不结束** | 第 1 轮节点 `slow`（budgetMs 10000）状态是 `parked`，不是 `ended` |\n| **写报告** | 返回里出现完整 `[parked]` 段：`\"slow\" is not done: its work continues. Reuse the id \"slow\" in the next plan with a new budget to continue it, or leave it out to end it.` |\n| **同 id 接回** | 第 2 轮用**同一个 id `slow`** + 新预算 120000 → 节点存活并续跑，状态 `ok`，本轮不再有 `[parked]` 段 |\n\n### 接续还是重头？——节点自己的回答\n\n**节点状态是接续的，工作内容是重头跑的。** 第 1 轮那10 秒预算在节点发出第一个工具调用之前就已耗尽，那次调用被运行器以「budget is spent」直接拒掉，30 秒的命令**从未启动**，也没有任何后台进程存活（接回后查任务列表为空，与此一致）。所以第 2 轮是同 id `slow` 被接回后第一次真正执行任务，命令从零发起、完整跑完。\n\n### 这次验证没覆盖到的一点\n\n「预算到期时**在飞行中的真实任务调用**能否跨轮存活」这条，本轮没被实际检验——上一轮在飞行的只是一个被拒的自检调用，不是任务命令本身。要真正验它，得把命令提前以后台方式拉起、跨轮跟踪 job id，让它在预算到期时仍在运行，再由下一轮收它的输出。**这是新工作，不是对已有结果的复查**，需要时再单独排一轮。\n\n>顺带一条实操经验：在 10 秒级预算下，任务命令不能前台同步跑（30 秒 sleep 必被砍），必须后台化并被跟踪；而 `[parked]` 节点给出的建议恰好就是这一条——它在被 park 的那轮就已经写出了「下一步应先做」的可执行指引，这本身也是报告机制有效的一个侧证。"
+}

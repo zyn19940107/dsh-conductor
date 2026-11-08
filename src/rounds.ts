@@ -26,7 +26,9 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'made of, what observable criteria decide it succeeded. A node may carry a budgetMs: your estimate of '
   + "how long it should take. When the budget or the runner's own ceiling is reached the node starts nothing "
   + 'new, lets the call in flight finish, and reports where it got to — what exists, what is confirmed, what '
-  + 'is missing — so the parent always learns something. If you already have what you need, hand over the '
+  + 'is missing — so the parent always learns something. That node is then parked, not ended: its work keeps '
+  + 'running, and putting the same node id in the next plan continues it with the new budget you give it; '
+  + 'leaving the id out ends it. If you already have what you need, hand over the '
   + 'empty plan and go straight to the conclusion. (2) Hand it over with refine_plan: one layer, every node '
   + 'starts at the same time, every result comes back together. (3) It runs — the nodes together — and every '
   + 'result comes back. (4) Only then judge the request: if those results answer it, write the conclusion, '

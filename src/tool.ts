@@ -31,6 +31,7 @@ import {
   type RepairCall,
 } from './batch.js'
 import { mayRunTogether, type ConcurrencyOverride } from './concurrency.js'
+import type { Parked } from './parked.js'
 import { spawnEmptyChild, spawnForkedChild, type Reporters, type SpawnResult } from './fork.js'
 import {
   AGENT_NODE_KINDS,
@@ -60,6 +61,10 @@ export interface PlanForkOptions {
   onWorker?: (sessionId: string) => void
   /** Where a child that is writing its report is recorded. */
   reporters?: Reporters
+  /** The conversation whose round is running; parked nodes belong to it. */
+  rootSessionId: string
+  /** The conversation's parked nodes, continued by reusing their id. */
+  parked?: Parked
 }
 
 /** What one node of a plan produced. */
@@ -232,6 +237,29 @@ async function runNode(
     }
   }
 
+  // A node the parent parked last round is continued here, under the same id and
+  // with the budget this round gives it. Nothing new is started for it: it keeps
+  // its conversation, its files and its background work.
+  if (fork !== undefined && fork.parked !== undefined && fork.rootSessionId !== '') {
+    const resumed = await fork.parked.resume(
+      fork.rootSessionId,
+      node.id,
+      buildAgentPrompt(node, criteria),
+      node.budgetMs,
+      agentNodeTimeoutMs,
+      signal,
+    )
+    if (resumed !== undefined) {
+      return {
+        id: node.id,
+        kind: node.kind,
+        ok: resumed.error === undefined,
+        output: scrubConclusion(resumed.output),
+        error: resumed.error ?? '',
+      }
+    }
+  }
+
   // A worker and a forker inherit this conversation, this round included. The
   // harness's own fork tool cannot do that from inside a running round, so the
   // child is started here, on a seed built from the log as it stands.
@@ -256,6 +284,9 @@ async function runNode(
         signal,
         ...(node.kind === 'worker' && fork.onWorker !== undefined ? { onCreated: fork.onWorker } : {}),
         ...(fork.reporters !== undefined ? { reporters: fork.reporters } : {}),
+        nodeId: node.id,
+        ...(fork.rootSessionId === '' ? {} : { rootSessionId: fork.rootSessionId }),
+        ...(fork.parked === undefined ? {} : { parked: fork.parked }),
       },
     )
     return {
@@ -288,6 +319,8 @@ async function runNode(
       ...(node.budgetMs > 0 ? { budgetMs: node.budgetMs } : {}),
       signal,
       ...(fork.reporters !== undefined ? { reporters: fork.reporters } : {}),
+      nodeId: node.id,
+      ...(fork.rootSessionId === '' ? {} : { rootSessionId: fork.rootSessionId }),
     },
   )
   return {
@@ -425,6 +458,8 @@ export function applyPlanTool(
     onWorker?: (sessionId: string) => void
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
+    /** The conversation's parked nodes: ended when a round leaves their id out. */
+    parked?: Parked
     /** Told when a plan starts running, so a rule can know the turn handed its plan over. */
     onPlanStarted?: (sessionId: string, callId: ToolCallId) => void
     /** Build the repair for one conversation, from its own call configuration. */
@@ -558,6 +593,12 @@ export function applyPlanTool(
       }
       const agent: Agent | undefined = exec.agent
       if (agent !== undefined) options.onPlanStarted?.(agent.session.id, exec.callId)
+      // The plan is the parent's decision about the parked nodes: an id it keeps
+      // is continued this round, an id it leaves out is ended here.
+      if (options.parked !== undefined && agent !== undefined) {
+        await options.parked.retain(agent.session.id, new Set(parsed.nodes.map(node => node.id)))
+      }
+
       // A failed call is repaired on the conversation's own route: the latest
       // request header carries the call configuration the conversation is on.
       const ownConfig = agent?.session.requestHeader()?.config
@@ -572,6 +613,8 @@ export function applyPlanTool(
             host: options.host(),
             ...(options.onWorker === undefined ? {} : { onWorker: options.onWorker }),
             ...(options.reporters === undefined ? {} : { reporters: options.reporters }),
+            rootSessionId: agent?.session.id ?? '',
+            ...(options.parked === undefined ? {} : { parked: options.parked }),
           }
       // The model has no clock, so it cannot tell how much of a stated budget is
       // already gone. The node budgets it wrote are one thing it can be checked

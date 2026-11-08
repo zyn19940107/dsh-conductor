@@ -17,6 +17,7 @@
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Parked, ParkedNode } from './parked.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 /** One recorded session event, as much of it as this module reads. */
@@ -324,9 +325,12 @@ export class Reporters {
 export function reportPrompt(budgetMs: number): string {
   const spent = Math.round(budgetMs / 1000)
   return `Your node's time budget of ${spent} seconds is spent. The call that was in flight was allowed to `
-    + 'finish; nothing new is started, and the rest of the work belongs to whoever reads your report.'
+    + 'finish. This node is not ending: its files and its background work keep running, and the next round '
+    + 'may continue it with a new budget.'
     + String.fromCharCode(10) + String.fromCharCode(10)
-    + 'Write the report now, as your answer. No tool calls — the report is the whole answer.'
+    + 'Write the report now, as your answer. No tool calls — the report is the whole answer. The rule about '
+    + 'collecting background jobs before a final answer does not apply here: this is not a final answer, and '
+    + 'the jobs stay running. Name them instead.'
     + String.fromCharCode(10)
     + '- What exists on disk now, by file, and where.'
     + String.fromCharCode(10)
@@ -383,6 +387,14 @@ function snapshotText(child: Agent): string {
   return lastAssistantText(events)
 }
 
+/** The handle the agent factory returns, as much of it as this module reads. */
+interface ChildHandle {
+  /** The child. */
+  agent: Agent
+  /** Release the child and everything it holds. */
+  dispose: () => Promise<void>
+}
+
 /**
  * Start a child seeded with this conversation and wait for its answer.
  *
@@ -413,6 +425,12 @@ export async function spawnForkedChild(
     onCreated?: (sessionId: string) => void
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
+    /** The plan node id, so a parked child can be continued under the same id. */
+    nodeId?: string
+    /** The conversation whose round is running. */
+    rootSessionId?: string
+    /** The conversation's parked nodes. */
+    parked?: Parked
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, true)
@@ -446,6 +464,12 @@ export async function spawnEmptyChild(
     signal: AbortSignal
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
+    /** The plan node id, so a parked child can be continued under the same id. */
+    nodeId?: string
+    /** The conversation whose round is running. */
+    rootSessionId?: string
+    /** The conversation's parked nodes. */
+    parked?: Parked
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, false)
@@ -461,6 +485,95 @@ export async function spawnEmptyChild(
  * @param seeded - whether the child inherits this conversation.
  * @returns what the child produced.
  */
+/** What one driving pass of a child produced. */
+interface DriveResult {
+  /** What it said. */
+  output: string
+  /** The budget that actually applied, in milliseconds. */
+  budget: number
+  /** Whether the budget ran out and it is now parked rather than done. */
+  parked: boolean
+  /** Why it is not a clean finish, when it is not. */
+  error?: string
+}
+
+/**
+ * Drive one child once: hand it the work, give it a budget, and if the budget runs
+ * out ask for the report without ending it.
+ *
+ * The report is asked for at the next step boundary, after the call in flight has
+ * returned — its time is already paid and it may be one line from the number the
+ * report exists to carry. No time limit is put on the asking: a slow API must not
+ * be able to turn a finished job into a silent one. Tools are refused from the
+ * moment the report is asked for, so the only thing left is the answer.
+ *
+ * @param child - the child to drive.
+ * @param prompt - what it is asked to do.
+ * @param budgetMs - the node's budget, or nothing for the node ceiling.
+ * @param timeoutMs - the ceiling behind the budget.
+ * @param signal - the round's cancellation.
+ * @param reporters - the conversations writing a report.
+ * @param sessionId - the child's session id.
+ * @returns what it produced, and whether it is now parked.
+ */
+async function driveChild(
+  child: Agent,
+  prompt: string,
+  budgetMs: number | undefined,
+  timeoutMs: number,
+  signal: AbortSignal,
+  reporters: Reporters | undefined,
+  sessionId: string,
+): Promise<DriveResult> {
+  const budget = budgetMs !== undefined && budgetMs > 0
+    ? Math.min(budgetMs, timeoutMs)
+    : timeoutMs
+  child.followup(createUserMessage({
+    content: [{ type: 'text', text: prompt }],
+    source: { kind: 'user' },
+  }))
+  const first = await waitForIdle(child, budget, signal)
+  if (first === 'cancelled') {
+    return { output: snapshotText(child), budget, parked: false, error: 'the plan was cancelled' }
+  }
+  if (first !== 'timeout') {
+    const output = snapshotText(child)
+    return {
+      output,
+      budget,
+      parked: false,
+      error: output.trim() === '' ? 'the child produced no answer' : undefined,
+    }
+  }
+  reporters?.mark(sessionId)
+  const report = createUserMessage({
+    content: [{ type: 'text', text: reportPrompt(budget) }],
+    source: { kind: 'user' },
+  })
+  const reportIsPending = (): boolean =>
+    child.inbox.nextStep.some(message => message.id === report.id)
+  if (child.status === 'idle') {
+    // Nothing is in flight, so there is no boundary to wait for.
+    child.followup(report)
+  } else {
+    child.inbox.append('next-step', report)
+  }
+  let second = await waitForIdle(child, undefined, signal)
+  // The turn can end on the step that was already in flight, before the boundary
+  // that would have delivered the request. The message is still pending then: hand
+  // it over as the next turn and wait again.
+  if (second === 'idle' && reportIsPending()) {
+    child.followup(report)
+    second = await waitForIdle(child, undefined, signal)
+  }
+  const output = snapshotText(child)
+  if (second === 'cancelled') return { output, budget, parked: false, error: 'the plan was cancelled' }
+  if (output.trim() === '') {
+    return { output, budget, parked: false, error: `the node used its ${budget}ms budget and produced no report` }
+  }
+  return { output, budget, parked: true }
+}
+
 async function spawnChild(
   host: Record<string, unknown>,
   parent: Agent,
@@ -482,6 +595,12 @@ async function spawnChild(
     onCreated?: (sessionId: string) => void
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
+    /** The plan node id, so a parked child can be continued under the same id. */
+    nodeId?: string
+    /** The conversation whose round is running; parked children belong to it. */
+    rootSessionId?: string
+    /** The conversation's parked nodes. */
+    parked?: Parked
   },
   seeded: boolean,
 ): Promise<SpawnResult> {
@@ -528,81 +647,66 @@ async function spawnChild(
   }
 
   const child = handle.agent
-  const budget = options.budgetMs !== undefined && options.budgetMs > 0
-    ? Math.min(options.budgetMs, options.timeoutMs)
-    : options.timeoutMs
+  const nodeId = options.nodeId
+  const rootSessionId = options.rootSessionId
+  const drive = async (
+    prompt: string,
+    budgetMs: number | undefined,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<DriveResult> => {
+    options.reporters?.unmark(sessionId)
+    try {
+      return await driveChild(child, prompt, budgetMs, timeoutMs, signal, options.reporters, sessionId)
+    } finally {
+      options.reporters?.unmark(sessionId)
+    }
+  }
+  let parkedHere = false
   try {
-    child.followup(createUserMessage({
-      content: [{ type: 'text', text: prompt }],
-      source: { kind: 'user' },
-    }))
-    const first = await waitForIdle(child, budget, options.signal)
-    if (first !== 'timeout') {
-      const output = snapshotText(child)
+    const first = await drive(prompt, options.budgetMs, options.timeoutMs, options.signal)
+    if (first.parked && options.parked !== undefined && nodeId !== undefined && rootSessionId !== undefined) {
+      // Not done, and not being thrown away either: the child stays alive, idle,
+      // with everything it has. The next plan continues it by using its id again.
+      parkedHere = true
+      const parkedNode: ParkedNode = {
+        nodeId,
+        sessionId,
+        report: first.output,
+        continue: (next, budgetMs, timeoutMs, signal) => drive(next, budgetMs, timeoutMs, signal),
+        dispose: async () => {
+          try {
+            await handle.dispose()
+          } catch {
+            // The child is already gone.
+          }
+        },
+      }
+      options.parked.park(rootSessionId, parkedNode)
+      const newline = String.fromCharCode(10)
       return {
-        output,
-        error: first === 'cancelled'
-          ? 'the plan was cancelled'
-          : (output.trim() === '' ? 'the child produced no answer' : undefined),
+        output: `${first.output}${newline}${newline}[parked] "${nodeId}" is not done: its work continues. `
+          + `Reuse the id "${nodeId}" in the next plan with a new budget to continue it, or leave it out to end it.`,
+        error: `the node used its budget and is parked as "${nodeId}"`,
       }
     }
-    // The budget is spent, so no new work starts — but the call that is already
-    // running is not killed. Its time has already been paid, and it may be one
-    // line away from the number the report exists to carry: a benchmark that was
-    // 227 seconds into a timed run when the budget landed reports nothing if it
-    // dies, and the next round repeats it. So the report is asked for at the next
-    // step boundary, after that call has returned, and no time limit is put on
-    // the asking: a slow API must not be able to turn a finished job into a
-    // silent one. Tools are refused from the moment the report is asked for, so
-    // the call in flight finishes and the next thing the child does is answer.
-    options.reporters?.mark(sessionId)
-    const report = createUserMessage({
-      content: [{ type: 'text', text: reportPrompt(budget) }],
-      source: { kind: 'user' },
-    })
-    const reportIsPending = (): boolean =>
-      child.inbox.nextStep.some(message => message.id === report.id)
-    if (child.status === 'idle') {
-      // Nothing is in flight, so there is no boundary to wait for.
-      child.followup(report)
-    } else {
-      child.inbox.append('next-step', report)
+    if (first.parked) {
+      return {
+        output: first.output,
+        error: `the child used its ${first.budget}ms budget; this is what it reported`,
+      }
     }
-    let second = await waitForIdle(child, undefined, options.signal)
-    // The turn can end on the step that was already in flight, before the
-    // boundary that would have delivered the request. The message is still
-    // pending in that case: hand it over as the next turn and wait again.
-    if (second === 'idle' && reportIsPending()) {
-      child.followup(report)
-      second = await waitForIdle(child, undefined, options.signal)
-    }
-    const output = snapshotText(child)
-    if (second === 'cancelled') return { output, error: 'the plan was cancelled' }
-    if (output.trim() === '') {
-      return { output, error: `the child used its ${budget}ms budget and produced no report` }
-    }
-    // The node did not finish its task — the budget stopped it — and the parent
-    // has to know that, so it is an error even though there is now a report.
-    return {
-      output,
-      error: `the child used its ${budget}ms budget; this is what it reported`,
-    }
+    return { output: first.output, error: first.error }
   } catch (error: unknown) {
     return { output: snapshotText(child), error: error instanceof Error ? error.message : String(error) }
   } finally {
     options.reporters?.unmark(sessionId)
-    try {
-      await handle.dispose()
-    } catch {
-      // The child is already gone; there is nothing left to release.
+    if (!parkedHere) {
+      try {
+        await handle.dispose()
+      } catch {
+        // The child is already gone; there is nothing left to release.
+      }
     }
   }
-}
-
-/** The handle the agent factory returns, as much of it as this module reads. */
-interface ChildHandle {
-  /** The child. */
-  agent: Agent
-  /** Release the child. */
-  dispose: () => Promise<void> | void
 }

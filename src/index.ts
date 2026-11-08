@@ -31,6 +31,7 @@ import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
 import { applyDelegationRule, applyJudgementGuard, applyReportGuard, applyRounds, applyTurnDoctrine, applyWorkerRule, NEXT_ROUND, Plans, Rounds, Workers } from './rounds.js'
 import { Reporters } from './fork.js'
+import { Parked } from './parked.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -237,6 +238,9 @@ export function apply(ctx: Context, config: Config): void {
   // The conversations that are writing their report: their tool calls are refused
   // so the report is the only thing left to produce.
   const reporters = new Reporters()
+  // Nodes that ran out of budget but are not done: they stay alive, reusing their
+  // id continues them next round, and the turn's end releases whatever is left.
+  const parked = new Parked()
 
   ctx.systemPrompt.section({
     name: 'refine-loop:policy',
@@ -269,13 +273,19 @@ export function apply(ctx: Context, config: Config): void {
     host: () => ctx as unknown as Record<string, unknown>,
     onWorker: (sessionId: string) => workers.mark(sessionId),
     reporters,
+    parked,
     // One round is a plan and its execution. When the plan has run and the loop
     // still has rounds in budget, queue the next one: the plan tool ends this
     // turn, and the pending message is what makes the harness open the next.
     onPlanFinished: (agent: Agent) => {
       const sessionId = agent.session.id
       plans.done(sessionId)
-      if (rounds.bump(sessionId) > config.maxRounds.get()) return false
+      if (rounds.bump(sessionId) > config.maxRounds.get()) {
+        // No next round is coming, so nothing will continue a parked node: release
+        // whatever is left before the turn closes.
+        void parked.disposeAll(sessionId)
+        return false
+      }
       agent.followup(createUserMessage({
         content: [{ type: 'text', text: NEXT_ROUND }],
         source: { kind: 'system-prompt' },
