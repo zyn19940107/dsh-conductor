@@ -418,8 +418,6 @@ export async function spawnForkedChild(
     reporters?: Reporters
     /** The background jobs the child started, for the handles it leaves behind. */
     background?: Background
-    /** The conversation whose turn started this child; its end reaps what the child left running. */
-    rootSessionId?: string
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, true)
@@ -455,8 +453,6 @@ export async function spawnEmptyChild(
     reporters?: Reporters
     /** The background jobs the child started, for the handles it leaves behind. */
     background?: Background
-    /** The conversation whose turn started this child; its end reaps what the child left running. */
-    rootSessionId?: string
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, false)
@@ -495,8 +491,6 @@ async function spawnChild(
     reporters?: Reporters
     /** The background jobs the child started, for the handles it leaves behind. */
     background?: Background
-    /** The conversation whose turn started this child. */
-    rootSessionId?: string
   },
   seeded: boolean,
 ): Promise<SpawnResult> {
@@ -519,9 +513,6 @@ async function spawnChild(
   // rule that refuses the plan tool. Registering afterwards let each worker's
   // first plan through — 285 of 285 in the benchmark did exactly that.
   options.onCreated?.(sessionId)
-  if (options.rootSessionId !== undefined) {
-    options.background?.noteChild(sessionId, options.rootSessionId)
-  }
 
   let handle: ChildHandle
   try {

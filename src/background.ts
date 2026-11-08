@@ -2,22 +2,18 @@
  * Background commands that outlive the node that started them.
  *
  * A node's budget stops the node, not the work. The harness's own background
- * jobs cannot carry that work across a node boundary: they are owned by the
+ * jobs cannot carry that job across a node boundary: they are owned by the
  * session that started them, a child's jobs are cancelled when the child is
  * disposed, and the parent cannot read them at all because every read is fenced
  * by the owner's session id. So this module starts its commands as **unowned**
  * jobs instead. The registry's unowned bucket is visible to every session and
- * survives every session's teardown, which is the one property the parent needs:
- * a handle it can collect with the ordinary `job_output` / `job_kill` tools once
+ * lives until the harness exits, which is the one property the parent needs: a
+ * handle it can collect with the ordinary `job_output` / `job_kill` tools once
  * the round that started the work has moved on.
  *
- * The life of such a job is the life of the **turn** that started it. No session
- * owns it, so nothing else would ever stop it — not a node budget, not a plan
- * ceiling, not a child's disposal — and a job that outlived its turn would be a
- * process nobody is left to collect. So the turn's own stop boundary is the
- * settlement point: the plugin reaps whatever is still running there. Inside the
- * turn there is no limit at all; a round can hand the handle to the next round,
- * and the work runs as long as it genuinely needs.
+ * The node's report carries the handle. A child that started a job here leaves
+ * it running when its budget lands, says what it started, and the next round
+ * decides who collects or kills it.
  */
 
 import { spawn } from 'node:child_process'
@@ -26,6 +22,16 @@ import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 
 /** The tool the model calls to start one of these. */
 export const BG_TOOL = 'bg'
+
+/**
+ * How long an unowned job may run before the plugin ends it on its own.
+ *
+ * Nothing else reaps an unowned job — no session owns it, so no session teardown
+ * stops it — and a command left running for hours holds a process and a ring for
+ * the rest of the harness's life. Half an hour is far longer than any benchmark
+ * or test suite these plans run.
+ */
+const MAX_JOB_MS = 30 * 60_000
 
 /** The producer face the registry hands a starter. */
 interface JobHandleLike {
@@ -53,7 +59,6 @@ interface JobsLike {
     run: (job: JobHandleLike) => JobHooksLike
   }): string
   get(id: string): { readonly status: string, readonly label: string }
-  kill(id: string, caller?: string, reason?: string): 'requested' | 'already-finished'
 }
 
 /**
@@ -61,9 +66,7 @@ interface JobsLike {
  *
  * The command runs the way the shell tool would run it: pwsh on Windows, sh
  * elsewhere, in the node's own working directory. Both streams are appended to
- * the ring whole, so a reader sees exactly what the command printed. Nothing here
- * puts a time limit on it: the job ends when the command does, when someone kills
- * it, or when the turn that started it ends and the plugin reaps it.
+ * the ring whole, so a reader sees exactly what the command printed.
  *
  * @param job - the registry's producer face for the new job.
  * @param command - the command line to run.
@@ -86,6 +89,7 @@ function runCommand(job: JobHandleLike, command: string, cwd: string | undefined
   const settle = (outcome: JobOutcomeLike): void => {
     if (settled) return
     settled = true
+    clearTimeout(timer)
     resolveDone(outcome)
   }
   child.stdout?.on('data', (chunk: Buffer) => { job.append(String(chunk), { channel: 'stdout' }) })
@@ -99,6 +103,10 @@ function runCommand(job: JobHandleLike, command: string, cwd: string | undefined
       ? { status: 'completed', detail: 'exit code: 0' }
       : { status: 'failed', detail: `exit code: ${String(code)}` })
   })
+  const timer = setTimeout(() => {
+    killTree(child)
+    settle({ status: 'killed', detail: `stopped after ${Math.round(MAX_JOB_MS / 60_000)} minutes` })
+  }, MAX_JOB_MS)
   return {
     cancel: () => { killTree(child) },
     done,
@@ -129,26 +137,16 @@ function killTree(child: { pid?: number, kill: (signal?: NodeJS.Signals) => bool
   }
 }
 
-/** One job this plugin started, and the turn it belongs to. */
-interface TrackedJob {
-  /** The conversation whose turn owns it; that turn's end reaps it. */
-  readonly root: string
-  readonly label: string
-}
-
 /**
- * The commands one node started, and the handles it leaves to the parent.
+ * The commands one node started, and where their handles go.
  *
  * A node is not required to remember what it started: the plugin records it when
- * the job is created, reads the live ones back when the node ends, and settles
- * whatever is still running when the turn that owns it closes.
+ * the job is created, and reads the live ones back when the node ends. That is
+ * what turns "I left a benchmark running" into a line the parent can act on.
  */
 export class Background {
   private readonly jobs: JobsLike | undefined
   private readonly bySession = new Map<string, Set<string>>()
-  private readonly tracked = new Map<string, TrackedJob>()
-  private readonly rootOf = new Map<string, string>()
-  private readonly roots = new Set<string>()
 
   /**
    * @param jobs - the composition's job registry, when it has one.
@@ -163,43 +161,9 @@ export class Background {
   }
 
   /**
-   * Remember that this conversation's turn is one the plugin works inside.
+   * Start one command as an unowned job and remember who asked for it.
    *
-   * Only such a conversation reaps on its turn end: a child's turn ends as a
-   * matter of course and must not take the parent's jobs with it.
-   *
-   * @param sessionId - the conversation that ran a plan.
-   */
-  noteRoot(sessionId: string): void {
-    this.roots.add(sessionId)
-  }
-
-  /**
-   * @param sessionId - a conversation to check.
-   * @returns whether the plugin ran a plan inside it.
-   */
-  isRoot(sessionId: string): boolean {
-    return this.roots.has(sessionId)
-  }
-
-  /**
-   * Remember which turn a spawned conversation belongs to.
-   *
-   * A child's own session is not the conversation whose turn is running — the
-   * plugin starts it — so the plugin has to say which turn a job started from
-   * inside that child belongs to, or the turn's end would never find it.
-   *
-   * @param childSessionId - the spawned conversation.
-   * @param rootSessionId - the conversation whose turn started it.
-   */
-  noteChild(childSessionId: string, rootSessionId: string): void {
-    this.rootOf.set(childSessionId, rootSessionId)
-  }
-
-  /**
-   * Start one command as an unowned job and remember which turn it belongs to.
-   *
-   * @param sessionId - the conversation that asked; a child counts as its turn's.
+   * @param sessionId - the conversation that asked, for the handle list later.
    * @param command - the command line to run.
    * @param cwd - the directory to run it in.
    * @returns the job's id and label.
@@ -216,7 +180,6 @@ export class Background {
     const started = this.bySession.get(sessionId) ?? new Set<string>()
     started.add(jobId)
     this.bySession.set(sessionId, started)
-    this.tracked.set(jobId, { root: this.rootOf.get(sessionId) ?? sessionId, label })
     return { jobId, label }
   }
 
@@ -240,56 +203,12 @@ export class Background {
         view = this.jobs.get(id)
       } catch {
         started.delete(id)
-        this.tracked.delete(id)
         continue
       }
       if (view.status !== 'running' && view.status !== 'stopping') continue
       lines.push(`- ${id} (${view.status}): ${view.label}`)
     }
     return lines
-  }
-
-  /**
-   * Settle every job the turn that just ended left running.
-   *
-   * This is the only reaper an unowned job has: no session owns it, so no session
-   * teardown stops it, and the turn is the outermost boundary the work was
-   * started for. Inside the turn a job may take as long as it genuinely needs and
-   * may be handed from round to round — which is exactly why nothing shorter than
-   * the turn bounds it. A job still running when its turn closes is a process
-   * nobody is left to collect.
-   *
-   * @param rootSessionId - the conversation whose turn is ending.
-   * @returns the ids that were still live and were stopped.
-   */
-  reap(rootSessionId: string): string[] {
-    const jobs = this.jobs
-    if (jobs === undefined) return []
-    const stopped: string[] = []
-    for (const [id, job] of this.tracked) {
-      if (job.root !== rootSessionId) continue
-      let status: string
-      try {
-        status = jobs.get(id).status
-      } catch {
-        this.tracked.delete(id)
-        continue
-      }
-      if (status === 'running' || status === 'stopping') {
-        try {
-          jobs.kill(id, undefined, 'the turn that started it ended')
-          stopped.push(id)
-        } catch {
-          // It settled between the read and the kill.
-        }
-      }
-      this.tracked.delete(id)
-    }
-    for (const [sessionId, ids] of this.bySession) {
-      for (const id of ids) if (!this.tracked.has(id)) ids.delete(id)
-      if (ids.size === 0) this.bySession.delete(sessionId)
-    }
-    return stopped
   }
 }
 
@@ -299,7 +218,7 @@ export const BG_TOOL_DESCRIPTION = 'Start a command that will run for a while as
   + 'suite, a benchmark, a build: the job keeps running after this node ends, so its budget cannot cut the run '
   + 'short, and the next round can collect it with job_output or stop it with job_kill. The job is unowned: any '
   + 'conversation can read it, including the parent. Do not poll it here — start it, and put its id in your '
-  + 'conclusion. It lives as long as this turn does; anything still running when the turn ends is stopped.'
+  + 'conclusion. It is stopped after 30 minutes.'
 
 /**
  * Register the background tool.
@@ -346,8 +265,7 @@ export function applyBackgroundTool(ctx: Context, background: Background): void 
         jobId: started.jobId,
         label: started.label,
         note: 'Running as an unowned background job: it survives this node, and any conversation can read it with '
-          + 'job_output or stop it with job_kill. Name the id in your conclusion so the next round can collect it. '
-          + 'It is stopped when this turn ends, so collect it before then.',
+          + 'job_output or stop it with job_kill. Name the id in your conclusion so the next round can collect it.',
       }
     },
   }))

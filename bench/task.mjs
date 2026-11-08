@@ -136,11 +136,6 @@ export const BG_PROBE = {
     '4. 再交一张图，nodes 原样照抄下面这个（一个只有 15 秒预算的 worker，它起的命令要跑 45 秒）：',
     `{"id": "cut", "kind": "worker", "budgetMs": 15000, "task": "用 bg 工具起这条命令：python -c \\"import time; time.sleep(45); print('BG-CUT-77')\\"。起完立刻把 job 的 id 写进你的结论，不要等它跑完，也不要用别的工具去等它。"}`,
     '5. 这张图回来后（那个 worker 会被它的预算停下），用 job_output 读它报告的那个 job——可能要多读几次，直到输出出现——把输出复述给我，并说明这个后台任务有没有跟着 worker 一起被杀。',
-    '',
-    '最后验证清算：',
-    '6. 再交一张图，nodes 只有一个 tools 节点，调用 bg 原样照抄这条命令（起完就不要管它——不要读它、不要等它、不要 kill 它）：',
-    `{"id": "left", "kind": "tools", "calls": [{"name": "bg", "arguments": {"command": "python -c \\"import time; time.sleep(90); open('REAP-MARKER.txt','w').write('alive')\\""}}]}`,
-    '7. 图返回后直接写总结，说明这个没人回收的后台任务会在什么时候被清算。',
   ].join(String.fromCharCode(10)),
   judge: judgeBy([
     { what: '读到了第一个后台任务的输出', any: ['BG-DONE-42'] },

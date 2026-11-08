@@ -63,8 +63,6 @@ export interface PlanForkOptions {
   reporters?: Reporters
   /** The background jobs a node started, so its handles ride along with the result. */
   background?: Background
-  /** The conversation whose turn is running the plan. */
-  rootSessionId: string
 }
 
 /** What one node of a plan produced. */
@@ -263,7 +261,6 @@ async function runNode(
         ...(fork.reporters !== undefined ? { reporters: fork.reporters } : {}),
       ...(fork.background !== undefined ? { background: fork.background } : {}),
         ...(fork.background !== undefined ? { background: fork.background } : {}),
-        ...(fork.rootSessionId === '' ? {} : { rootSessionId: fork.rootSessionId }),
       },
     )
     return {
@@ -569,10 +566,7 @@ export function applyPlanTool(
           + 'Split it, or narrow it to the nodes that belong together.')
       }
       const agent: Agent | undefined = exec.agent
-      if (agent !== undefined) {
-        options.onPlanStarted?.(agent.session.id, exec.callId)
-        options.background?.noteRoot(agent.session.id)
-      }
+      if (agent !== undefined) options.onPlanStarted?.(agent.session.id, exec.callId)
       // A failed call is repaired on the conversation's own route: the latest
       // request header carries the call configuration the conversation is on.
       const ownConfig = agent?.session.requestHeader()?.config
@@ -588,7 +582,6 @@ export function applyPlanTool(
             ...(options.onWorker === undefined ? {} : { onWorker: options.onWorker }),
             ...(options.reporters === undefined ? {} : { reporters: options.reporters }),
             ...(options.background === undefined ? {} : { background: options.background }),
-            rootSessionId: agent?.session.id ?? '',
           }
       // The model has no clock, so it cannot tell how much of a stated budget is
       // already gone. The node budgets it wrote are one thing it can be checked

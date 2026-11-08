@@ -40,22 +40,15 @@ interface StartedSpec {
  * @returns the registry, its specs, and its status map.
  */
 function fakeJobs(): {
-  jobs: {
-    start: (spec: StartedSpec) => string
-    get: (id: string) => { status: string, label: string }
-    kill: (id: string, caller?: string, reason?: string) => 'requested' | 'already-finished'
-  }
+  jobs: { start: (spec: StartedSpec) => string, get: (id: string) => { status: string, label: string } }
   specs: StartedSpec[]
   statuses: Map<string, string>
-  kills: Array<{ id: string, caller?: string, reason?: string }>
 } {
   const specs: StartedSpec[] = []
   const statuses = new Map<string, string>()
-  const kills: Array<{ id: string, caller?: string, reason?: string }> = []
   return {
     specs,
     statuses,
-    kills,
     jobs: {
       start(spec: StartedSpec) {
         specs.push(spec)
@@ -67,11 +60,6 @@ function fakeJobs(): {
         const status = statuses.get(id)
         if (status === undefined) throw new Error(`unknown job ${id}`)
         return { status, label: 'python bench.py' }
-      },
-      kill(id: string, caller?: string, reason?: string) {
-        kills.push({ id, ...(caller === undefined ? {} : { caller }), ...(reason === undefined ? {} : { reason }) })
-        statuses.set(id, 'killed')
-        return 'requested'
       },
     },
   }
@@ -109,31 +97,6 @@ console.log('the handles a node leaves behind are the live ones')
   check('a settled job is not handed over as work', live.length === 1 && !live[0].includes(first))
   statuses.set(second, 'stopping')
   check('a stopping job still counts as live', background.handlesOf('session-node-1').length === 1)
-}
-
-console.log("a turn's end settles what it left running")
-{
-  const { jobs, kills, statuses } = fakeJobs()
-  const background = new Background(jobs)
-  background.noteRoot('session-root-1')
-  background.noteRoot('session-root-2')
-  // A job a child started belongs to the turn that spawned the child.
-  background.noteChild('session-child-1', 'session-root-1')
-  const own = background.start('session-root-1', 'python bench.py', '/tmp').jobId
-  const fromChild = background.start('session-child-1', 'python child.py', '/tmp').jobId
-  const otherTurn = background.start('session-root-2', 'python other.py', '/tmp').jobId
-
-  const stopped = background.reap('session-root-1')
-  check('the turn stops the jobs it started', stopped.includes(own))
-  check('and the ones its children started', stopped.includes(fromChild))
-  check('another turn is untouched', !stopped.includes(otherTurn))
-  check('a stopped job is killed by the registry, not by a caller session',
-    kills.length === 2 && kills.every(kill => kill.caller === undefined))
-  check('the reason says why it was stopped',
-    (kills[0]?.reason ?? '').includes('turn'))
-  check('reaping twice stops nothing the second time', background.reap('session-root-1').length === 0)
-  check('the other turn still has its handle', background.handlesOf('session-root-2').length === 1)
-  statuses.set(otherTurn, 'completed')
 }
 
 console.log('a composition without a job registry refuses instead of pretending')
