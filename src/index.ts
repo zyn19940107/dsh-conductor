@@ -31,7 +31,6 @@ import z from '@deepseek-ai/schemastery'
 import { buildOverrides } from './concurrency.js'
 import { applyDelegationRule, applyJudgementGuard, applyReportGuard, applyRounds, applyTurnDoctrine, applyWorkerRule, NEXT_ROUND, Plans, Rounds, Workers } from './rounds.js'
 import { Reporters } from './fork.js'
-import { applyBackgroundTool, Background } from './background.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
@@ -79,10 +78,6 @@ export const REFINE_GUIDANCE = [
   '- Never spend a node on checking another node. No review node, no independent re-derivation, no hardening '
   + 'pass: a node is trusted to do what its task said, and its result is used as it comes back. When a result '
   + 'is incomplete, the missing work is new work — not a re-check of what already came back.',
-  '- A command that may run for minutes — a test suite, a benchmark, a build — goes through bg, not a '
-  + 'blocking shell call. The job it starts is unowned, so it outlives the node that started it and any '
-  + 'conversation can collect it with job_output or stop it with job_kill; a node that blocks on a long command '
-  + 'loses both its budget and the work when the budget lands. Name the id in the report.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',
@@ -242,14 +237,6 @@ export function apply(ctx: Context, config: Config): void {
   // The conversations that are writing their report: their tool calls are refused
   // so the report is the only thing left to produce.
   const reporters = new Reporters()
-  // Background commands are started as unowned jobs, so they outlive the node
-  // that started them and the parent can collect them with job_output.
-  // The registry is an optional service, so it is read through `ctx.get`:
-  // `ctx.jobs` is reserved for declared injections, and reading it without one
-  // throws and takes the whole plugin down with it.
-  const background = new Background(
-    ctx.get('jobs') as ConstructorParameters<typeof Background>[0],
-  )
 
   ctx.systemPrompt.section({
     name: 'refine-loop:policy',
@@ -282,7 +269,6 @@ export function apply(ctx: Context, config: Config): void {
     host: () => ctx as unknown as Record<string, unknown>,
     onWorker: (sessionId: string) => workers.mark(sessionId),
     reporters,
-    background,
     // One round is a plan and its execution. When the plan has run and the loop
     // still has rounds in budget, queue the next one: the plan tool ends this
     // turn, and the pending message is what makes the harness open the next.
@@ -306,7 +292,6 @@ export function apply(ctx: Context, config: Config): void {
   applyTurnDoctrine(ctx, workers, () => config.maxBatchSize.get())
   applyRounds(ctx, rounds, plans)
   applyJudgementGuard(ctx, plans)
-  applyBackgroundTool(ctx, background)
   applyWorkerRule(ctx, workers)
   applyReportGuard(ctx, reporters)
   applyDelegationRule(ctx)

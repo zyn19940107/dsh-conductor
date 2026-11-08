@@ -17,7 +17,6 @@
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Background } from './background.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 /** One recorded session event, as much of it as this module reads. */
@@ -335,8 +334,6 @@ export function reportPrompt(budgetMs: number): string {
     + String.fromCharCode(10)
     + '- What is still missing, and what the next person should do first.'
     + String.fromCharCode(10)
-    + '- Background jobs you started: name their ids. They keep running, and the next round collects them.'
-    + String.fromCharCode(10)
     + String.fromCharCode(10)
     + 'Do not describe what you intend to do; only what is. If you got nothing done, say that in one line '
     + 'and name what is missing: a clear status with wrong-looking numbers beats an unfinished attempt.'
@@ -416,8 +413,6 @@ export async function spawnForkedChild(
     onCreated?: (sessionId: string) => void
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
-    /** The background jobs the child started, for the handles it leaves behind. */
-    background?: Background
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, true)
@@ -451,8 +446,6 @@ export async function spawnEmptyChild(
     signal: AbortSignal
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
-    /** The background jobs the child started, for the handles it leaves behind. */
-    background?: Background
   },
 ): Promise<SpawnResult> {
   return await spawnChild(host, parent, prompt, options, false)
@@ -489,8 +482,6 @@ async function spawnChild(
     onCreated?: (sessionId: string) => void
     /** Where a child that is writing its report is recorded. */
     reporters?: Reporters
-    /** The background jobs the child started, for the handles it leaves behind. */
-    background?: Background
   },
   seeded: boolean,
 ): Promise<SpawnResult> {
@@ -537,20 +528,6 @@ async function spawnChild(
   }
 
   const child = handle.agent
-  /**
-   * The child's text plus the handles of any job it left running.
-   *
-   * A job started through the plugin's own tool is unowned: it does not die with
-   * the node, and the parent can collect it. What the parent cannot do is guess
-   * its id, so every result the child produces carries the handles with it.
-   */
-  const withHandles = (text: string): string => {
-    const handles = options.background?.handlesOf(sessionId) ?? []
-    if (handles.length === 0) return text
-    const newline = String.fromCharCode(10)
-    const head = '[background jobs still running — the next round can collect these with job_output]'
-    return `${text}${text.trim() === '' ? '' : newline + newline}${head}${newline}${handles.join(newline)}`
-  }
   const budget = options.budgetMs !== undefined && options.budgetMs > 0
     ? Math.min(options.budgetMs, options.timeoutMs)
     : options.timeoutMs
@@ -561,7 +538,7 @@ async function spawnChild(
     }))
     const first = await waitForIdle(child, budget, options.signal)
     if (first !== 'timeout') {
-      const output = withHandles(snapshotText(child))
+      const output = snapshotText(child)
       return {
         output,
         error: first === 'cancelled'
@@ -599,7 +576,7 @@ async function spawnChild(
       child.followup(report)
       second = await waitForIdle(child, undefined, options.signal)
     }
-    const output = withHandles(snapshotText(child))
+    const output = snapshotText(child)
     if (second === 'cancelled') return { output, error: 'the plan was cancelled' }
     if (output.trim() === '') {
       return { output, error: `the child used its ${budget}ms budget and produced no report` }
@@ -611,7 +588,7 @@ async function spawnChild(
       error: `the child used its ${budget}ms budget; this is what it reported`,
     }
   } catch (error: unknown) {
-    return { output: withHandles(snapshotText(child)), error: error instanceof Error ? error.message : String(error) }
+    return { output: snapshotText(child), error: error instanceof Error ? error.message : String(error) }
   } finally {
     options.reporters?.unmark(sessionId)
     try {
