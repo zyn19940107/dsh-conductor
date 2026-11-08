@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.9.2
+
+### worker 提示词：不能建图，就把"收集"做成一个批次
+
+worker 是叶子，`refine_plan` 被规则拒绝，所以它拿不到 tools 节点那两个好处（调用打包、
+结果截断）。这一版**只改提示词**，让它用同一种做法手工达成：
+
+> You cannot draw a plan, so make the gathering itself one batch: in a single message, make every call that
+> only collects material — list, search, read — and bound each answer before you ask for it: a listing
+> returns names rather than a tree, a search returns its first hits rather than every hit, and a file is read
+> in the ranges you need. They run together and come back together, and then you think from that digest.
+> **Bound how you look, never how much of the task you cover: what the task names, read in full.**
+
+放在 worker 提示词的开场白与任务之间；与既有文本不冲突：
+
+| 既有文本 | 关系 |
+|---|---|
+| 开场白 "Do not draw a plan and do not delegate" | 一致（新句子以"你不能建图"开头）|
+| 任务（如"分块读完整个 plan.ts"）| 一致（"任务点名的要读全"明确保留覆盖要求）|
+| 契约 "Keep it short… no inventory" | 不同对象（契约管报告，新句子管收集）|
+| 结尾禁令 "禁止使用 refine_plan" | 一致 |
+
+### 实测（review，5 对，2.9.1 build + 本节提示词）
+
+| | 基线（无指令）| 第一版措辞 | **本版措辞** |
+|---|---|---|---|
+| 正确率 | 6/6 × 5 | **5/6,6/6,6/6,6/6,5/6** | **6/6 × 5** |
+| token 中位 | 1,430k | 1,007k | **1,086k（−24%）** |
+| 未缓存输入 | 157k | 139k | 149k |
+| 成本 | ¥0.275 | ¥0.291 | **¥0.247（−10%）** |
+| 墙钟中位 | 88s | 100s | **73s（−17%）** |
+
+第一版措辞把"读文件用需要的行区间"写成了倾向（漏了覆盖要求），两次 5/6（缺
+`delegationDepth`）。第二版加上"Bound how you look, never how much of the task you cover:
+what the task names, read in full"，正确率回到 5/5，同时保住 token 与时间收益。
+
 ## 2.9.1
 
 ### 修正

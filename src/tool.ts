@@ -137,6 +137,20 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
       + 'report what you found. Do not draw a plan and do not delegate.'
       + String.fromCharCode(10) + String.fromCharCode(10)
     : ''
+  // A worker cannot draw a plan, so it cannot get the plan tool's batching and
+  // its capped output. What it can do is the same thing by hand, and this is the
+  // sentence that asks for it: every call that only gathers material goes out in
+  // one message, and each answer is bounded before it is asked for. Nothing here
+  // is a new rule — it is how a worker with no graph gets a graph's economy.
+  const workerBatch = node.kind === 'worker'
+    ? 'You cannot draw a plan, so make the gathering itself one batch: in a single message, make every call '
+      + 'that only collects material — list, search, read — and bound each answer before you ask for it: a '
+      + 'listing returns names rather than a tree, a search returns its first hits rather than every hit, and '
+      + 'a file is read in the ranges you need. They run together and come back together, and then you think '
+      + 'from that digest. Bound how you look, never how much of the task you cover: what the task names, read '
+      + 'in full.'
+      + String.fromCharCode(10) + String.fromCharCode(10)
+    : ''
   // The last line a worker reads, and the one that has to survive the system
   // prompt above it: that prompt describes the plan tool as this conversation's
   // opening move, so a worker that only reads the top still tries to plan. Two
@@ -145,7 +159,7 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
     ? String.fromCharCode(10) + String.fromCharCode(10)
       + '禁止使用 refine_plan，不要做和任务不相关的事情。'
     : ''
-  return `${opener}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}${contract}${workerBan}`.trim()
+  return `${opener}${workerBatch}${node.task}${String.fromCharCode(10)}${String.fromCharCode(10)}${judged}${contract}${workerBan}`.trim()
 }
 
 /**

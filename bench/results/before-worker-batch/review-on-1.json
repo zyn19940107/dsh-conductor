@@ -1,0 +1,41 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 54329,
+  "timedOut": false,
+  "sessionId": "session-71a20f75-b79b-4e12-8087-a2774fe974e5",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 15494,
+    "outputTokens": 4330,
+    "cacheReadTokens": 12288,
+    "totalTokens": 32112
+  },
+  "formation": {
+    "agents": 4,
+    "input": 196939,
+    "output": 25517,
+    "cacheRead": 1088256,
+    "total": 1310712,
+    "steps": 32
+  },
+  "mainPrompt": 16677,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 208,
+  "thinkingPreview": "The three results answer all three questions. Now write the conclusion with three sections plus a summary paragraph. No file modifications needed.\n\nLet me write it in Chinese, since the user asked in Chinese.",
+  "finalText": "## 1. `src/plan.ts` —— 计划的数据结构、节点种类、调用参数\n\n**数据结构**：一次 `refine_plan` 调用就是一个计划，类型为 `PlanArgs { criteria: string[]; nodes: PlanNode[] }`。`criteria` 是判定成功与否的可观察陈述，`nodes` 是工作单元。一个节点是 `PlanNode { id, kind, calls, task, order, writes, budgetMs }`，其中一次工具调用是 `PlanToolCall { name: string; arguments: unknown }`。文件另外导出 `MAX_NODE_BUDGET_MS = 3_600_000`（单节点一小时上限）、`WORKER_MARKER = '[refine-loop worker]'`，以及三种分组常量 `AGENT_NODE_KINDS` / `NODE_AGENT_KINDS`（均为 worker/spawner/forker）和 `WORKER_NODE_KINDS`（仅 worker）。\n\n**节点种类**：`PlanNodeKind = 'tools' | 'worker' | 'spawner' | 'forker'`。`tools` 跑参数已定的调用、不起子代理；`worker` 起一个继承当前对话、自己做活的叶子节点，自己不再画图；`spawner` 起一个空上下文、走插件自己的规划循环的 leader；`forker` 起一个继承当前对话、走插件自己的规划循环的 leader。\n\n**参数校验（`parsePlanArgs` 是全有全无的）**：criteria/nodes 非数组、criteria 去空后为空、节点非对象、id 非空串、kind 不在四个枚举内、trim 后 id 重复、`tools` 节点无 calls 或 calls 为空、call 的 name 非空串、agent 节点无 task —— 任一命中就整张图被拒。字段互斥不是靠拒绝多余字段实现的，而是按 kind 归一：`tools` 的 `task` 强制为 `''`，agent 节点的 `calls` 强制为 `[]`，未知属性忽略。归一化还包括：`id`/`task` 去空白，`writes` 只留非空去空白字符串，`budgetMs` 只在是有限正数时保留并取整、随后被夹到一小时上限（否则为 0），`order` 只在字面量恰好是 `'sequential'` 时生效，否则一律 `parallel`。\n\n**调用参数怎么处理**：`plan.ts` 里 `arguments` 是不透明的 `unknown`，解析器只校验 `name` 非空并在其缺失时补 `{}`，从不按目标工具的 schema 检查——schema 层面的检查在 harness（`tool.ts` 里声明 `arguments: { type: 'json', required: true }`），执行在 `src/batch.ts`：`runBatch` 把 `{name, arguments}` 原样交给 `runner.execute`，失败调用可用 `repair()` 修好参数后重发（上限 `MAX_REPAIRS`）。节点级选项的语义：`order` 决定 `tools` 节点内调用是顺序跑还是分波并行（某个调用自称 exclusive 时成为屏障）；`writes` 只影响跨节点调度——声明同一路径的两个节点不会进同一组，组与组之间顺序执行；`budgetMs` 是节点自己的时间预算，`tools` 节点上会中止未完成的调用但保留已完成的，agent 节点上则把子代理叫停并要求它汇报状态而非被杀。\n\n**plan.ts 之外的硬约束**：节点数上限在 `tool.ts`，超过 `options.maxBatchSize()`（默认 `DEFAULT_MAX_BATCH_SIZE = 8`）直接抛错「split it, or narrow it」；整轮上限是 `maxBatchTimeoutMs`（默认 900000ms），节点预算之和超了会在报告里加 `[budgets]` 警告。文件头还定死了整体形状：只有一层、没有 `after`、没有依赖关系。\n\n## 2. 插件强制的那条规则\n\n**规则本身：「一个回合 = 一张图」。** `src/index.ts` 的模块注释原话是：the first call of a turn is the plan, and after the plan has run the turn is over — what the plan did not settle belongs to the next round. 完整回合是：设计计划 → 用 `refine_plan` 交图 → 图跑完 → 模型只做**判断**（写结论，或交下一张图）。逐个工具调用式的干活必须塞进图里，不能在图之后。\n\n**两半的强制强度不一样，这是关键。**\n\n*前半「回合必须以计划开头」只是教义，没有机制。* `src/rounds.ts` 的 `applyTurnDoctrine` 在模型开口前注入 `ROUND_LOOP`（触发于 `agent/pre-step`、`decision.kind === 'enter'`、`payload.step === 1`），附带节点数上限和会话起始时刻。插件**不拦截**首个计划之前的工具调用；README 明确说「必须交图」不在强制项之列，v1.0 那个会把没交图的回合拉回去的 gate 已经删了。\n\n*后半「图跑完只剩判断」是代码强制的，挂在 `ctx.tools.guard` 上。*\n- `applyJudgementGuard` → 拒绝，报 `JUDGE_ONLY`。\n- `applyDelegationRule` → 重新注册 harness 的 `subagent` / `subagent_fork`，描述指向计划节点种类，但 `execute` 直接抛 `DELEGATE_IN_GRAPH`；`list_agents` / `send_message` / `interrupt_agent` 用 `agent.ctx.tools.restrict({ deny: HIDDEN_TOOLS })` 从模型工具表里整个拿掉。\n- `applyWorkerRule` → worker 对话内调用 `refine_plan` 拒绝，报 `WORKER_NO_PLAN`（工具故意保留在表里，只拒调用，为的是不破坏继承前缀的 KV cache 命中）。\n- `applyReportGuard` → 子代理写报告期间拒绝一切工具调用，报 `REPORT_ONLY`。\n- `applyReportRetention`（`src/index.ts`）→ 在 `tools/post-execute` 以 `value` 返回计划报告，让 harness 的 spill/截断策略跳过它。\n\n**触发条件**：judgement guard 只在以下全部成立时触发——`execution.agent` 存在；调用是模型发起的（`isModelCall(execution)`，即 `execution.callId === execution.rootCallId`；图内嵌套调用 callId 不同，一律放行）；工具不是 `refine_plan`；且 `plans.waiting(agent.session.id)` 为 false，即本请求已经跑完过一张图。状态机在 `src/rounds.ts` 的 `Plans`，由 `src/index.ts` 驱动：`applyRounds` 在会话带用户消息时于 `agent/pre-step` 调 `plans.expect(sessionId)`（新请求 → waiting → guard 沉默 → 首个计划前模型可自由调工具）；`plans.done(sessionId)` 由 `refine_plan` 的 `execute` 在 `runPlan` 返回后立刻调用（之后除 `refine_plan` 外一切模型调用被拒）。`onPlanFinished` 同时推轮次计数：超过 `maxRounds`（默认 16）则回合结束，否则排入 `NEXT_ROUND` 跟进消息并 `exec.concludeTurn()` 结束本回合、由 harness 开下一轮；新用户消息重置轮次和 `plans.expect`。delegation 拒绝的触发条件是 `exec.callId === exec.rootCallId`（直接模型调用）；worker 拒绝看 `workers.has(session.id)`；报告拒绝看 `reporters.has(session.id)`。\n\n一个值得记的不对称：教义里那句「本轮计划最多 N 个节点」是在画图前告诉模型的，而同一个上限在 `tool.ts` 里被工具独立强制——教义那半是 courtesy，工具那半才是真限制。\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**怎么跑**：`applyPlanTool` 注册一个工具 `refine_plan`（`PLAN_TOOL`），参数 schema 是 `"
+}
