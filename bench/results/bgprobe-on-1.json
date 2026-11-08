@@ -4,12 +4,12 @@
   "index": 1,
   "profile": "bench-on",
   "exitCode": 0,
-  "wallMs": 166110,
+  "wallMs": 495322,
   "timedOut": false,
-  "sessionId": "session-e8cee280-1cc9-4390-bf99-e8d2bd2f62ce",
+  "sessionId": "session-43ca6e17-8750-4630-8620-e84a720cc675",
   "stderr": "",
-  "steps": 8,
-  "toolCalls": 8,
+  "steps": 12,
+  "toolCalls": 12,
   "tools": [
     "refine_plan",
     "job_list",
@@ -18,23 +18,27 @@
     "refine_plan",
     "refine_plan",
     "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 31261,
-    "outputTokens": 9921,
-    "cacheReadTokens": 110336,
-    "totalTokens": 151518
+    "inputTokens": 28633,
+    "outputTokens": 24783,
+    "cacheReadTokens": 285440,
+    "totalTokens": 338856
   },
   "formation": {
-    "agents": 3,
-    "input": 75725,
-    "output": 25340,
-    "cacheRead": 340736,
-    "total": 441801,
-    "steps": 24
+    "agents": 4,
+    "input": 103124,
+    "output": 74554,
+    "cacheRead": 883712,
+    "total": 1061390,
+    "steps": 43
   },
-  "mainPrompt": 24951,
+  "mainPrompt": 43658,
   "correctness": {
     "passed": 2,
     "total": 2,
@@ -42,7 +46,7 @@
   },
   "planned": true,
   "planAgentNodes": 0,
-  "thinkingChars": 21494,
-  "thinkingPreview": "The user wants me to verify background job ownership semantics. Let me follow the loop: design plan first as my first message (no tool call before), then refine_plan.\n\nStep 1: First plan — tools node with bg, exactly as given.\n\nLet me write the plan message and call refine_plan. The system says \"your first message of the round IS the plan: you hand it over before you call anything else, no tool call comes first.\" Hmm — but the plan is handed over with refine_plan. So my first assistant message should contain the plan text (design), and then call refine_plan. Actually the guidance says the first message IS the plan — meaning I should describe the plan then call refine_plan in that same message? The instruction: \"(2) Hand it over with refine_plan: one layer...\" Let me do: message containing brief plan design + refine_plan call. Actually \"no tool call comes first\" — the tool call is refine_",
-  "finalText": "验证完成，两个机制都成立。\n\n## 第一件事：bg 起的后台任务是 unowned，父代理可以直接读\n\n**图 1**（nodes 原样照抄你的 JSON）→ `bg` 返回 job id **`bash-1`**，节点随即结束。\n\n**父代理随后用 `job_output` 读到的原样输出**：\n```\nBG-DONE-42\n[status: completed, exit code: 0]\n```\n`job_list` 同刻显示：`bash-1 [bash] completed — python -c \"import time; time.sleep(12); print('BG-DONE-42')\"`\n\n**为什么父代理能读到**：`bg` 起的是**无主（unowned）后台任务**——它不挂在发起它的节点、图或会话的生命周期上。`bg` 本身是「点火即返回」的非阻塞调用，只负责把命令交给 harness 的后台 job 表并把 job id 交回；节点的结束只意味着「没人再等它了」，不意味着「它被杀了」。任务归 harness 的 job 表统一托管，因此 `job_list` / `job_output` 对任何会话都可见可读，`job_kill` 也一样。\n\n## 第二件事：节点被预算掐断时，它起的后台任务不会被杀\n\n**图 2**（nodes 原样照抄你的 JSON，`cut` worker，budget 15000）→ 报出的 job id **`bash-2`**。父代理随后读到：\n```\nBG-CUT-77\n[status: completed, exit code: 0]\n```\n\n这里有个必须说清的细节：**你给的 `cut` worker 其实没被 15 秒预算掐到**——它的任务是「起完立刻报 id、不要等」，所以它在结论写完时就正常收工了，15 秒预算没来得及生效。它证明的是「节点结束 → 后台任务继续跑」，不是「节点被掐断 → 后台任务继续跑」。因此我补跑了第三个 worker（budget 10000）来真正走一遍掐断路径：\n\n- 该 worker 的结论原文：`the child used its 10000ms budget`，且**掐断发生在它执行 write 调用的途中**——连兜底文件 `kill-test-job.txt` 都没建成。它报出的 job id 是 **`bash-3`**，并且明确标注「unowned background job，此刻仍在跑」。\n- 父代理随后用 `job_output` 读到：\n```\nBG-KILL-99\n[status: completed, exit code: 0]\n```\n\n**结论：后台任务没有跟着节点一起被杀。** `bash-3` 的节点是在预算到点时被硬停在一次工具调用中间（write 被拒、文件没落盘），但它起的 60 秒任务在节点消失之后继续跑满，并完整交出了 `BG-KILL-99` 和 exit code 0。\n\n**最终 job 表**（三个都 completed，无残留、无仍在运行的任务）：\n```\nbash-1 [bash] completed — ... print('BG-DONE-42')\nbash-2 [bash] completed — ... print('BG-CUT-77')\nbash-3 [bash] completed — ... print('BG-KILL-99')\n```\n\n**一句话总结机制**：`bg` 建立的任务所有权属于 harness 的 job 表，不属于任何节点或会话；节点（无论正常结束还是被预算掐断）只是启动者而非所有者，所以节点的死期与任务的死期无关——只有显式 `job_kill` 才会终止它们。"
+  "thinkingChars": 59670,
+  "thinkingPreview": "The task: three rounds of plans. First plan: tools node with bg command. The user wants me to hand over the plan with refine_plan first.\n\nRound 1: refine_plan with criteria and nodes as specified.\n\nLet me do that. The plan's first message IS the plan — I should write a brief plan text then call refine_plan. Actually the instruction says \"your first message of the round IS the plan: you hand it over before you call anything else\". I can include text before the tool call.\n\nLet me start round 1.\n\nNote the AGENTS.md is about DSH plugin sandbox — not relevant here since we're just using bg tool.\n\nRound 1: refine_plan with nodes exactly as given. The node needs budgetMs — \"Every node carries a budgetMs\". The user said nodes 原样照抄 for the first plan. But the system says every node carries a budgetMs. There's a tension. The user explicitly said \"nodes 原样照抄\". Hmm. The first plan's nodes given does",
+  "finalText": "三件事全部跑完，结论如下。\n\n## 图 1（nodes 原样照抄）→ 实测\n\n| 项 | 结果 |\n|---|---|\n| bg 返回 | `bash-1 started: python -c \"import time; time.sleep(12); print('BG-DONE-42')\"` |\n| 父代理下一张图读它 | `job_list` 里能看到 `bash-1`；`job_output` → `[status: failed, exit code: 1]`，**stdout 空** |\n\n原样照抄的那张图**没能**让父代理读到 `BG-DONE-42`：bg 返回时提示 `It is stopped when this turn ends, so collect it before then`，`bash-1` 在下一张图开始前就被清算成 exit 1 / 无输出（Windows 上被杀即 exit 1、无 signal 标记）。这不是 python 或引号问题——诊断确认 `python` = Python 3.12.10 在 bg 的 Git Bash 里可用（`python3` 才是 Store 假壳，exit 9009）。\n\n于是把读取搬进**同一张图**（`bg` 后同节点顺序 `job_output`，job id 由全局计数器预测为 `bash-4`）：\n\n- bg 返回 → `bash-4 started: ...print('BG-DONE-42')`\n- `job_output(bash-4, wait=true)` → **`BG-DONE-42`** / `[status: completed, exit code: 0]`\n\n**输出原样复述：`BG-DONE-42`，状态 completed，exit code 0。**\n\n**为什么父代理能直接读它**：bg 把进程注册进 harness 的**全局 job 注册表**，key 是 `bash-N`，登记项不挂在任何节点/会话的树上——启动它的节点只拿到一个句柄，进程本身是脱离的（unowned）。所以任何拿到这个 id 的会话都能用 `job_output`/`job_kill` 访问它；注册表跨节点、跨图共享（下一张图的 `job_list` 能列出前面图创建的 `bash-1`…`bash-5`）。但 **unowned ≠ 无限寿命**：它活到**创建它的那个 turn（图）结束**，turn 一收口，仍在跑的 job 被终止。\n\n## 图 2（cut，nodes 原样照抄）→ 实测\n\n- worker 报告：`Job id: **bash-5**`，且图末尾 harness 附注 `[background jobs still running — the next round can collect these with job_output]`。\n- 下一张图父代理读 `bash-5` → `[status: failed, exit code: 1]`，stdout 空。**没读到 `BG-CUT-77`**。\n\n为区分「预算掐断杀的」还是「turn 结束杀的」，做同图对照：`cut2` worker（15 秒预算、45 秒任务、打印 `BG-CUT-99`）旁边放一个 `reader` tools 节点，先 `Start-Sleep 12` 等它被掐断，再 `job_output(bash-6, wait=true)`：\n\n- `bash-6` → **`BG-CUT-99`** / `[status: completed, exit code: 0]`\n\n**这个后台任务没有跟着 worker 一起被杀**：15 秒预算掐断只停节点，不碰它起的进程。`bash-5` 的死因是**创建它的 turn 结束时的清算**（45 秒没跑完就被终止），不是预算掐断。\n\n## 图 3（left，nodes 原样照抄）→ 实测\n\n- bg 返回 `bash-7 started: python -c \"import time; time.sleep(90); open('REAP-MARKER.txt','w').write('alive')\"`；按要求不读、不等、不 kill。\n- 下一张图只做纯观测：`job_list` → `bash-7 [bash] failed`（exit 1）；`Test-Path REAP-MARKER.txt` → `False`。\n\n**清算时机**：在**创建它的那个 turn（= 这一张图）结束时**立即清算，不是等它自己跑完 90 秒。所以 `bash-7` 在图返回后约 1 秒就被终止，`REAP-MARKER.txt` 永远不会落盘。没人回收的 job 不会泄漏——它由 turn 收口时的清扫兜底。\n\n## 全量 job 台账\n\n| job | 起它的节点 | 状态 | 说明 |\n|---|---|---|---|\n| bash-1 | tools（照抄图 1） | failed / exit 1 | 图 1 结束即清算，12 秒没跑完 |\n| bash-2 / bash-3 | worker（诊断） | completed | 环境探测 |\n| bash-4 | tools（同图内 bg+读） | completed | 输出 `BG-DONE-42` |\n| bash-5 | worker（15s 预算掐断） | failed / exit 1 | turn 结束清算（非预算掐断） |\n| bash-6 | worker（15s 预算掐断） | completed | 输出 `BG-CUT-99`，同图内被父代理读到 |\n| bash-7 | tools（left 图） | failed / exit 1 | turn 结束清算，marker 未落盘 |\n\n## 两点要修正的预期\n\n1. **「unowned」成立的边界是节点，不是 turn**。job 确实不属于任何节点/会话（节点被预算掐断也不影响它，`bash-6` 为证），但它仍绑定在创建它的 turn 上；父代理要读到完整输出，**必须在同一张图内**（或同一个 turn 内）完成 bg → job_output。跨图去捡，往往捡到的是一具 exit 1 的尸体。\n2. **harness 自己的提示语有误导性**：cut 图末尾说「the next round can collect these with job_output」，实测下一轮 `bash-5` 已经是 failed/exit 1。这句附注与 bg 自己的契约「It is stopped when this turn ends」矛盾，如果插件要保证「下一轮还能捡」，需要把 job 的存活期延长到 turn 之后，或在 turn 收口时把 job 状态/输出落盘而不是直接杀掉。\n\n另外提醒：为让图 1 真正满足判据，我把 `job_output` 加进了同一张图（你要求原样照抄的那张我已经原样交过一次并报告了它的真实结果）；图 2 的对照图用了不同标记 `BG-CUT-99` 以便和 `bash-5` 区分。"
 }

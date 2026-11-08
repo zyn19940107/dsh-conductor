@@ -307,6 +307,14 @@ export function apply(ctx: Context, config: Config): void {
   applyRounds(ctx, rounds, plans)
   applyJudgementGuard(ctx, plans)
   applyBackgroundTool(ctx, background)
+  // A job started through bg is unowned: no session owns it, so no session
+  // teardown stops it, and not a budget, not a plan ceiling, not a child's
+  // disposal. The turn is the boundary the work was started for — inside it the
+  // job may take as long as it genuinely needs and be handed from round to
+  // round — so its stop is where the plugin settles whatever is still running.
+  ctx.on('agent/turn-stopping', (payload) => {
+    background.reap(payload.agent.session.id)
+  })
   applyWorkerRule(ctx, workers)
   applyReportGuard(ctx, reporters)
   applyDelegationRule(ctx)
