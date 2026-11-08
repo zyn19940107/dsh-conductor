@@ -70,6 +70,7 @@ console.log('a parked node is continued when the next plan asks for its id')
   check('it got the new prompt', fake.calls[0]?.prompt === 'keep going')
   check('it got the new budget', fake.calls[0]?.budgetMs === 60_000)
   check('it did not run out again, so it is gone from the registry', parked.list('session-root').length === 0)
+  check('a node that finishes inside its new budget is ended', fake.disposed() === 1)
 }
 
 console.log('a continuation that runs out again is parked again')

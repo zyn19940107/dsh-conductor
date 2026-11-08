@@ -91,7 +91,17 @@ export class Parked {
     if (nodes.size === 0) this.byRoot.delete(rootSessionId)
 
     const outcome = await node.continue(prompt, budgetMs, timeoutMs, signal)
-    if (outcome.parked) this.park(rootSessionId, node)
+    if (outcome.parked) {
+      // Ran out again: it stays alive for the round after this one.
+      this.park(rootSessionId, node)
+    } else {
+      // Finished inside the new budget: it ends like any node that did its work.
+      try {
+        await node.dispose()
+      } catch {
+        // The child is already gone.
+      }
+    }
     return outcome
   }
 
