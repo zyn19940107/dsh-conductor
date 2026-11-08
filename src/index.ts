@@ -82,7 +82,7 @@ export const REFINE_GUIDANCE = [
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',
   '- The plan report comes back whole — the plugin keeps this one result out of the harness\'s truncation — so '
-  + 'judge from all of it.',
+  + 'read all of it.',
 ].join('\n')
 
 /**

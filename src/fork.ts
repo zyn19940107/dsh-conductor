@@ -330,7 +330,7 @@ export function reportPrompt(budgetMs: number): string {
     + String.fromCharCode(10)
     + '- What exists on disk now, by file, and where.'
     + String.fromCharCode(10)
-    + '- What is confirmed: which command was run and what it printed.'
+    + '- What is confirmed: what works now, and how far it got.'
     + String.fromCharCode(10)
     + '- What is still missing, and what the next person should do first.'
     + String.fromCharCode(10)

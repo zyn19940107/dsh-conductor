@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.7.1
+
+### 修正：prompt 里的自相矛盾
+
+- **工具示例里的 review 节点删掉。** `refine_plan` 的示例参数里有一个 `plan-review`（kind `forker`，任务是
+  "Review how the plan format treats node arguments..."），而政策明写 "No review node"。模型每读一次示例
+  就看到一次反例。示例改成一个不涉及复核的分工（`parser-tests`）。
+- **示例里的"用一行代码做答案"删掉。** 契约禁止行号与引用，"backed by a line of code" 正好相反。
+- **`budgetMs` 的参数说明还停在 2.6.0 的旧行为。** 它写着"到点后可以 either finish by the shortest path
+  or report its state"，而 2.7.0 的收尾是"不许开新活、不许调工具，只写报告"。改成真实行为。
+- **"没有预算的节点跑完没人知道结果"是假的。** 没预算的节点用节点上限，到点同样进入报告阶段，父代理会
+  学到。这句话改掉了；同时按你的要求把预算改成**可选**（"A node may carry a budgetMs"），不再声称每个
+  节点都必须带。
+- **criteria 不再写成"可以拿去检查的东西"。** 验收不做、检查 criteria 没有用，所以改成"完成时应该是
+  什么样"；"judge from all of it" 改成 "read all of it"。
+- **报告里的"哪个命令跑了、打印了什么"改成"现在什么能用、到什么程度"。** 子代理契约禁止把命令日志当
+  证据，报告却要求它，两条指示相反。
+
 > **2.8.0 - 2.8.2 已撤回。** 那三个版本加了 `bg` 工具（无主后台任务），但实测它解决的是
 > 2.7.0 已经解决的问题（预算到点不再杀在跑的工具），而且在 80 次 benchmark 里一次都没被用到；
 > 它还引入了四处 prompt 自相矛盾（"阻塞会丢工作"是假的、"别轮询"与 harness 的"最终答案前收集"

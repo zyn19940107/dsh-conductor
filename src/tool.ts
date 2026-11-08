@@ -395,9 +395,8 @@ export const PLAN_TOOL_DESCRIPTION = 'Run one plan and return every result toget
       + '{"id": "scan", "kind": "tools", "calls": [{"name": "read", "arguments": {"file_path": "src/plan.ts"}}]}, '
       + '{"id": "budget-field", "kind": "worker", "task": "Add the budgetMs field to PlanNode in '
       + 'src/plan.ts and read it in parsePlanArgs. Done when both places are changed and tsc passes."}, '
-      + '{"id": "plan-review", "kind": "forker", "task": "Review how the plan format treats node '
-      + 'arguments: where they are validated, where they leak, and what a fifth node kind would need. You '
-      + 'decide how to split the review. Done when each question has an answer backed by a line of code."}]}'
+      + '{"id": "parser-tests", "kind": "forker", "task": "The plan parser needs tests for a fifth node '
+      + 'kind. You decide how to split the work. Done when the new cases pass and typechecking is clean."}]}'
 
 /**
  * Register the plan tool.
@@ -448,8 +447,8 @@ export function applyPlanTool(
         type: 'array',
         items: { type: 'string' },
         required: true,
-        description: 'The observable criteria that decide whether this plan succeeded. Each one is something '
-          + 'you could check against the results.',
+        description: 'What done looks like for this plan: the observable state that means it succeeded. The '
+          + 'nodes are written against it; nothing re-checks it afterwards.',
       },
       nodes: {
         type: 'array',
@@ -502,11 +501,10 @@ export function applyPlanTool(
             },
             budgetMs: {
               type: 'number',
-              description: 'How long you expect this node to take, in milliseconds. When it is spent the '
-                + 'node is stopped mid-work and asked to look at where it got to and either finish by the '
-                + 'shortest path or report its state and stop, so the parent still gets something. Declare '
-                + 'one on every node that could run long: a node that declares nothing runs until the '
-                + "runner's own ceiling.",
+              description: 'How long you expect this node to take, in milliseconds. Optional. When it is '
+                + 'spent the node starts nothing new, lets the call in flight finish, and writes a report of '
+                + "where it got to, so the parent still gets something. It lives inside this plan's own "
+                + 'ceiling; a node that declares nothing runs until that ceiling.',
             },
           },
         },
