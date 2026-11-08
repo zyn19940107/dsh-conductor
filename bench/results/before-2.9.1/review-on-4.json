@@ -1,0 +1,46 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 214003,
+  "timedOut": false,
+  "sessionId": "session-3fef5255-edcc-42f7-b45e-b335863699e7",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 6,
+  "tools": [
+    "pwsh",
+    "pwsh",
+    "refine_plan",
+    "read",
+    "read",
+    "pwsh"
+  ],
+  "usage": {
+    "inputTokens": 47048,
+    "outputTokens": 8656,
+    "cacheReadTokens": 34517,
+    "totalTokens": 90221
+  },
+  "formation": {
+    "agents": 4,
+    "input": 263954,
+    "output": 33812,
+    "cacheRead": 1262036,
+    "total": 1559802,
+    "steps": 33
+  },
+  "mainPrompt": 38906,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 15083,
+  "thinkingPreview": "Now I have a picture. The project has src/plan.ts, src/tool.ts, src/policy.ts, src/fork.ts, src/index.ts, etc.\n\nThe three review targets:\n1. src/plan.ts — plan data structures, node kinds, call args handling\n2. The plugin's forced rule — likely in src/policy.ts or index.ts (the prompt/guidance). \"这个插件强制的那条规则是什么?\" — need to figure out which rule. Possibly the \"no node on checking another node\" rule, or \"one layer\" rule, or the coverage guidance. Let me read the files.\n3. src/tool.ts — how plan is run, subagent constraints.\n\nLet me read the key source files. These are independent reads — I can do them in parallel. Let me check file sizes first, but just read them.\n\nLet me plan the round properly. The instruction says my first message of the round IS the plan. I've already made tool calls (orientation). Hmm, the rule says \"your first message of the round IS the plan: you hand it over before",
+  "finalText": "三个部分的审查都回来了,结论如下。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构、节点种类、参数处理\n\n**数据结构**(全部手写类型,没有 zod/JSON-Schema 参与运行时校验):\n\n- `PlanArgs` 只有两个字段:`criteria: string[]`(判断计划是否成功的可观测标准)、`nodes: PlanNode[]`。\n- `PlanNode` 带 `id`、`kind`、`calls`、`task`、`order`、`writes`、`budgetMs`;`PlanToolCall` 只有 `name: string` 和 `arguments: unknown`。\n- **节点有四种 kind**:`tools` | `worker` | `spawner` | `forker`。`tools` 是\"参数已定、只管调工具\"的批次;`worker` 是叶子,自己干活、不再画图(它内部调 plan 工具会被拒);`spawner` 是从空白起步的 leader;`forker` 是继承当前对话的 leader。派生集合 `AGENT_NODE_KINDS` / `NODE_AGENT_KINDS` 都是 `['worker','spawner','forker']`,`WORKER_NODE_KINDS` 是 `['worker']`。\n- `order` 只对 tools 节点有意义:`'parallel'`(默认,凡不是字面量 `'sequential'` 就算并行)或 `'sequential'`(按书写顺序跑)。\n- `writes` 是节点自报要写的文件,`buildGroups` / `canRunTogether` 用它把写同一路径的节点拆到不同组。\n- `budgetMs` 是模型自报的时间估计,`0` 表示没声明;解析时按\"有限正数\"取整,并被 `MAX_NODE_BUDGET_MS`(3,600,000ms)截顶。\n\n**参数处理**:全部集中在唯一的入口 `parsePlanArgs(value): PlanArgs | undefined`,它返回 `undefined` 即拒收整个计划。规则是:`criteria` 必须是去空白后仍有内容的字符串数组;每个节点必须是非空对象、有非空且不重复的 `id`、`kind` 取自那四种;**tools 节点的调用严格按名字传参,`arguments` 类型是 `unknown`、原样透传,plan.ts 对参数载荷零校验**,`undefined` 会被补成 `{}`,某个工具自己有哪些必填参数由那个工具自己管。tools 节点必须有非空 `calls`,agent 节点必须有非空 `task`,缺的字段会被补默认值(`tools` 补 `task: ''`,agent 补 `calls: []`),节点上多余的键被静默丢弃 —— `docs/example-plan.json` 就是因此过时的:它还带着 `description` 和 `after`,而 `after` 根本没有实现(\"没有 after,没有分层\"),那份示例的排序意图会被解析器丢掉。模型真正看到的 JSON Schema 另写一份在 `tool.ts` 的 `defineTool` 参数里(节点对象 `additionalProperties: false`、`kind` 为四值枚举、`arguments` 类型 `json`)。\n\n---\n\n## 2. 插件强制的那条规则 —— 「一个 turn 就是一张图」\n\n规则本身:turn 的第一条消息就是计划;计划跑完,这一 turn 就结束了,计划没解决的事归下一轮。`src/rounds.ts` 把它拆成两半措辞:`ROUND_LOOP`(\"你这一轮的第一条消息**就是**计划……你先交出去再调任何东西\")与 `NEXT_ROUND` / `JUDGE_ONLY`(\"写结论,或者交下一张图\")。\n\n**实现是明显不对称的**:\n\n- **计划之前只有教条,没有拦截。** `applyTurnDoctrine` 在 `agent/pre-step`、且 `payload.step === 1` 时把 `ROUND_LOOP` 作为\"模型开口前的最后一条消息\"注入,附带一次性的 \"This conversation started at …\" 和节点数上限提示。插件**不会**在第一张图之前拦截工具调用,也不会把没交图的轮次拉回来 —— 旧的\"没交图就拉回\"那道闸已经被删掉,`src/` 里没有对应代码。README 的\"插件强制了什么\"一节说的正是这点:交图是教条,不是拦截。\n- **计划之后才是真机制。** `applyJudgementGuard` 注册 `ctx.tools.guard`,拒绝模型发起的**除 `refine_plan` 外的所有**工具调用,提示语就是 `JUDGE_ONLY`(\"图已经跑完……直接调工具属于图内,不属于图后\")。`applyDelegationRule` 把 harness 的 `subagent` / `subagent_fork` 重新注册成\"不能直接调:委派只在 refine_plan 里发生\",并用 `execute` 包装在模型直接调用时抛 `DELEGATE_IN_GRAPH`;同时用 `agent.ctx.tools.restrict({ deny: HIDDEN_TOOLS })` 把 `list_agents` / `send_message` / `interrupt_agent` 从模型工具表里摘掉。\n\n**触发条件**:`plans.waiting` 由 `applyRounds` 在用户消息出现时置位,由工具的 `onPlanFinished`(→ `plans.done`)解除。所以**一个请求的第一轮不受限**;从第一张图跑完起,模型只能交图或写结论。`NEXT_ROUND` 续接消息带 `source: { kind: 'system-prompt' }`,不会重新置位 `waiting`,因此守卫在整个请求期间持续生效 —— 这正是第 2 轮以后也必须走 `refine_plan` 的原因。轮次超 `maxRounds`(默认 16)则回合直接结束等人工。\n\n豁免与开关:worker 对话不受教条约束(`applyTurnDoctrine` 在 `workers.has(sessionId)` 或 `isWorkerConversation(messages)` 时跳过);worker 里 `applyWorkerRule` 用 `WORKER_NO_PLAN` 拒掉 `refine_plan`,但**故意把工具留在表里**(摘掉会改请求头、打断继承前缀的 KV 缓存命中);reporter 对话由 `applyReportGuard` 用 `REPORT_ONLY` 拒掉全部工具。会话级退出是 `/dsh-conductor off` → `SessionPolicy.turnOff` → `tools.restrict({ deny: [PLAN_TOOL] })`,工具离表,`refine-loop:policy` 那段系统提示文本也随之变空(它本来就写成 `ctx.tools.get(PLAN_TOOL, scope) === undefined ? '' : REFINE_GUIDANCE`)。插件级 `enabled: false` 时 `apply()` 直接返回。工具内部还有两道拒收:节点数超过 `maxBatchSize`(默认 8)拒收;agent 节点的 `delegationDepth` 达到 `maxAgentDepth`(默认 3)按防跑飞阀拒收。\n\n另有一处支撑机制值得点名:`applyReportRetention` 挂在 `tools/post-execute` 上,把计划报告作为 `value` 而不是 `content` 返回,harness 的 spill/截断策略会跳过它 —— 判断依据那份报告永远不会被从中间截断。\n\n两处遗留问题(代码读出来的,没有实跑验证):教条注入的钩子从不查策略开关,所以即使 `/dsh-conductor off` 仍会注入 `ROUND_LOOP`;`SessionPolicy.appliesTo` 定义了但从未被调用 —— 真正让 \"off\" 生效的是工具拒收本身,守卫仍然注册着,只是因为 `plans.done` 不会触发而处于惰性状态。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来、子代理受什么限制\n\n**执行流程**:入口是 `applyPlanTool` 注册的 `refine_plan` 工具(`PLAN_TOOL`)。`execute` 依次做:`parsePlanArgs` 解析 → 节点数超限直接抛错(\"This plan has N nodes and the limit is M\") → `onPlanStarted` / `background.noteRoot` → 用本会话的 `requestHeader()?.config` 装配 repair → 装配 `PlanForkOptions` → 算预算告警(各节点 `budgetMs` 之和超计划上限时产出 `budgetWarn`) → `runPlan"
+}

@@ -1,0 +1,61 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 3,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 180176,
+  "timedOut": false,
+  "sessionId": "session-1f59dac5-edb1-48f7-9833-28fa15005845",
+  "stderr": "",
+  "steps": 15,
+  "toolCalls": 21,
+  "tools": [
+    "glob",
+    "pwsh",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "read",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 86176,
+    "outputTokens": 15960,
+    "cacheReadTokens": 796416,
+    "totalTokens": 898552
+  },
+  "formation": {
+    "agents": 1,
+    "input": 86176,
+    "output": 15960,
+    "cacheRead": 796416,
+    "total": 898552,
+    "steps": 15
+  },
+  "mainPrompt": 86226,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 27036,
+  "thinkingPreview": "The user wants a read-only review of D:\\code\\vibe\\dsh-refine-loop, specifically three parts:\n1. src/plan.ts — data structures, node types, how call parameters are handled\n2. The rule this plugin enforces — how it's implemented in current code, trigger conditions\n3. src/tool.ts — how the plan is executed, what restrictions subagents get\n\nThen summarize in one paragraph.\n\nThis is a read-only task. Let me explore the repo. The AGENTS.md mentions skills for DSH plugin dev, but this is a read-only review, not modifying. The skill `dsh-plugin-sandbox` is for developing/debugging/modifying plugins. Here we're only reading code. I might not need it, but the rule says \"改/调任何 DSH 插件前先调用它\" — we're not modifying. Let me just do the read-only review.\n\nLet me start by listing files.\n\nI could delegate to subagents for parallelism, but the task is a focused read of probably a small repo. Let me look fir",
+  "finalText": "已完成只读审查（未修改任何文件）。审查对象：`D:\\code\\vibe\\dsh-refine-loop`，版本 `2.8.1`（package.json:3）。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构、节点种类、调用参数处理\n\n### 1.1 数据结构\n\n```\nPlanArgs            { criteria: string[], nodes: PlanNode[] }     plan.ts:93-98\nPlanNode            { id, kind, calls, task, order, writes, budgetMs }   plan.ts:65-87\nPlanToolCall        { name: string, arguments: unknown }          plan.ts:57-62\nPlanNodeKind        'tools' | 'worker' | 'spawner' | 'forker'     plan.ts:24\nPlanNodeOrder       'parallel' | 'sequential'                     plan.ts:54\n```\n\n- `criteria`：可观测的判据（计划成功与否的标准），字符串数组。\n- `PlanNode` 七个字段中**没有一个是所有种类都用的**：`calls` 只属于 `tools` 节点，`task` 只属于 agent 节点；`id / kind / order / writes / budgetMs` 通吃。`parsePlanArgs` 会按 kind 把不适用的字段强行归零（agent 节点的 `calls` 被写成 `[]`，plan.ts:176）。\n- `budgetMs`：模型自报的时长预估，0 表示\"没声明\"；上限 `MAX_NODE_BUDGET_MS = 3_600_000`（1 小时），防止一个手滑把子代理挂一整天（plan.ts:90）。\n- `writes`：节点会写哪些文件，是\"谁不能同时跑\"的唯一依据。\n- 另有 `WORKER_MARKER = '[refine-loop worker]'`（plan.ts:109），用于识别\"这是一个 worker 的对话\"，从而把教条和 plan 工具挡在 worker 之外。\n\n### 1.2 节点有哪几种（4 种）\n\n| kind | 语义 | 是否起子代理 | 上下文 |\n|---|---|---|---|\n| `tools` | 参数已定死的调用批次 | 否 | 本 agent |\n| `worker` | 自己干活的叶子节点，**不画自己的图** | 是 | 继承本对话（含本轮） |\n| `spawner` | 从零开始、**按本插件循环自己画图** | 是 | 空 |\n| `forker` | 继承本对话、**按本插件循环自己画图** | 是 | 继承本对话（含本轮） |\n\n关键设计（plan.ts:4-18, 15-16）：**图只有一层，没有 `after`、没有分层依赖**。需要另一个节点输出的活属于下一轮；必须按顺序做的活塞进同一个节点（`tools` 节点写 `\"order\": \"sequential\"`，或交给 `worker`）。\n\n顺带：`AGENT_NODE_KINDS`（plan.ts:27）和 `NODE_AGENT_KINDS`（plan.ts:44）内容完全相同，后者全仓库无人引用；`WORKER_NODE_KINDS`（plan.ts:35）在 tool.ts:39 被 import 但从未使用。\n\n### 1.3 调用参数是怎么处理的\n\n**两层，只有一层做语义校验：**\n\n1. **声明层**（tool.ts:456-526）：`parameters` 是 JSON Schema，`nodes[].additionalProperties: false`，每个 call 的 `arguments` 类型是 `json` 且 `required: true` —— 模型必须显式给出参数对象。\n2. **运行层** `parsePlanArgs`（plan.ts:121-183）：**fail-closed**，任何一处不合规 → 整个计划返回 `undefined` → 工具抛错 `\"refine_plan needs criteria, and nodes that each have an id and a kind\"`（tool.ts:562-565）。没有任何\"部分保留\"。\n   - `criteria` 必须是数组；过滤掉空白项并 trim；过滤后为空 → 拒。\n   - 节点 `id` 必须非空字符串（trim），**重复 id 直接拒**；`kind` 必须是那 4 个之一。\n   - `budgetMs`：有限且 > 0 → `min(round(v), 1h)`，否则归 0；`order`：只有 `'sequential'` 被认，其余一律 `'parallel'`；`writes`：非数组 → `[]`，数组内过滤空白并 trim。\n   - `tools` 节点：`calls` 必须非空数组，每条 call 的 `name` 必须非空字符串（trim）。\n   - agent 节点：`task` 必须非空字符串。\n   - **`nodes: []` 合法**（plan.ts:178-181）——空计划表示\"这一轮直接写结论\"，插件不规定计划必须有多大。\n\n**关键点：`arguments` 在 plan.ts 里是 `unknown`，原样透传**（plan.ts:168：`args === undefined ? {} : args`）。plan.ts **不校验工具名是否存在、不校验参数是否符合目标工具的 schema**。这部分延后到执行期由工具注册表裁决；一旦某条调用失败，batch 层会用**本对话自己的模型**（`agent.session.requestHeader()?.config`，index.ts:578-581 → `repairFailedCall`，index.ts:369-391）问\"这条调用本来应该是什么\"，最多修 2 次共试 3 次（`MAX_REPAIRS = 2`，batch.ts:296），修好的只有那一条调用。\n\n**并发怎么定**：`order` 决定\"串行\"还是\"按波次并行\"；`parallel` 下每条调用还要看它自己的 `executionMode`（工具自带的排他性）加上插件的 override（`glob`/`grep`、只读 shell），不合群的调用成为一道 barrier，barrier 前的跑完才开始（batch.ts:401-441）。计划内部的调用挂在计划自己的 `rootCallId` 之下，所以是**嵌套调用**，不属于\"模型自己发起的调用\"——第三部分的规则守卫管不到它们。\n\n---\n\n## 二、这个插件强制的那条规则\n\n### 2.1 规则是什么\n\n一句话：**\"一轮 = 一张图\"**（index.ts:19-21 原文：\"The rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over — what the plan did not settle belongs to the next round.\"）。\n\n拆成两半，**只有后半半是被代码强制的**：\n\n| 半句 | 状态 | 实现 |\n|---|---|---|\n| ① 每轮的第一条消息就是图，交图前不调任何工具 | **只是教条（提示），不拦** | `ROUND_LOOP` 文本作为**最后一条消息**注入（rounds.ts:23-40, 191-245） |\n| ② 图跑完只能判断：写结论，或交下一张图，不能自己一个一个调工具 | **机制强制** | `applyJudgementGuard`（rounds.ts:471-480） |\n\nREADME 自己写明了这一点（README:152-158）：\"必须交图\"不在强制表里，v1.0 时代那条\"没交图就拉回\"的闸门已随\"闸门\"一起删掉；现在插件**不拦交图前的工具调用**，靠教条（实测 39/39 全部交图）。\n\n### 2.2 强制那半是怎么实现的\n\n`applyJudgementGuard`（rounds.ts:471-480）注册为 `ctx.tools.guard`：\n\n```\n若 是模型自己发起的调用（callId === rootCallId，rounds.ts:455-460）\n且 工具名 !== 'refine_plan'\n且 该会话不再 waiting\n→ 拒绝，返回 JUDGE_ONLY（rounds.ts:443-445）：\n   \"The graph has run — every result is above. This turn is the judgement:\n    write the conclusion if the results answer the request, or hand over the next\n    graph "
+}

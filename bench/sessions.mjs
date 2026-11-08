@@ -77,7 +77,19 @@ export function readSessions(root) {
     for (const file of readdirSync(directory)) {
       if (!file.endsWith('.zstd')) continue
       const facts = readOne(join(directory, file))
-      if (facts !== undefined) sessions.set(facts.id, facts)
+      if (facts === undefined) continue
+      // One session may be written as several segment files; each segment only
+      // carries its own events, so the totals add up rather than overwrite.
+      const existing = sessions.get(facts.id)
+      if (existing === undefined) {
+        sessions.set(facts.id, facts)
+        continue
+      }
+      existing.input += facts.input
+      existing.output += facts.output
+      existing.cacheRead += facts.cacheRead
+      existing.steps += facts.steps
+      existing.lastPrompt = Math.max(existing.lastPrompt, facts.lastPrompt)
     }
   }
   return sessions
@@ -103,20 +115,29 @@ function readOne(file) {
     lastPrompt: 0,
     firstUserMessage: '',
   }
-  for (const line of text.split('\n')) {
+  const events = []
+  for (const line of text.split(String.fromCharCode(10))) {
     if (line.trim() === '') continue
-    let event
     try {
-      event = JSON.parse(line)
+      events.push(JSON.parse(line))
     } catch {
-      continue
+      // torn line
     }
-    if (event.type === 'session') {
-      facts.id = String(event.id ?? '')
-      facts.parent = event.parentSession
-      facts.depth = Number(event.delegationDepth ?? 0)
-      continue
-    }
+  }
+  // A forked child's log begins with a copy of the parent's conversation. Those
+  // seeded events carry the parent's own usage, and summing them here would count
+  // the parent's tokens once per child — the on arm's totals grow with every
+  // child forked. Only the events after the seed boundary are this session's own.
+  // The session header is read from anywhere: it sits before the seed.
+  const header = events.find(event => event.type === 'session')
+  if (header !== undefined) {
+    facts.id = String(header.id ?? '')
+    facts.parent = header.parentSession
+    facts.depth = Number(header.delegationDepth ?? 0)
+  }
+  const boundary = events.findIndex(event => String(event.type).includes('end-seed'))
+  for (let index = boundary + 1; index < events.length; index += 1) {
+    const event = events[index]
     if (event.type === 'step/start') {
       facts.steps += 1
       continue
