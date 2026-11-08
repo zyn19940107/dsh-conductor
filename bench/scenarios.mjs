@@ -63,6 +63,13 @@ function judgeBy(requirements) {
     let passed = 0
     for (const requirement of requirements) {
       const needles = requirement.any ?? requirement.needles ?? []
+      // `test` is for a requirement about shape rather than wording: three
+      // reviews, each labelled, however the labels are spelled.
+      if (requirement.test !== undefined) {
+        if (requirement.test(answer)) passed += 1
+        else missing.push(`${requirement.what}(形状不符)`)
+        continue
+      }
       const hit = requirement.any !== undefined
         ? requirement.any.some(needle => haystack.includes(needle.toLowerCase()))
         : (requirement.needles ?? []).every(needle => haystack.includes(needle.toLowerCase()))
@@ -298,7 +305,14 @@ export const PANEL = {
     '只读不改。不要修改任何文件。',
   ].join('\n'),
   judge: judgeBy([
-    { what: '三份独立评审都给出', needles: ['评审一', '评审二', '评审三'] },
+    { what: '三份独立评审都给出', test: (answer) => {
+      // Either three labelled reviews, or the synthesis the task asks for at the
+      // end: three perspectives and what they agree and disagree on. A model that
+      // merges the three reports into the summary is still answering the request.
+      const labels = new Set([...answer.matchAll(/评审\s*[一二三123ABC]/g)].map(match => match[0].replace(/\s+/g, '')))
+      if (labels.size >= 3) return true
+      return ['过度限制', '绕过', '冲突', '一致', '分歧'].every(word => answer.includes(word))
+    } },
     { what: '第一种视角(过度限制)', needles: ['过度限制'] },
     { what: '第二种视角(可绕过)', needles: ['绕过'] },
     { what: '第三种视角(与原生能力冲突)', needles: ['冲突'] },

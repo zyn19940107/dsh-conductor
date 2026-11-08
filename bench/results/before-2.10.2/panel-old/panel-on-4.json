@@ -1,0 +1,45 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 699879,
+  "timedOut": false,
+  "sessionId": "session-d010f3b8-fb27-48e4-a67a-fb68e36173da",
+  "stderr": "",
+  "steps": 4,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 46681,
+    "outputTokens": 20423,
+    "cacheReadTokens": 55296,
+    "totalTokens": 122400
+  },
+  "formation": {
+    "agents": 11,
+    "input": 743604,
+    "output": 295226,
+    "cacheRead": 12823424,
+    "total": 13862254,
+    "steps": 201
+  },
+  "mainPrompt": 46341,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 27010,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the DSH plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nThe core rules: each round must submit a plan (\"图\" = plan), after submitting the plan judge whether a conclusion can be given; dispatch can only go through nodes in the plan.\n\nI need to:\n1. Read the plugin source code myself (to know what to look for and to synthesize the final report).\n2. Organize three mutually independent reviews — each must read relevant source and point out implementation files.\n\nThe three reviews should be independent — using spawner nodes (leaders starting empty) so they don't see each other's conclusions. Actually, for independence, I should use \"spawner\" kind nodes (leaders starting empty) so they don't inherit this conversation... but wait, the task says \"互相不知道对方结论\" (don't know",
+  "finalText": "# DSH 插件 `dsh-refine-loop` 核心规则 · 三方独立评审汇总\n\n只读完成：全程只用 read / grep / glob / 只读 pwsh 列表，**未修改、未新建、未删除仓库内任何文件**。三位评审者各自以「空上下文 + 各自任务」独立启动，互相看不到对方结论，各自读自己的源码；三人都在各自 9 分钟预算耗尽处交卷（因此都自报了未核项，见末尾）。\n\n---\n\n## 一、核心规则在代码里的落点（评审前先定位，这是三方共同的坐标）\n\n| 规则 | 文本/机制落点 |\n|---|---|\n| R1 每轮先交图、交图前不许调工具 | 教条文本 `src/rounds.ts` `ROUND_LOOP`(23–40)、`NEXT_ROUND`(48)；注入方式 `applyTurnDoctrine`(191)，经 `agent/pre-step` 追加为**用户消息**；静态说明 `src/index.ts` `REFINE_GUIDANCE`(56–91)，系统提示段 `refine-loop:policy`(254–266)，槽位取 `getSectionOrder('PLAN_POLICY')` |\n| R2 交完图才判断、才能给结论 | `applyJudgementGuard`(rounds.ts 471–479) + `JUDGE_ONLY`(443–445)；轮次推进 `src/index.ts` `onPlanFinished` → `exec.concludeTurn()` + `agent.followup(NEXT_ROUND)`(289–298)，`maxRounds` 默认 16 |\n| R3 派发只能走图里的节点 | `applyDelegationRule`(rounds.ts 407–434)：重注册原生 `subagent`/`subagent_fork`（`DELEGATION_TOOLS` 63）成「直连即抛」`DELEGATE_IN_GRAPH`(58)；`HIDDEN_TOOLS`(73–77) 摘掉 `list_agents`/`send_message`/`interrupt_agent`；插件自有派生通道 `src/fork.ts` `spawnChild`(475–632) → `host['agentLoop'].createAgent`(503–543) |\n| 图与工具本体 | `src/tool.ts` `PLAN_TOOL='refine_plan'`(48)、`PLAN_TOOL_DESCRIPTION`(396)、`runPlan`；`src/plan.ts` `parsePlanArgs`(121–183)、`WORKER_MARKER`(109)、`buildGroups`(200–208)；`src/batch.ts` `runBatch`；`src/concurrency.ts` `mayRunTogether`(222–234)；`src/policy.ts` `SessionPolicy`(45)/`POLICY_TOOLS`(38–40)；`src/repair.ts` `askForRepair`；`src/background.ts` `bg`(310–353) |\n\n---\n\n## 二、三份评审各自说了什么\n\n**评审 A（入口角度：规则文本与强制点）**\n1. 过度限制：**部分成立**。成本 = 每轮固定提示税（`ROUND_LOOP` 约 2.4KB 经 `applyTurnDoctrine` 每轮注入 + `REFINE_GUIDANCE` 每请求重发）；真正的过度在 R2 —— `applyJudgementGuard` 拒掉所有非 `refine_plan` 直连工具，「再读一个文件」被迫开新一轮图。\n2. 可绕过：**成立，且分条性质不同**。机制强制：R2 的 `JUDGE_ONLY`、R3 对 `subagent`/`subagent_fork` 的拒绝、worker 禁画图（`applyWorkerRule` → `WORKER_NO_PLAN`）、报告阶段禁工具（`applyReportGuard`）。**只是教条**：R1 本身 —— `Plans.waiting()` 只被 `applyJudgementGuard` 当作「已交过图」的闸门，**第一张图之前 guard 全放行**；`workflow`/`todo_write`/`create_goal`/`exit_plan_mode`/`bg` 都不在拦截名单里；`/dsh-conductor off` 只摘 `refine_plan`，doctrine 照注、guard 照在。\n3. harness 冲突：**部分成立**。原生 `subagent` 被插件收走却没复用（插件自建第三套派生，绕开 harness 的 provider/depth/投影/预算）；原生「后台 subagent + `send_message` 续跑」被 `HIDDEN_TOOLS` 整条掐断；并发是**叠加而非冲突**（`order:sequential` 与 `writes` 分组是原生表达不了的业务顺序）；但原生 plan mode 与插件的图「两套 plan 同屏竞争」；插件 `maxRounds` 与原生 goal 的 `maxGoalRounds` 是两套并行轮次预算。独有硬证据：harness 侧 `packages/core/tools/src/index.ts` 的 `guardReason`(767–773)/`prepareExecution`(1519–1529) 证明 `ctx.tools.guard` 确是**拒绝执行**而非仅注入说明。\n\n**评审 B（入口角度：绕过面与模型可走的路径）**\n1. 过度限制：**部分成立**。自动续轮 `onPlanFinished` 无条件 `followup(NEXT_ROUND)`，模型不能选择不发消息；`JUDGE_ONLY` 只放行 `refine_plan`；不成立的部分：节点数模型自定、「被逼出的无用拆解」不成立；真正机制性的过度在 `src/batch.ts` `scrubConclusion` 会**物理删掉含回执词的整行**。空图是官方合法出口（`PLAN_TOOL_DESCRIPTION` 明写 \"A plan may be empty\"）。\n2. 可绕过：**成立，首轮有完整洞**。四条硬拦截只在 `src/rounds.ts`（`applyJudgementGuard`/`applyDelegationRule`/`applyWorkerRule`/`applyReportGuard`）。首轮可走：纯文本直答、先调工具再交图（`applyRounds` 在用户消息到达时置 `waiting`，首轮守卫整轮不生效）、`bg` 后台、`todo_write`/`create_goal`、审批类交互、**`src/repair.ts` 的裸 llm 修复环**（不过 agent loop、不过任何 guard，就能产出会被执行的调用）、forker/spawner 内部再画图（未登记为 worker）。图内旁路：图内 tools 节点点名原生 `subagent` 因 `callId !== rootCallId` 被放行 → 生成插件管不到的原生子代理。off 开关是混合态：`turnOff` 只摘 `refine_plan`，`plans.done` 不执行 → `waiting` 永真 → 图后拦截永不触发。\n3. harness 冲突：**部分成立**。两套派发通道共用一个工厂（`agentLoop.createAgent`），但种子/预算/报告协议分叉；并发是**加宽而非替换**（宿主把「未声明」当 exclusive，插件更宽松；`respectConcurrencySafety=false` 时连宿主判定也不看；两套不一致时**无仲裁点**）；插件提示段挂宿主 `PLAN_POLICY` 槽位、靠顺序而非机制；插件 `bg` 与宿主 `bg` 同名不同语义却复用同一 job registry；插件 `Rounds`/`Plans` 按 session 记内存、用户一说话就 reset，与宿主 todo/goal 持久化是两条线；`applyPlanTool` 的 900 秒 timeout 在 `defineTool` 注册时求值一次；`applyReportRetention` 用 `tools/post-execute` 把图报告换成 `value`，**绕开宿主 spill 截断**。\n\n**评审 C（入口角度：harness 接口面）**\n1. 过度限制：**部分成立**。成本不在画图，而在**结论被强制推到下一轮**（`onPlanFinished` 的 `exec.concludeTurn()` 结束本轮、插件再排 `NEXT_ROUND`），一轮 = 一个新 turn、历史整段重读；每轮固定税 ≈6.3k 字符（教条 1.8–1.9k + `REFINE_GUIDANCE` 2.8–2.9k + 工具描述 1.5k）≈1.5k token；**「空图逃生口」不成立** —— `parsePlanArgs` 中 criteria 为空直接 `return undefined`（工具抛"
+}

@@ -1,0 +1,48 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 685957,
+  "timedOut": false,
+  "sessionId": "session-cea33789-e270-4f20-8d90-cdc9b4f17406",
+  "stderr": "",
+  "steps": 7,
+  "toolCalls": 6,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 31203,
+    "outputTokens": 22017,
+    "cacheReadTokens": 136064,
+    "totalTokens": 189284
+  },
+  "formation": {
+    "agents": 4,
+    "input": 341823,
+    "output": 109784,
+    "cacheRead": 4111872,
+    "total": 4563479,
+    "steps": 71
+  },
+  "mainPrompt": 45051,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+    ]
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 27480,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-party independent review of the \"core rule\" of the DSH plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nThe core rule: 每轮必须交一张图,交完图判断能不能给结论;派发只能走图里的节点。 (Each round must submit a plan/graph; after submitting the graph, judge whether a conclusion can be given; dispatch can only go through nodes in the graph.)\n\nI need to:\n1. Read the plugin source code to find where this rule is implemented.\n2. Organize three independent reviews (each doesn't know the others' conclusions) — these should be subagents (workers) that each independently read the source and evaluate.\n3. Each review must read relevant source and point out implementation files.\n4. Summarize: where do the three agree, where do they diverge.\n\nSince the three reviews must be mutually independent and each must read source code, they're good candidates ",
+  "finalText": "三份评审已全部返回并完成分歧裁决。以下是汇总。\n\n---\n\n# dsh-refine-loop「核心规则」三方独立评审 · 汇总\n\n**被评审对象**：插件 npm 真名 `@zyn19940107/dsh-conductor`（见 `cordis.patch.yml`），仓库目录 `D:\\code\\vibe\\dsh-refine-loop`；harness 原生源码在 `D:\\code\\vibe\\deepseek-harness`。\n**核心规则**：每轮必须交一张图 → 交完图判断能不能给结论 → 派发只能走图里的节点。\n\n## 0. 评审是怎么组织的\n\n三份评审在**同一轮并行**跑完，互不可见对方结论，彼此不通信；各自通读源码并指认实现文件。为避免三个意见同质化，各自带一个主轴：\n\n| 评审 | 主轴 | 独特视角 |\n|---|---|---|\n| **A** | 模型付出的**无用代价** | 「教条 vs 机制不对称」导致的省事路径 |\n| **B** | **强制性**：代码不变量还是提示词教条 | 逐条清点「代码真正保证了什么」+ 测试覆盖 |\n| **C** | 与 harness 原生能力的**语义兼容性** | 原生 vs 插件逐项对照 |\n\n全程只读，未修改任何文件；三方均未复跑基准，README 里的耗时/token 数字按「作者自述」对待。\n\n## 1. 三方独立指认出一致的实现地图\n\n三份评审各自独立读代码，落到**同一批文件与同一批符号**：\n\n| 子规则 | 强制性质 | 实现位置 |\n|---|---|---|\n| 每轮必须交一张图 | **仅提示词教条，无代码闸门** | `src/rounds.ts` 的 `ROUND_LOOP`（教条正文）＋ `applyTurnDoctrine`（`agent/pre-step`，每轮第 1 步注入为最后一条消息）；`src/index.ts` 的 `REFINE_GUIDANCE` → 系统提示段 `refine-loop:policy`，排序位 `PLAN_POLICY` |\n| 交完图判断能不能给结论 | **代码强制** | `src/rounds.ts` 的 `applyJudgementGuard`（`ctx.tools.guard`，回绝文案 `JUDGE_ONLY`）；状态机 `Plans.expect/done/waiting`；`src/index.ts` 的 `onPlanFinished`；`src/tool.ts` 的 `exec.concludeTurn()` 与 `NEXT_ROUND` |\n| 派发只能走图里的节点 | **代码强制，但有缺口** | `src/rounds.ts` 的 `applyDelegationRule`（重注册原生 `subagent`/`subagent_fork`，`DELEGATION_TOOLS`，模型直调抛 `DELEGATE_IN_GRAPH`；`HIDDEN_TOOLS` 把 `list_agents`/`send_message`/`interrupt_agent` 摘出工具表）；节点由插件自己 spawn：`src/fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`；配套 `applyWorkerRule`（`WORKER_NO_PLAN`）、`applyReportGuard`（`REPORT_ONLY`） |\n\n三问的总体判定：**Q1 部分成立（短任务亏、长任务赚）／Q2 成立（可绕过）／Q3 成立但不打硬架** —— 三方在每一问上都给出同档判定。\n\n## 2. 三方一致点\n\n1. **强制力严重不对称。** 「交图后只能判断」「不许直调派发」有代码兜底；「每轮必交图」只有一句注入的教条。三方独立指向同一个根因：`applyJudgementGuard` 在 `Plans.waiting()` 为真时**放行一切**——也就是第一张图之前，模型调任何工具、给纯文字结论都合法。\n2. **第一轮是最大的洞。** 插件不拦「交图前的工具调用」，也不把没交图的一轮拉回来；三方都把它列为「最脆的一环」。README 自述 v1.0 的「闸门」已删，三方都在 `src/` 里找不到对应拦截代码。\n3. **空图是合法逃生口。** `src/plan.ts` 的 `parsePlanArgs` 允许 `nodes: []`；而教条正文（`ROUND_LOOP`）本身就写着「已经有需要的东西就交空图、直接给结论」。所以「必须交图」可以被一次几乎零成本的调用**形式化满足**，内容上空转。\n4. **图内二次派发是敞口。** `applyDelegationRule` 只在模型直调（`callId === rootCallId`）时抛错；tools 节点里的嵌套调用放行——子代理被创建了，却不受节点 `budgetMs` 管、不进图报告、不留句柄。\n5. **两套「计划」语义正面相撞。** 插件的 `refine-loop:policy` 与原生 `plan:policy` 同占 `PLAN_POLICY` 序位；原生 plan 是「呈人审批」（`exit_plan_mode`），插件的图是「一交就执行」；且图跑完后的判断守卫会把 `exit_plan_mode` 一起挡掉，原生审批在飞行中不可达。\n6. **两套派发语义并存、深度预算双轨。** 原生 subagent＝冷上下文＋`run_in_background`＋harness 的深度上限；插件节点＝继承本轮＋`budgetMs` 到点先停再收尾＋插件自己的 `maxAgentDepth`。插件还把原生 `subagent` 的描述改写成讲「节点子代理继承本轮」，而原生工具在嵌套调用时并不继承——描述与行为错位。\n7. **过度限制的「形状」三方一致，方向不同。** 代价是可数的：一次额外模型往返，加 `criteria`＋节点 `id/kind/task`＋tools 节点的完整调用参数的脚手架成本。三方引用的作者实测同源同值：短任务 coverage 归一 83s／509k token vs off 56s／383k，quixbugs 184s vs 86s；多步、可并行的任务净赚（步数下降、单轮派多个执行者）。**三方都判「部分成立」，没有任何一方认为失控。**\n8. **人工开关是设计内的退路。** `/dsh-conductor off`（`src/policy.ts` 的 `SessionPolicy.turnOff`）可整场关掉规则；三方一致归为部署/用户级开关，**不是模型能自走的路径**。\n\n> 补充（我第一手核到的、三方都没点出的一层）：教条正文里写着「Do not spend a node on checking another node: no review node, no independent re-derivation…」。也就是说插件的自我哲学本来就是「信任节点、不做二次校验」，这与 harness 自身的节点政策同源——「每轮必交图」没有闸门不是疏漏，而是与这套哲学一致的取舍；而「判断守卫」「派发守卫」属路由规则，不违背这条哲学。\n\n## 3. 三方分歧点（含裁决）\n\n**D1 工具并发到底冲不冲突 —— A 与 C 正面对立，B 居中**\n- A：并发是**叠加不打架**，harness 自己按工具声明并行，插件的 tools 节点只是第二层并发；插件仅把 `glob`/`grep` 和只读 shell 有意从独占判定里放开。\n- C：原生「独占工具单独跑」的保证**跨节点丢失**——`src/batch.ts` 的 `runBatch` 只在单个 tools 节点内复刻波次逻辑，`src/tool.ts` 的 `runPlan` 用 `Promise.all` 并行节点，两个节点同时调 `write`/`edit` 无人拦，唯一分隔是模型自己申报的 `writes`（`src/plan.ts` 的 `buildGroups`）。\n- B：方向与 harness 一致，但插件另写了一套 shell 只读分类器，且默认 shell 工具名 `ops_bash` 在当前 harness 里**不存在**（现为 `bash`/`pwsh`），这条规则在默认部署里基本是死的。\n- **裁决**：倾向 C。harness 的独占保证粒度是「一轮内按调度波次」，插件把节点并行之后粒度就断了；A 的「不打架」前提（节点之间 harness 也会保证独占）不成立。B 指出的 `ops_bash` 死配置进一步说明插件的并发策略表没对准当前 harness。\n\n**D2 原生后台子代理 / 插件 `bg` 是漏洞还是补洞 —— A 偏漏洞、B 偏补洞、C 判「移除而非和解」**\n- A：`src/background.ts` 的 `bg` 起的是**无主作业**，寿命整个回合，节点预算管不住，只有回合末 `Background.reap` 才收；原生 subagent 的 `run_in_background` 同样不受节点预算管、不进图报告——后台活是规则破口。\n- B：插件的 `bg` 与 harness 的 job registry **共用同一套**，`job_output`/`job_kill` 照常可用，没有第二套作业系统；插件那份恰好补上「子会话作业父会话读不到」的洞。"
+}
