@@ -22,7 +22,6 @@ import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import {
   capNodeOutput,
-  scrubConclusion,
   renderBatch,
   runBatch,
   type BatchArgs,
@@ -125,7 +124,7 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
     + 'it; (2) roughly how — the method in a line or two, not a transcript; (3) what came of it — the result, '
     + 'whether it worked, and what is still open. No line numbers, no citations and no command log as proof, '
     + 'and never write 证据 / evidence / proof / citation / 行号: a sentence that reaches for those is a '
-    + 'receipt, not a conclusion, and it is dropped before the parent reads it. Keep it short — a few '
+    + 'receipt, not a conclusion, and the parent wants the conclusion. Keep it short — a few '
     + 'paragraphs or a short list, no tables of counts or rankings and no inventory of what you looked at — '
     + 'even when the task above asks for a fuller report; the parent composes the final answer.'
     + String.fromCharCode(10) + String.fromCharCode(10)
@@ -267,7 +266,7 @@ async function runNode(
         id: node.id,
         kind: node.kind,
         ok: resumed.error === undefined,
-        output: scrubConclusion(resumed.output),
+        output: resumed.output,
         error: resumed.error ?? '',
       }
     }
@@ -306,7 +305,7 @@ async function runNode(
       id: node.id,
       kind: node.kind,
       ok: result.error === undefined,
-      output: scrubConclusion(result.output),
+      output: result.output,
       error: result.error ?? '',
     }
   }
@@ -340,7 +339,7 @@ async function runNode(
     id: node.id,
     kind: node.kind,
     ok: result.error === undefined,
-    output: scrubConclusion(result.output),
+    output: result.output,
     error: result.error ?? '',
   }
 }

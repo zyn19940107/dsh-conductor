@@ -6,7 +6,7 @@
  * look at the overlap rather than at a summary.
  */
 
-import { capNodeOutput, capOutput, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, scrubConclusion, type BatchRunner } from '../src/batch.js'
+import { capNodeOutput, capOutput, MAX_CALL_OUTPUT_CHARS, MAX_NODE_OUTPUT_CHARS, runBatch, type BatchRunner } from '../src/batch.js'
 
 let failures = 0
 
@@ -186,37 +186,6 @@ console.log('a call that fails is reported, not thrown')
   check('the node cap says what it dropped', capped.includes("characters of this node's 50000-character output were left out"))
   check('the node cap names every call', capped.includes('1. read ok') && capped.includes('2. pwsh failed'))
   check('a small tools node is untouched', capNodeOutput('short', results) === 'short')
-}
-
-// A conclusion carries the verdict, not the receipts: lines that reach for a
-// line number, an import or a piece of evidence are dropped before the parent
-// reads them.
-{
-  const text = [
-    'The verify scripts are hand-rolled: run-specs bundles each and runs it in node.',
-    'The rule lives in src/rounds.ts and the field is delegationDepth.',
-    '证据：batch.ts:351 连着三处调用。',
-    'Line numbers: L6, L8.',
-    'The result is that all 8 specs pass.',
-  ].join('\n')
-  const scrubbed = scrubConclusion(text)
-  check('receipt lines with 证据 are dropped', scrubbed.includes('证据') === false)
-  check('receipt lines with line numbers are dropped', scrubbed.includes('L6') === false)
-  check('the conclusion itself survives', scrubbed.includes('all 8 specs pass'))
-  check('a named file and field survive', scrubbed.includes('src/rounds.ts') && scrubbed.includes('delegationDepth'))
-  check('ordinary lines survive', scrubbed.includes('run-specs bundles each'))
-  const allReceipts = '证据: a\n行号: L3'
-  check('an all-receipt conclusion is left alone', scrubConclusion(allReceipts) === allReceipts)
-  check('plain text is untouched', scrubConclusion('the suite passes') === 'the suite passes')
-  // The whole report on one line, ending in a sentence that describes this rule.
-  // Dropping the line would take the fact at the start of it too; only the
-  // receipt sentence may go.
-  const oneLine = '嵌套深度由 maxAgentDepth 把关，按 session.header.delegationDepth 判定，超了就失败。'
-    + '报告还会过 scrubConclusion，把「行号/证据/proof/citation」那类收据句整行剔掉。'
-  const keptOneLine = scrubConclusion(oneLine)
-  check('a receipt sentence on a long line does not take the facts with it',
-    keptOneLine.includes('delegationDepth') && keptOneLine.includes('maxAgentDepth'))
-  check('and the receipt sentence itself is gone', keptOneLine.includes('行号') === false)
 }
 
 if (failures > 0) {

@@ -261,41 +261,6 @@ ${note}
 ${tail}`
 }
 
-/**
- * The words that turn a conclusion into a receipt.
- *
- * A child reports to a parent the way a manager expects a report: the
- * conclusion, not the paperwork. These are the words people reach for when they
- * start attaching proof — a line number, an import that shows where something
- * came from, a citation — and the rule says none of them survives into the
- * report. They are removed rather than asked away because a prompt has not once
- * been enough on its own.
- */
-const RECEIPT_PATTERN = /证据|行号|\bL\d+\b|\bline\s+numbers?\b|\bevidence\b|\bproof\b|\bcite[sd]?\b|\bcitation\b/i
-
-/**
- * Drop the receipt sentences from a conclusion.
- *
- * A line that names a line number, an import or a piece of evidence is not a
- * conclusion — it is the paperwork behind one. Dropping the whole line keeps
- * the rest of the report readable; when every line is a receipt the conclusion
- * is returned as it came, because an empty answer is worse than a verbose one.
- *
- * @param output - the conclusion a child returned.
- * @returns the conclusion without its receipt lines.
- */
-export function scrubConclusion(output: string): string {
-  // A receipt is a sentence, not a paragraph. Dropping whole lines lost this
-  // once: a worker wrote its whole report as one line and ended it by describing
-  // this very rule — the word 行号 in that last sentence took the delegation-depth
-  // fact at the start of the line with it, and the parent never saw it. So the
-  // text is split at sentence ends as well as newlines, and only the sentences
-  // that are receipts go.
-  const sentences = output.split(/(?<=[。！？!?])|\n/)
-  const kept = sentences.filter(sentence => !RECEIPT_PATTERN.test(sentence))
-  const out = kept.join('').replace(/\n{3,}/g, '\n\n').trim()
-  return out === '' ? output : out
-}
 
 /**
  * How many times one failed call may be repaired.
