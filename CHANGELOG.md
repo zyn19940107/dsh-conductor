@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.8.0
+
+### 新增
+
+- **`bg` 工具：把长命令起成"不属于任何会话"的后台任务。**
+
+  机制约束（来自 `dsh-jobs` 契约与 `dsh-jobs-local` 实现）：任务归发起它的会话所有，读取按 owner 校验；**子会话被销毁时它的任务会被取消**，父会话也读不到。所以把 handle 交给父代理的前提是任务从出生起就 `unowned`——unowned 任务对任何会话可见，且活到 harness 退出。
+
+  `bg` 用 `ctx.jobs.start({ kind: 'bash', label, run })` 起命令（**不带 owner**），返回 job id；输出按 stdout/stderr 进环，30 分钟硬上限，取消时在 Windows 上用 `taskkill /T` 收整棵进程树。
+
+- **节点结果自动携带 handle。** 节点结束时，插件把它在本次会话里起的、仍在运行的任务附在结果末尾：
+
+  ```
+  [background jobs still running — the next round can collect these with job_output]
+  - bash-2 (running): python -c "import time; time.sleep(45); print('BG-CUT-77')"
+  ```
+
+  父代理下一轮直接用 `job_output`（可带 `wait` / `timeout_ms`）收集，或 `job_kill` 停掉——不需要任何新工具，也不需要由子代理转述。
+
+- **教条**：预期要跑几分钟的命令（测试套件、基准、构建）走 `bg`，不要阻塞在 shell 里；"节点阻塞在长命令上，预算到点会同时丢掉预算和这段工作"。
+- **收尾报告**多一问：起过哪些后台任务、id 是什么（它们会继续跑，下一轮来收）。
+
+### 验证
+
+新增 `bgprobe`（两阶段，166 秒，2/2）：
+
+1. tools 节点用 `bg` 起 `sleep 12; print('BG-DONE-42')`。图返回后父代理 `job_output({"job_id":"bash-1"})` 读到 `BG-DONE-42` —— unowned 任务跨会话可读。
+2. worker 只有 15 秒预算，用它起一条要跑 45 秒的命令。预算到点后 worker 写报告结束，计划结果自动带上 `bash-2 (running)` 的 handle；父代理 `job_output({"job_id":"bash-2","wait":true,"timeout_ms":30000})` 读到 `BG-CUT-77` —— **节点被预算掐断，它起的后台任务没有被杀**。
+
+### specs
+
+- 新增 `verify/background.spec.ts`：任务必须以**无 owner** 启动（这是全部前提）、handle 只列 live 的任务、已结算的不再交接、没有 job registry 的部署明确拒绝。
+
 ## 2.7.0
 
 ### 行为

@@ -112,6 +112,38 @@ export const BUDGET_PROBE = {
 }
 
 /**
+ * A probe for a background job that outlives the node that started it.
+ *
+ * The job is started through the plugin's `bg` tool, which registers it
+ * unowned: no session owns it, so no session teardown cancels it and any
+ * conversation may read it. The point under test is that the parent — a
+ * different session from the one that started it — can still collect it with the
+ * ordinary job_output tool once the node that started it is gone.
+ */
+export const BG_PROBE = {
+  text: [
+    '这是一个机制验证任务：验证插件起的后台任务不属于任何会话（unowned），所以启动它的节点结束后它还在跑，父代理能直接读它。',
+    '',
+    '请交一张图，criteria 写「tools 节点用 bg 起了一个后台任务，图返回后父代理能用 job_output 读到它的输出 BG-DONE-42」，nodes 原样照抄：',
+    `{"id": "slow", "kind": "tools", "calls": [{"name": "bg", "arguments": {"command": "python -c \\"import time; time.sleep(12); print('BG-DONE-42')\\""}}]}`,
+    '',
+    '等这张图回来之后：',
+    '1. 从报告里拿到 bg 返回的 job id；',
+    '2. 用 job_output 读它（如果还没结束就再读一次），把输出原样复述给我；',
+    '3. 说明这个 job 为什么父代理能读到。',
+    '',
+    '然后做第二件事，验证「节点被预算掐断时，它起的后台任务不会被杀」：',
+    '4. 再交一张图，nodes 原样照抄下面这个（一个只有 15 秒预算的 worker，它起的命令要跑 45 秒）：',
+    `{"id": "cut", "kind": "worker", "budgetMs": 15000, "task": "用 bg 工具起这条命令：python -c \\"import time; time.sleep(45); print('BG-CUT-77')\\"。起完立刻把 job 的 id 写进你的结论，不要等它跑完，也不要用别的工具去等它。"}`,
+    '5. 这张图回来后（那个 worker 会被它的预算停下），用 job_output 读它报告的那个 job——可能要多读几次，直到输出出现——把输出复述给我，并说明这个后台任务有没有跟着 worker 一起被杀。',
+  ].join(String.fromCharCode(10)),
+  judge: judgeBy([
+    { what: '读到了第一个后台任务的输出', any: ['BG-DONE-42'] },
+    { what: 'worker 被预算停下后，它起的后台任务仍然跑完并被读到', any: ['BG-CUT-77'] },
+  ]),
+}
+
+/**
  * A probe for a call that outlives its node's budget.
  *
  * The node's budget is 20 seconds; the call it must run blocks for 180. The
@@ -218,7 +250,7 @@ export const GOAL_PROBE = {
 }
 
 export const TASKS = { goalprobe: GOAL_PROBE, forkerprobe: FORKER_PROBE, leadprobe: LEAD_PROBE,
-  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, toolprobe: TOOL_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
+  survey: SURVEY, chain: CHAIN, review: REVIEW, budgetprobe: BUDGET_PROBE, toolprobe: TOOL_PROBE, bgprobe: BG_PROBE, ...SCENARIOS, ...PUBLIC_TASKS, ...LHTB_TASKS, ...LHTB_NBODY_TASKS, ...LHTB_MATPOWER_TASKS }
 
 /**
  * Build a criterion checker from a list of requirements.
