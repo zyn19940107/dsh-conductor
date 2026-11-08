@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 5,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 133928,
+  "timedOut": false,
+  "sessionId": "session-4930e031-4c88-407f-966f-19c72c3d29db",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 5900,
+    "outputTokens": 2893,
+    "cacheReadTokens": 21537,
+    "totalTokens": 30330
+  },
+  "formation": {
+    "agents": 3,
+    "input": 104029,
+    "output": 19589,
+    "cacheRead": 701794,
+    "total": 825412,
+    "steps": 31
+  },
+  "mainPrompt": 15921,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 4040,
+  "thinkingPreview": "Let me start by understanding the task. The user asks three read-only questions about a project at D:\\code\\vibe\\dsh-refine-loop.\n\nLet me first explore the directory structure. The plan should come first as my first message. Let me design a plan.\n\nRound 1: I need to:\n1. List verify/*.spec.ts files and read them to find the entry functions under test.\n2. List src/**/*.ts modules and check which have corresponding specs.\n3. Find the module with most lines among those without specs.\n\nWait — question 3: \"这些模块里行数最多的是哪一个?\" — \"these modules\" refers to the ones without corresponding spec (from Q2). So among modules without specs, which has most lines.\n\nLet me design nodes:\n- node \"list-files\": tools node that lists verify/*.spec.ts and src/**/*.ts (glob).\n- node \"spec-entries\": worker that reads each spec file and determines the entry function under test. But this depends on knowing the file list",
+  "finalText": "## 1. verify 下每个 .spec.ts 实际测的入口函数\n\n这些不是 vitest 用例——每个 `verify/*.spec.ts` 是独立 node 脚本（自带 `check()` 断言、末尾 `process.exit(1)`），由 `verify/run-specs.mjs` 用 esbuild 打包后逐个跑。被测入口以「从 `../src` import 且在断言里真被调用」为准：\n\n| spec | 实际测的入口函数 |\n|---|---|\n| batch.spec.ts | `runBatch`（src/batch.ts）＋ `capOutput`/`capNodeOutput` |\n| concurrency.spec.ts | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`（src/concurrency.ts 三入口全测）＋ 借用 `runBatch` 验排布 |\n| fork.spec.ts | `buildSeedFromNow`、`openTurnClosers`、`reportPrompt`、`Reporters`（src/fork.ts 四入口全测） |\n| output-schema.spec.ts | `applyPlanTool`（src/tool.ts），但只取其注册的 `output.schema`，不碰 execute |\n| parked.spec.ts | `Parked` 类：`park`/`list`/`resume`/`retain`/`disposeAll`（src/parked.ts） |\n| plan.spec.ts | `parsePlanArgs`、`buildGroups`（src/plan.ts）＋ `runPlan`、`renderPlan`、`PLAN_TOOL_DESCRIPTION`（src/tool.ts）＋ `REFINE_GUIDANCE`（src/index.ts） |\n| refine.spec.ts | `parseBatchArgs`、`renderBatch`（src/batch.ts）＋ `parsePolicyCommand`（src/policy.ts） |\n| repair.spec.ts | `runBatch` 的修复分支（src/batch.ts）＋ `parseRepair`（src/repair.ts） |\n| retain.spec.ts | `applyReportRetention`（src/index.ts）＋ 常量 `PLAN_TOOL`（src/tool.ts） |\n| rounds.spec.ts | `Rounds`、`Workers`、`applyTurnDoctrine`、`applyReportGuard`、`applyWorkerRule`、`isWorkerConversation`、`startOf`、`formatClock` 及常量 `ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN`/`REPORT_ONLY`（src/rounds.ts） |\n| tools-tool.spec.ts | `applyToolsTool`、`readToolsCalls`、`TOOLS_TOOL`（src/tools-tool.ts） |\n\n## 2. src 下没有对应 spec 的模块\n\nsrc 共 11 个模块：batch、concurrency、fork、index、parked、plan、policy、repair、rounds、tool、tools-tool。\n\n- **按「同名 spec」判定，3 个没有自己的 spec 文件**：`src/index.ts`（插件主入口 apply、Config schema、REFINE_GUIDANCE、applyReportRetention）、`src/policy.ts`（`/dsh-conductor on|off`、SessionPolicy、applyPolicyMessage/applyPolicyCommand）、`src/tool.ts`（runPlan / renderPlan / applyPlanTool / PLAN_TOOL）。\n- **按「被任意 spec import」判定，11 个全都被引用过**，模块级无孤儿——但被 import ≠ 被测：`index.ts` 的 `apply` 与 Config schema 从未被调用；`policy.ts` 只有 `parsePolicyCommand` 被测；`fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`、`rounds.ts` 的 `Plans`/`applyRounds`/`applyDelegationRule`/`applyJudgementGuard`/`isModelCall`、`repair.ts` 的 `askForRepair`/`repairSystem`/`describeFailure`/`collectText` 都无人触碰。\n\n## 3. 行数最多的模块\n\nsrc 全集实际行数：fork.ts 712、**tool.ts 671**、rounds.ts 481、batch.ts 448、**index.ts 395**、policy.ts 241、concurrency.ts 234、plan.ts 225、tools-tool.ts 174、repair.ts 173、parked.ts 156。\n\n- 在「没有同名 spec」的三个模块（index.ts / policy.ts / tool.ts）里，行数最多的是 **`src/tool.ts`，671 行**。\n- 若改用「自己的入口函数完全没被测」的口径，则是 **`src/index.ts`，395 行**（`apply` 从未被调用）。\n- 整个 src 最大的文件是 `src/fork.ts`，712 行。\n\n**额外发现（两个 worker 独立报出的一致结论）**：`verify/run-specs.mjs` 的 specs 列表只有 10 项，**漏掉了 `repair.spec.ts`**——磁盘上有 11 个 spec，但 `pnpm specs` 不会跑它，`src/repair.ts` 在实际测试路径上是零覆盖。\n\n全程只读，未修改任何文件。"
+}

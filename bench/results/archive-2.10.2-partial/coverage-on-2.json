@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 181358,
+  "timedOut": false,
+  "sessionId": "session-2c7fadb9-03ad-4ed2-87bb-7b2ffbb11b18",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 15859,
+    "outputTokens": 2341,
+    "cacheReadTokens": 12544,
+    "totalTokens": 30744
+  },
+  "formation": {
+    "agents": 3,
+    "input": 98925,
+    "output": 24852,
+    "cacheRead": 751744,
+    "total": 875521,
+    "steps": 31
+  },
+  "mainPrompt": 17002,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 1164,
+  "thinkingPreview": "The two workers agree on all three answers. The inventory tools node's glob for src/**/*.ts and verify/**/*.spec.ts returned \"No files found\" — but that's because the path was relative to workspace root maybe, and workers did their own globs successfully. So the data is consistent.\n\nI have everything needed. Write the conclusion.\n\nNote the discrepancy: src-coverage says parked.spec.ts exercises park/list/resume; spec-entry-points says park/resume/retain/list/disposeAll. Minor. Also both agree tool.ts 671 lines largest among spec-less.\n\nLet me write the conclusion in Chinese since the user asked in Chinese.\n\nI should mention the extra finding about run-specs.mjs missing repair.spec.ts.\n\nI don't need another plan round — the request is answered. The instructions say \"If you already have what you need, hand over the empty plan and go straight to the conclusion.\" Hmm — actually that refers t",
+  "finalText": "三个问题都有结果了，两个独立视角（按 spec 读入口、按模块做覆盖映射）结论一致。\n\n---\n\n## 1. 每个 `.spec.ts` 实际测的入口函数\n\n`verify/` 下共 11 个 spec：\n\n| spec | 实际被调用的入口 | 来自 |\n|---|---|---|\n| `batch.spec.ts` | `runBatch`，`capOutput` / `capNodeOutput` | `src/batch.ts` |\n| `concurrency.spec.ts` | `buildOverrides`、`isReadOnlyCommand`、`mayRunTogether`（+ `runBatch` 测独占顺序） | `src/concurrency.ts` / `src/batch.ts` |\n| `fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers`、`reportPrompt`、`Reporters` | `src/fork.ts` |\n| `output-schema.spec.ts` | `applyPlanTool`（抓注册工具的 output schema） | `src/tool.ts` |\n| `parked.spec.ts` | `Parked` 类：`park` / `resume` / `list`（另 `retain` / `disposeAll`） | `src/parked.ts` |\n| `plan.spec.ts` | `runPlan`、`renderPlan`、`PLAN_TOOL_DESCRIPTION`；`parsePlanArgs`、`buildGroups`、`WORKER_MARKER`；`REFINE_GUIDANCE` | `src/tool.ts` / `src/plan.ts` / `src/index.ts` |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch`；`parsePolicyCommand` | `src/batch.ts` / `src/policy.ts` |\n| `repair.spec.ts` | `parseRepair`；`runBatch`（repair 走一遍批处理） | `src/repair.ts` / `src/batch.ts` |\n| `retain.spec.ts` | `applyReportRetention`；`PLAN_TOOL` | `src/index.ts` / `src/tool.ts` |\n| `rounds.spec.ts` | `Rounds`、`applyTurnDoctrine`、`applyReportGuard`、`applyWorkerRule`、`isWorkerConversation`、`startOf`、`formatClock`、`NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN`/`REPORT_ONLY`；`WORKER_MARKER`；`Reporters` | `src/rounds.ts` / `src/plan.ts` / `src/fork.ts` |\n| `tools-tool.spec.ts` | `applyToolsTool`、`readToolsCalls`、`TOOLS_TOOL` | `src/tools-tool.ts` |\n\n注意 `refine.spec.ts` 名字叫 refine，实际没测任何 refine 模块——它测的是 `batch.ts` 的参数解析 + `policy.ts` 的命令解析。\n\n## 2. `src/` 下没有对应 spec 的模块\n\n`src/` 共 11 个 `.ts`（无子目录、无 `.d.ts`）。按 `src/X.ts` ↔ `verify/X.spec.ts` 的对应关系，**8 个有同名 spec，3 个没有**：\n\n- **`src/index.ts`**\n- **`src/policy.ts`**\n- **`src/tool.ts`**\n\n但\"没有同名 spec\"≠\"完全没被测到\"。这三个都被别的 spec 从侧面调用到：`policy.ts` 只被 `refine.spec.ts` 调了 `parsePolicyCommand`（`SessionPolicy`、`runPolicyCommand`、`applyPolicyMessage`、`applyPolicyCommand`、`policyConfirmation` 全未被调用）；`tool.ts` 被 `plan.spec.ts` / `output-schema.spec.ts` 覆盖；`index.ts` 只被 `applyReportRetention` 和 `REFINE_GUIDANCE` 覆盖——它的插件入口 `apply(ctx, config)`、`Config` schema、内部 `repairFailedCall` 从未被调用。\n\n真正的空白是**导出级别**的，不是模块级别的。\n\n## 3. 行数最多的\n\n**`src/tool.ts`，671 行。**\n\n全部模块行数排名（`src/fork.ts` 712 是整体最大的，但它有 `fork.spec.ts`）：\n\n```\nfork.ts 712  tool.ts 671  rounds.ts 481  batch.ts 448  index.ts 395\npolicy.ts 241  concurrency.ts 234  plan.ts 225  tools-tool.ts 174\nrepair.ts 173  parked.ts 156\n```\n\n---\n\n**附带发现（可能比问题本身更重要）**：`verify/run-specs.mjs`（`pnpm specs` 脚本）只枚举了 10 个 spec，**`repair.spec.ts` 不在其中**。也就是说这个 spec 存在但项目自己的测试命令根本不会跑它，`src/repair.ts`（173 行）实际上完全没被覆盖。\n\n全程只读，未修改任何文件。"
+}

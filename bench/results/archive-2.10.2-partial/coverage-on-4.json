@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 111601,
+  "timedOut": false,
+  "sessionId": "session-1303fdcc-5be1-41b1-a441-a62fc66788c1",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 7135,
+    "outputTokens": 3646,
+    "cacheReadTokens": 22323,
+    "totalTokens": 33104
+  },
+  "formation": {
+    "agents": 3,
+    "input": 125741,
+    "output": 32031,
+    "cacheRead": 737181,
+    "total": 894953,
+    "steps": 21
+  },
+  "mainPrompt": 17942,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 7341,
+  "thinkingPreview": "Let me plan. The user asks three questions about D:\\code\\vibe\\dsh-refine-loop — read-only.\n\nI need to:\n1. Find each .spec.ts under verify/ and determine what entry function it actually tests.\n2. Find all .ts modules under src/ and which have no corresponding spec.\n3. Of those modules, which has the most lines, and how many.\n\nThis is a read-only analysis task. I can do it with tools (glob, grep, read). Possibly delegate to subagents. Let me first explore quickly — actually the protocol says the first message of the round IS the plan, handed over before any tool call. Hmm, \"your first message of the round IS the plan: you hand it over before you call anything else, no tool call comes first.\"\n\nSo I should design a plan first and call refine_plan. But I need to know the file structure to design the plan well... I can design a generic plan: a tools node that lists files, and worker nodes that",
+  "finalText": "## 1. 每个 verify/*.spec.ts 实际测的入口函数\n\n| spec 文件 | 目标 src 模块 | 实际测试的入口函数 |\n|---|---|---|\n| `verify/refine.spec.ts` | `src/batch.ts` + `src/policy.ts` | `parseBatchArgs`、`renderBatch`、`parsePolicyCommand`（**不测 `src/index.ts`**） |\n| `verify/batch.spec.ts` | `src/batch.ts` | **`runBatch`**（主入口）、`capOutput`、`capNodeOutput` |\n| `verify/concurrency.spec.ts` | `src/concurrency.ts` + `src/batch.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`；外加 `runBatch`（验批内顺序） |\n| `verify/plan.spec.ts` | `src/tool.ts` + `src/plan.ts` + `src/index.ts` | **`runPlan`**、`renderPlan`、`PLAN_TOOL_DESCRIPTION`；`parsePlanArgs`、`buildGroups`、`WORKER_MARKER`；`REFINE_GUIDANCE` |\n| `verify/rounds.spec.ts` | `src/rounds.ts` + `src/plan.ts` + `src/fork.ts` | **`applyTurnDoctrine`**、`applyReportGuard`、`applyWorkerRule`、`Rounds`、`Workers`、`isWorkerConversation`、`startOf`、`formatClock`；常量 `NEXT_ROUND`/`ROUND_LOOP`/`WORKER_NO_PLAN`/`REPORT_ONLY` |\n| `verify/fork.spec.ts` | `src/fork.ts` | **`buildSeedFromNow`**、`openTurnClosers`、`reportPrompt`、`Reporters` |\n| `verify/retain.spec.ts` | `src/index.ts` + `src/tool.ts` | **`applyReportRetention`**（唯一入口函数）+ 常量 `PLAN_TOOL` |\n| `verify/output-schema.spec.ts` | `src/tool.ts` | **`applyPlanTool`**（取注册后的 output schema） |\n| `verify/parked.spec.ts` | `src/parked.ts` | **`Parked` 类**（`park`/`list`/`resume`/`retain`/`disposeAll`） |\n| `verify/tools-tool.spec.ts` | `src/tools-tool.ts` | **`applyToolsTool`**、`readToolsCalls`、常量 `TOOLS_TOOL` |\n| `verify/repair.spec.ts` | `src/batch.ts` + `src/repair.ts` | `runBatch`（带修复回调路径）+ `parseRepair` |\n\n11 个 spec 都真实调用了 `src` 里的函数，没有\"只测常量\"的水 spec。\n\n## 2. 没有对应 spec 的 src 模块\n\nsrc 共 11 个模块。按两种口径：\n\n- **没有同名专属 spec 文件**：`src/policy.ts`（241 行）、`src/index.ts`（395 行）、`src/tool.ts`（671 行）。\n  - `policy.ts` 只在 refine.spec.ts 里测了 `parsePolicyCommand` 一个函数，`SessionPolicy`/`runPolicyCommand`/`policyConfirmation`/`applyPolicyMessage`/`applyPolicyCommand` 无人问津。\n  - `index.ts` 插件主入口 `apply` 和 `Config` schema 完全没测，只测了 `applyReportRetention` + `REFINE_GUIDANCE`。\n  - `tool.ts` 反而测得不错，只是分散在 plan.spec.ts（`runPlan`/`renderPlan`）和 output-schema.spec.ts（`applyPlanTool`）里，没有 tool.spec.ts。\n- **完全没有任何 spec 触及**：**没有**。每个模块至少有一个导出被调用过。\n\n## 3. 行数最多的模块\n\n- **缺专属 spec 的那批里：`src/tool.ts`，671 行**（其次 index.ts 395、policy.ts 241）。\n- src 全体里最长的其实是 `src/fork.ts`，**712 行**，但它有 fork.spec.ts 覆盖。\n\n完整行数（降序）：fork 712、tool 671、rounds 481、batch 448、index 395、policy 241、concurrency 234、plan 225、tools-tool 174、repair 173、parked 156。\n\n---\n\n顺带一个发现：`verify/repair.spec.ts` **不在 `verify/run-specs.mjs` 的执行列表里**，写了但从不运行 —— 所以 `src/repair.ts` 的实际有效覆盖比看上去更弱。\n\n全程只读，未创建、修改或删除任何文件。"
+}

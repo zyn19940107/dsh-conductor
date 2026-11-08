@@ -1,0 +1,55 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 4,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 62008,
+  "timedOut": false,
+  "sessionId": "session-acfa0355-ff61-49da-94ef-b8a912639ea7",
+  "stderr": "",
+  "steps": 9,
+  "toolCalls": 15,
+  "tools": [
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "read",
+    "grep",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 71563,
+    "outputTokens": 9423,
+    "cacheReadTokens": 412672,
+    "totalTokens": 493658
+  },
+  "formation": {
+    "agents": 1,
+    "input": 71563,
+    "output": 9423,
+    "cacheRead": 412672,
+    "total": 493658,
+    "steps": 9
+  },
+  "mainPrompt": 79613,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 17428,
+  "thinkingPreview": "Let me read the three key source files: src/plan.ts, src/policy.ts (likely the enforced rule), src/tool.ts.\n\nLet me read them in parallel.\nNow I need to find the \"forced rule\" — \"one plan per turn\" seems to be the rule (\"the rule that makes a turn one plan\"). Let me look at src/tool.ts and src/rounds.ts to find where the rule is enforced.\n\nLet me read src/tool.ts and src/rounds.ts.\nNow I have a good understanding. Let me also check src/index.ts to see how these are wired, and src/fork.ts for the child-agent limits (budget, report guard, etc.). And batch.ts for the tool call argument handling.\n\nKey question 1: \"调用参数是怎么处理的?\" — how are call arguments handled? In plan.ts: `arguments: unknown`, `args === undefined ? {} : args`. Then in batch.ts runBatch, calls are dispatched via runner with arguments. Let me check batch.ts to see how arguments are validated/handled (e.g., JSON schema validati",
+  "finalText": "三份代码都读完了(`src/plan.ts`、`src/rounds.ts`、`src/policy.ts`、`src/tool.ts`、`src/fork.ts`、`src/batch.ts`、`src/concurrency.ts`、`src/index.ts`)。以下按三部分独立给结论。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构\n\n**结论:计划是一棵\"单层\"的有向无环图(实际就是一层),由 `criteria`(验收标准)+ `nodes`(节点数组)组成;节点只有四种 kind;调用参数(`arguments`)在计划层几乎不被校验,原样透传到工具调用层,只在\"并发判定\"和\"失败修复\"两处被真正读取。**\n\n**数据结构(`plan.ts:57-98`)**\n\n```\nPlanArgs = { criteria: string[]; nodes: PlanNode[] }\nPlanNode = { id, kind, calls: PlanToolCall[], task, order, writes, budgetMs }\nPlanToolCall = { name: string; arguments: unknown }\n```\n\n**四种节点 kind(`plan.ts:24`)**\n\n| kind | 语义 | 关键区别 |\n|---|---|---|\n| `tools` | 参数已定好的工具调用批次 | 不起子代理,最便宜 |\n| `worker` | 继承当前对话、自己干活的叶子 | **不许画计划**、不许再委派 |\n| `spawner` | 从零开始、但走本插件循环起手的 leader | 任务里要带全量背景 |\n| `forker` | 继承当前对话(含本轮已读内容)的 leader | 任务只写目标与验收标准 |\n\n计划**没有 `after`、没有分层、没有依赖边**(`plan.ts:15-18`):需要别的节点输出的工作属于下一轮;必须按序的工作塞进一个节点(`order: \"sequential\"` 的 tools 节点或一个 worker)。\n\n**调用参数怎么处理(`plan.ts:158-176`、`batch.ts:316-359`、`concurrency.ts:222`)**\n\n1. **解析层**:节点级 schema 是 `additionalProperties: false`,未知字段先被 harness 挡掉;`parsePlanArgs` 只做最小归一——`name` 去空白、**`arguments` 缺失时补 `{}`**、类型是 `unknown`(JSON 原样),**计划层不校验参数形状**。整份计划是全有全无的:任一节点不合法就整个返回 `undefined`,工具直接抛错重来。\n2. **执行层**:参数原样交给 `runner.execute({ name, arguments })`,走的是工具注册表的完整管线(所有 guard/policy 仍然生效)。\n3. **并发判定层**:参数会被读一次——`mayRunTogether` 取 `args.command` 判断 shell 命令是否\"只读\"(可读命令白名单 + 禁止 `; | > & $ ()` 等元字符 + 危险 flag 黑名单),决定该调用能不能和别人同波并发(`concurrency.ts:138-156`)。\n4. **失败修复层**:参数是唯一可变的东西——调用失败时插件拿 `{name, arguments}` + 错误文本去问**该对话自己的模型**\"这次调用本该是什么\",最多修 2 次(`MAX_REPAIRS`),模型返回的新 `name/arguments` 直接替换后重跑(`batch.ts:325-357`、`repair.ts:139-158`)。注意修复版 `arguments` 必须是对象,数组/标量一律视为无效答案。\n\n**值得注意的点**\n- `budgetMs` 由模型自己声明,上限被硬夹在 `MAX_NODE_BUDGET_MS = 3_600_000`(1 小时);声明值非有限/≤0 一律当成 0(未声明)。\n- `buildGroups`(`plan.ts:200`)是唯一的调度逻辑:写同一文件的两个节点**不并发**;不声明 `writes` 的节点\"信它\",无从判断。\n- `criteria` 为空 → 整个计划被拒;但**空计划(nodes: [])是合法的**,语义是\"我已经有答案了,直接进结论\"。\n\n---\n\n## 二、插件强制的那条规则\n\n**结论:被强制的规则是\"一个回合 = 一个计划(一次 hand-over)\":回合的第一个动作必须是 `refine_plan`,计划跑完之后这个回合就只剩\"写结论\"或\"再交下一份计划\"两种可能,不允许逐个工具调用地干活,也不允许绕过计划直接委派。**\n\n**怎么实现的(共四道闸)**\n\n1. **教义(说服层)**:`applyTurnDoctrine`(`rounds.ts:192`)在**每个回合的第 1 步**,把 `ROUND_LOOP` 作为最后一条消息塞进上下文——\"你的第一个消息就是计划,不许先调工具;结果回来后再判断:写结论 or 交下一张图\"。\n2. **判定守卫(硬拦层)**:`applyJudgementGuard`(`rounds.ts:472`)注册工具 guard:\n   ```ts\n   if (!isModelCall(execution)) return undefined   // 计划内部的嵌套调用放行\n   if (execution.name === 'refine_plan') return undefined\n   if (plans.waiting(agent.session.id)) return undefined  // 还没交过计划 → 全放行\n   return JUDGE_ONLY                               // 交过计划之后 → 其它模型调用一律被拒\n   ```\n3. **委派收编**:`applyDelegationRule`(`rounds.ts:408`)把 harness 自带的 `subagent` / `subagent_fork` 重新注册(换描述指向 `refine_plan`),并在 `exec.callId === exec.rootCallId`(模型自己直接调)时抛 `DELEGATE_IN_GRAPH`;`list_agents` / `send_message` / `interrupt_agent` 被整个从工具表里隐藏。\n4. **worker 反向规则**:`applyWorkerRule`(`rounds.ts:365`)——worker 内部调 `refine_plan` 被 `WORKER_NO_PLAN` 拒绝(工具**保留在表里**是刻意的:工具表属于 request header,拿掉会让继承前缀命中不了缓存)。\n\n**触发条件(精确到状态机)**\n\n- `Plans`(`rounds.ts:125`)按 session 维护\"本次请求是否还没交过计划\":\n  - `applyRounds`(`rounds.ts:167`):回合里出现 user 消息 → `plans.expect(sessionId)` = **等待计划**;\n  - `index.ts:282` `onPlanFinished` 里 `plans.done(sessionId)` = **计划已交,进入\"只能判定\"状态**。\n- 所以守卫的实际触发链是:**用户发言 → 等待计划(什么都能调) → 第一次 `refine_plan` 跑完 → 该 session 的其它模型级工具调用全部被拒 → 只能再交一个 `refine_plan`(下一轮)或直接写结论**。\n- 每次用户发言会 `rounds.reset()`,轮次预算(`maxRounds`,默认 16)重新计数;超预算时回合直接结束,不再排下一轮。\n\n**可以关掉**:`/dsh-conductor off`(`policy.ts:68`)`agent.ctx.tools.restrict({ deny: ['refine_plan'] })`——工具从该对话的工具表里消失,系统提示里的 `REFINE_GUIDANCE` 也随之消失(systemPrompt section 靠 `ctx.tools.get(PLAN_TOOL, scope)` 判断)。因为工具没了就没人调 `onPlanFinished`,`plans.waiting` 永远为真,**判定守卫自然不再生效**——这是\"关掉\"真的关掉的关键机制。\n\n**值得注意的问题**\n- **关掉之后委派闸还在**:`applyDelegationRule` 是在 `agent/created` 上对**每个** agent 做的,不看 policy 状态。所以 `/dsh-conductor off` 之后,模型直接调 `subagent` 仍然会拿到 `DELEGATE_IN_GRAPH`(\"请加一个 worker/spawner/forker 节点到 refine_plan\"),而 `refine_plan` 已经不存在了——错误信息指向一个用"
+}

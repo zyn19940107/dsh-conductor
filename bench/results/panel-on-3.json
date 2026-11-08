@@ -4,41 +4,47 @@
   "index": 3,
   "profile": "bench-on",
   "exitCode": 0,
-  "wallMs": 1177181,
+  "wallMs": 1839108,
   "timedOut": false,
-  "sessionId": "session-fc441a51-da97-46be-b596-932aa26c650e",
+  "sessionId": "session-1ee42e92-0eb4-4149-9437-3cc5bd1aef42",
   "stderr": "",
-  "steps": 3,
-  "toolCalls": 2,
+  "steps": 8,
+  "toolCalls": 6,
   "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
     "refine_plan",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 17094,
-    "outputTokens": 25052,
-    "cacheReadTokens": 64040,
-    "totalTokens": 106186
+    "inputTokens": 40136,
+    "outputTokens": 22483,
+    "cacheReadTokens": 212480,
+    "totalTokens": 275099
   },
   "formation": {
-    "agents": 21,
-    "input": 996200,
-    "output": 253417,
-    "cacheRead": 15851610,
-    "total": 17101227,
-    "steps": 311
+    "agents": 33,
+    "input": 1672281,
+    "output": 518717,
+    "cacheRead": 33187200,
+    "total": 35378198,
+    "steps": 590
   },
-  "mainPrompt": 41230,
+  "mainPrompt": 59981,
   "correctness": {
-    "passed": 5,
+    "passed": 3,
     "total": 6,
     "missing": [
-      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+      "三份独立评审都给出(形状不符)",
+      "第一种视角(过度限制)(缺:过度限制)",
+      "第二种视角(可绕过)(缺:绕过)"
     ]
   },
   "planned": true,
-  "planAgentNodes": 4,
-  "thinkingChars": 23764,
-  "thinkingPreview": "Let me start by understanding the task: review the \"core rules\" of the DSH plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nI need to:\n1. Explore the plugin source\n2. Organize three independent reviews (mutually unaware of each other's conclusions)\n3. Each review must read relevant source code and point out implementation files\n4. Final summary: where the three agree and where they disagree\n\nPer the harness loop: my first message of the round IS the plan, handed over via refine_plan before any tool call.\n\nBut wait — I need to know the plugin structure to design a plan. Actually, the plan nodes are subagents that will do the exploration. I can design a plan that has each of three reviewers do their own exploration (forker or spawner nodes), each independently reading the source.\n\nLet me think about the design:\n- First, I might want a scouting node to map the repo — bu",
-  "finalText": "## 评审已完成(三份独立评审 + 一份补充)\n\n**执行说明(透明起见):** 第一轮里 `review-c`(spawner)空手而归、`ground-truth` 节点只回显了计划文本;第二轮用空白上下文的 worker 补上了第三份评审,并用 grep 独立核对了所有关键符号落点。`review-c-alt` 超出预算但已产出完整报告,作为**第四份补充意见**使用。**全程只读,未修改、创建、删除任何文件。**\n\n三份评审在同一轮同时启动、上下文为空,互不可见对方结论 —— 独立性靠\"同轮并发 + 空上下文\"保证,不靠事后声明。\n\n---\n\n## 规则的真实落点(三方共同的事实底座)\n\n| 规则要素 | 实现位置 | 性质 |\n|---|---|---|\n| 「每轮第一句话必须是图」 | `src/rounds.ts:23` `ROUND_LOOP` → `src/rounds.ts:192` `applyTurnDoctrine`(在 `agent/pre-step` 的 `step===1` 注入) | **提示词层** |\n| 「交完图再判断能不能给结论」 | `src/rounds.ts:49` `NEXT_ROUND`;`src/index.ts` 的 `onPlanFinished` | **提示词层**(无任何校验) |\n| 图的数据结构 | `src/plan.ts:121` `parsePlanArgs`;`src/tool.ts:47` `PLAN_TOOL='refine_plan'`、`src/tool.ts:433` `PLAN_TOOL_DESCRIPTION` | 插件自创 |\n| 运行时唯一真闸门① | `src/rounds.ts:472` `applyJudgementGuard`(图跑完后普通工具调用 → `JUDGE_ONLY`) | 运行时强制 |\n| 运行时唯一真闸门② | `src/rounds.ts:408` `applyDelegationRule` + `:64` `DELEGATION_TOOLS`(`subagent`/`subagent_fork` 按名拒,`callId===rootCallId` → `DELEGATE_IN_GRAPH`) | 运行时强制(按名) |\n| 插件自认边界 | `README.md:152-157`、`:563` 已知边界、`:583-584`、`:597` | 文档明说\"教条不是机制\" |\n\n---\n\n## 三份评审各自的判断\n\n### 评审 A(主视角:强制机制与可绕过性)\n\n- **Q1 过度限制**:成立,是**每轮固定成本**而非\"多余规划\"。`ROUND_LOOP` 要求首句是图,唯一出口是空图(`ROUND_LOOP` \"If you already have what you need, hand over the empty plan\")。但 `parsePlanArgs` 要求 `criteria` 非空 → 一句话回答也得先写 `criteria:['answered']`。`applyTurnDoctrine` 每轮重发 doctrine,固定 token 税。豁免只有人下的 `/dsh-conductor off`(`src/policy.ts`);worker 会话整体豁免(`src/rounds.ts:365` `applyWorkerRule`),顶层会话没有。\n- **Q2 可绕过**:**成立,主路径就是\"第一轮不交图\"**。`applyJudgementGuard` 里 `plans.waiting(session.id)` 为真时**放行一切**;`plans.expect` 只在收到**人类** user 消息时置位(`applyRounds`),`plans.done` 只在 `onPlanFinished` 调用,而 `NEXT_ROUND` 是 `system-prompt` 来源、不重新武装 → 模型全程不交图,所有直接工具调用畅通,结论闸门永不启动。插件没挂 `agent/turn-stopping`(README 自己点名这条拉回规则没加)。图也能做样:`parsePlanArgs` 放行空 `nodes`,空图渲染成 `Plan finished — 0 node(s) in 0 group(s)…`,与真图同形;`criteria` 自由文本且从不被核对;`writes` 按注释原话\"taken at its word\"。\n- **Q3 原生冲突**:\"不要求模型做 harness 拒绝的事\",但有**四处实质摩擦**:① 原生 `packages/plan/plan-mode/src/index.ts` 的 `exit_plan_mode` 在图跑完后被闸门拒掉 → plan 模式审批出口不可达;② 插件 `refine-loop:policy` 与原生 `plan:policy` 同抢 `packages/core/system-prompt/src/index.ts` 的 `PLAN_POLICY=500` 槽;③ 原生 `packages/subagent/tool-subagent/src/index.ts` 的 `tool:${toolName}` 段还在教\"一条 assistant 消息并行起多个子代理\",与插件教条互相矛盾;④ 并发语义重造(`src/plan.ts` `buildGroups` + `src/batch.ts` `runBatch` + `src/concurrency.ts` `mayRunTogether` 叠在原生调度器上),且 `HIDDEN_TOOLS`(`:74`)摘掉 `list_agents/send_message/interrupt_agent`,原生后台子代理能力净损失。\n- **Top3 风险**:第一轮零强制 > 派发漏洞(`workflow` 不在名单 + 改名即失效) > 图可做样。\n\n### 评审 B(主视角:认知负担与多余规划)\n\n- **Q1 过度限制**:**代价是实的,但不是\"多规划\",是\"多付一轮固定税\"**。每轮 = 1 次 `refine_plan` 调用 + 2 次模型回合(平凡任务最短两回合);每节点新增 `budgetMs`/`writes`/`criteria`/`id`/`kind` 等字段义务,而原生 plan 模式只要一份 markdown 计划等人审 → **叠加而非替代**。轮内禁止依赖 → 每条依赖边 = 一张新图 + 一个新回合;`DEFAULT_MAX_ROUNDS=16` 用尽后**静默结束,模型收不到提示**。豁免清点后只有\"空图\"一条,没有最小粒度、没有简单任务免图。插件自测:短任务收不回来(`README.md` coverage 归一 83s vs off 56s、token 509k vs 383k;quixbugs 184s vs 86s);多步探索型任务才净收益(humeval 89s/78s)。\n- **Q2 可绕过**:① 首轮直接做事再写结论(**插件自认**);② 空图(**教条鼓励**);③ 走过场图(一个 `tools` 节点装一条无关调用)通过形状校验;④ **原生 `workflow` 首轮扇出子代理**(不在 `DELEGATION_TOOLS` 也不在 `HIDDEN_TOOLS`);⑤ **在图内 `tools` 节点里调 `subagent`** —— `src/batch.ts` `runBatch` 给图内调用发新 `callId` 但沿用图的 `rootCallId`,`isModelCall` 为假 → 不触发 `DELEGATE_IN_GRAPH`,\"派发只能走图里\"两侧都有洞;⑥ deny 按名匹配,部署改名即失效;⑦ `/dsh-conductor off` 会话级豁免(回执原话\"the rule that makes a turn one plan is not enforced\")。\n- **Q3 原生冲突**:原生仓**根本没有 `refine_plan`/节点 kind**,所以不存在\"同名工具打架\",真冲突是**两套规划教条同屏**(`exit_plan_mode` 的\"markdown 计划 + 等人批\" vs 插件的\"JSON 节点图 + 自执行\",语义互斥)、**两条派发语义 + 第三条 spawn 路**(`src/fork.ts` 自 spawn 绕开原生 provider 栈与 `maxDepth`,自用 `DEFAULT_MAX_AGENT_DEPTH=3`)、**两套并发 +两只时钟**(`budgetMs` vs 原生 `packages/guard/timeout-policy` 的 `timeoutMs`)。另一个模型侧代价:`buildGroups` 按 `writes` 重叠把并行降级为串行分组,模型必须**预先猜对写集**才能拿到并行。\n\n### 评审 C(主视角:与 harness 原生能力的冲突)\n\n- **定性**:`refine_plan` 是插件自己的工具(`src/tool.ts` `PLAN_TOOL` + `applyPlanTool`),原生 harness 树里没有同名工具 → **不是\"加固原生\",是\"另起一套规划语义\"**。运行时真正生效的只有 `applyJudgement"
+  "planAgentNodes": 0,
+  "thinkingChars": 30981,
+  "thinkingPreview": "The user wants a three-party independent review of the \"core rule\" in the DSH plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only.\n\nLet me plan. First round: I need to read the source code to know what the plugin is. Let me start with a plan.\n\nActually the instruction says: the first message of the round IS the plan, hand it over before calling anything else. But I need to explore the repo first. Hmm — the loop says each round: (1) design plan — first message is the plan. But I need to know the file layout to design a plan. I think it's acceptable to do a quick discovery round first (tools node reading files), then design the three-reviewer round.\n\nLet me do round 1: discover the plugin source files with glob + grep, and read key files. Then round 2: three independent reviewer nodes (forker/spawner) each reading the source and producing an independent opinion.\n\nActually, the three reviewer",
+  "finalText": "评审已经完成，三份独立意见和汇总都已给出，无需继续。\n\n**最终结论**（已在上一条完整给出，此处压缩）：\n\n- **实现基线**：R1 在 `src/rounds.ts` 的 `ROUND_LOOP` + `applyTurnDoctrine`（`agent/pre-step`）；R2 在 `src/rounds.ts` 的 `applyJudgementGuard`；R3 在 `src/rounds.ts` 的 `applyDelegationRule`；辅助在 `src/tool.ts`、`src/plan.ts`、`src/fork.ts`、`src/batch.ts`、`src/concurrency.ts`、`src/policy.ts`。\n- **三方一致**：R1 只有提示词层（无 turn-stopping 守卫）；R2 机制只覆盖「图之后」；R3 是唯一真机制但 tools 节点嵌套调用是共同认定的缺口；短任务净亏长程净赚且无规模豁免；与原生 plan 模式同槽竞争、并发双调度器并存；README 落后于源码；两条硬守卫缺回归 spec。\n- **三方分歧**：原生 subagent 的定性（接管 / 替换留通道 / 叠加）、`off` 开关残留是否已坐实、A/B 数字可信度（off 基线包名错位 vs 现版本建图成本无实测）、`budgetMs` 是否仍属多余推理、判断期守卫误伤 `job_*` 是否算独立冲突、`tools` 批量工具能否免图、首要改进落点。\n- **未坐实的四处硬缺口**：`applyJudgementGuard` 的 waiting 放行分支、`SessionPolicy.appliesTo` 是否零调用、`verify/run-specs.mjs` 是否含 `repair.spec.ts`、README 截断数字 10k vs 代码 5000 的冲突。\n\n全程只读，未修改任何文件。"
 }

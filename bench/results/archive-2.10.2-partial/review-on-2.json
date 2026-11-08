@@ -1,0 +1,41 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 187856,
+  "timedOut": false,
+  "sessionId": "session-c0776738-f59c-4956-81f7-790fe4816453",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 17905,
+    "outputTokens": 7025,
+    "cacheReadTokens": 14924,
+    "totalTokens": 39854
+  },
+  "formation": {
+    "agents": 4,
+    "input": 148002,
+    "output": 41003,
+    "cacheRead": 1296379,
+    "total": 1485384,
+    "steps": 38
+  },
+  "mainPrompt": 21409,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 8685,
+  "thinkingPreview": "The user wants a read-only review of three parts of D:\\code\\vibe\\dsh-refine-loop:\n1. src/plan.ts — data structure of the plan, node kinds, how call arguments are handled\n2. The forced rule — what is it, how it's implemented in current code, trigger conditions\n3. src/tool.ts — how the plan is run, what limits apply to dispatched subagents\n\nThen summarize into one paragraph.\n\nThis is a read-only investigation task. I should plan the round: my first message must be the plan (refine_plan call) before any other tool call. Actually the instructions say: first message of the round IS the plan — hand it over before calling anything else.\n\nBut wait — the workspace instructions mention AGENTS.md says to call `dsh-plugin-sandbox` skill before modifying/debugging any DSH plugin. Here the task is read-only review, not modification. The skill is about developing/debugging plugins. Reading source code ",
+  "finalText": "三份审查都已完成（只读，未修改任何文件）。注意：该目录里的包实际以 `@zyn19940107/dsh-conductor` 名义发布，插件内的命令前缀是 `/dsh-conductor`，工具名是 `refine_plan`。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构、节点种类、调用参数\n\n**数据结构**（`src/plan.ts`）：\n\n- `PlanArgs` = `{ criteria: string[]; nodes: PlanNode[] }`，两者都必填，没有分层/边/依赖字段。\n- `PlanNode` = `{ id: string; kind: PlanNodeKind; calls: PlanToolCall[]; task: string; order: PlanNodeOrder; writes: string[]; budgetMs: number }`。\n- `PlanToolCall` = `{ name: string; arguments: unknown }`。\n- `PlanNodeKind` = `'tools' | 'worker' | 'spawner' | 'forker'`；`PlanNodeOrder` = `'parallel' | 'sequential'`。\n\n**四种节点**（常量 `AGENT_NODE_KINDS` = worker+spawner+forker，`WORKER_NODE_KINDS` = worker）：\n\n| kind | 语义 | 承载字段 |\n|---|---|---|\n| `tools` | 参数已定的工具调用，无子代理、无继承上下文 | 只用 `calls`，其 `task` 被丢弃 |\n| `worker` | 叶子子代理，继承当前对话，自己干活，**不画自己的图** | 只用 `task`，其 `calls` 被丢弃 |\n| `spawner` | leader，空启动，可自己再画图 | 只用 `task` |\n| `forker` | leader，继承当前对话，可自己再画图 | 只用 `task` |\n\n三种 agent 节点都由插件自己 spawn（不走 harness 的 `subagent` 工具），目的是插件握着子会话句柄以便到预算时停它。\n\n**调用参数怎么处理**：`arguments` 类型是 `unknown`，**原样透传**。`parsePlanArgs` 只在字段为 `undefined` 时补 `{}`，不重新 JSON 解析、不做逐工具 schema 校验、不包装信封；值原样进入 `batch.ts` 的 `runOne` → `runner.execute({ name, arguments })`，真正校验的是目标工具自己的入参 schema，且发生在执行时。计划工具 schema 里 `arguments: { type: 'json' }`，所以计划层接受任意 JSON 值。失败的调用可走 `repair.ts` 让模型改写 `{name, arguments}` 重试，最多 `MAX_REPAIRS + 1`（3）次。\n\n三个控制字段的消费点：`order` 只认精确字符串 `'sequential'`，其余一律 `'parallel'`；`writes` 仅用于 `buildGroups`/`canRunTogether`——声明了同一路径的节点被拆到不同组，不声明就\"照信\"（插件无从知道某次调用会动磁盘）；`budgetMs` 要求有限且 >0，四舍五入并被 `MAX_NODE_BUDGET_MS = 3,600,000` 封顶，0 表示未声明。\n\n**校验入口** `parsePlanArgs(value): PlanArgs | undefined` 是全有全无的：一个坏节点否掉整份计划，`tool.ts` 随即抛 `refine_plan needs criteria, and nodes that each have an id and a kind`。它拒绝：criteria/nodes 非数组、criteria 截断后为空、节点非对象、id 缺失或空白、kind 不在四种之内、id 重复、`tools` 节点无非空 `calls`、调用非对象或 name 空白、agent 节点缺 `task`。未知多余字段被忽略（但注册 schema 在节点与调用层都写了 `additionalProperties: false`，由宿主提前挡掉）；空节点列表合法，节点数超过 `maxBatchSize()` 则由工具另行拒绝。\n\n---\n\n## 二、这个插件强制的那条规则\n\n**规则本身：\"一轮一图\"**（a turn is one plan）。`src/index.ts` 的模块头是它自己的表述：*一次回合的第一件事是交图，图跑完这个回合就结束——图里没settle的事归下一轮。* 中文 README 里被真正执行的那半句是 **\"图跑完只能判断\"**：图跑完后模型只允许做两件事——写结论，或交下一张图；**\"模型自己发起的工具调用一律拒绝\"**。\n\n**关键切分**：\"一回合必须交图\"只是**教条不是机制**。README 明说 *\"「必须交图」不在上面这几条里\"*、*\"模型可以不交图：插件不强制。它只在「图已经跑完」之后拦工具调用\"*，v1.0 里那个\"无图拉回\"的 gate 已删。被强制的只有**判断阶段**这半。\n\n**实现机制**（主要在 `src/rounds.ts`）：\n\n- `applyJudgementGuard` —— `ctx.tools.guard` 钩子。当调用是模型自己发起的（`isModelCall`：`callId === rootCallId`）、工具不是 `refine_plan`、且 `Plans.waiting(sessionId)` 为假时拒绝，拒绝文案 `JUDGE_ONLY`。\n- `applyDelegationRule` —— 在 `agent/created` 上重注册 harness 自带的 `subagent`/`subagent_fork`，改写描述并加 execute包装，模型顶层发起委派即抛 `DELEGATE_IN_GRAPH`；计划内部的嵌套调用（callId ≠ rootCallId）放行。`list_agents`/`send_message`/`interrupt_agent` 被 `HIDDEN_TOOLS` 直接从工具表里摘掉。\n- `applyWorkerRule` —— 在 worker 会话里拒绝 `refine_plan`（`WORKER_NO_PLAN`）。工具**故意留在表里**：摘掉会改变 request header，破坏继承前缀的 KV-cache 命中，改成\"在调用处拒绝\"。\n- `applyReportGuard` —— 子代理写报告期间拒绝一切工具调用（`REPORT_ONLY`），报告是它唯一能产出的东西。\n- 配套：`applyTurnDoctrine` 在每回合 step 1 把 `ROUND_LOOP`（`src/rounds.ts`）作为**最后一条消息**注入（worker 会话除外）；`applyRounds` 在用户消息出现时重置轮次计数并重新布防；`applyReportRetention`（`src/index.ts`）用 `tools/post-execute` 按 value 返回计划报告，避免被 harness 的 spill 策略截断。\n\n**触发条件**：`Plans` 状态机——用户消息到达时 `applyRounds` 调 `expect(sessionId)` 布防，计划跑完时工具的 `onPlanFinished` 调 `done(sessionId)` 撤防。所以守卫**从请求到达就武装，只在该请求的第一个计划跑完之后才开火**；第一个计划之前什么都不拦。作用域是**按请求（回合）/按会话**，下一条用户消息重新布防。委派规则无条件触发；worker 规则只在插件自己开的 worker 会话里触发（`Workers.mark` 经节点的 `onCreated` 回调，或消息里的 `[refine-loop worker]` 标记）。`maxRounds`（默认 16）限制一个请求最多跑多少张图，超了循环自停。\n\n**逃生口**：`/dsh-conductor off`（人类命令，不对模型展示）—— `SessionPolicy.turnOff` 对该会话 `ctx.tools.restrict({ deny: [PLAN_TOOL] })`。工具离开模型表，且 `refine-loop:policy` 系统提示段在工具缺席时渲染为空，于是指导也一起消失，规则真停：`Plans.waiting` 恒为真，judgement guard 永不触发。`/dsh-conductor on` 恢复。部署层面 `enabled: false` 则什么都不挂。\n\n**两个已知缺口**（值得记一笔）：`applyTurnDoctrine` 不看 policy，所以 `off` 之后回合教条仍会注入，而它指向的工具已经没了；插件也无法强制模型交图（没有 `agent/turn-stopping` 拉回规则），\"一回合的第一件事是交图\"完全靠提示服从。\n\n---"
+}
