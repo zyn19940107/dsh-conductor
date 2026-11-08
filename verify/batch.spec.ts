@@ -208,6 +208,15 @@ console.log('a call that fails is reported, not thrown')
   const allReceipts = '证据: a\n行号: L3'
   check('an all-receipt conclusion is left alone', scrubConclusion(allReceipts) === allReceipts)
   check('plain text is untouched', scrubConclusion('the suite passes') === 'the suite passes')
+  // The whole report on one line, ending in a sentence that describes this rule.
+  // Dropping the line would take the fact at the start of it too; only the
+  // receipt sentence may go.
+  const oneLine = '嵌套深度由 maxAgentDepth 把关，按 session.header.delegationDepth 判定，超了就失败。'
+    + '报告还会过 scrubConclusion，把「行号/证据/proof/citation」那类收据句整行剔掉。'
+  const keptOneLine = scrubConclusion(oneLine)
+  check('a receipt sentence on a long line does not take the facts with it',
+    keptOneLine.includes('delegationDepth') && keptOneLine.includes('maxAgentDepth'))
+  check('and the receipt sentence itself is gone', keptOneLine.includes('行号') === false)
 }
 
 if (failures > 0) {

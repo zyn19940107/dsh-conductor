@@ -285,8 +285,15 @@ const RECEIPT_PATTERN = /证据|行号|\bL\d+\b|\bline\s+numbers?\b|\bevidence\b
  * @returns the conclusion without its receipt lines.
  */
 export function scrubConclusion(output: string): string {
-  const kept = output.split('\n').filter(line => !RECEIPT_PATTERN.test(line))
-  const out = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  // A receipt is a sentence, not a paragraph. Dropping whole lines lost this
+  // once: a worker wrote its whole report as one line and ended it by describing
+  // this very rule — the word 行号 in that last sentence took the delegation-depth
+  // fact at the start of the line with it, and the parent never saw it. So the
+  // text is split at sentence ends as well as newlines, and only the sentences
+  // that are receipts go.
+  const sentences = output.split(/(?<=[。！？!?])|\n/)
+  const kept = sentences.filter(sentence => !RECEIPT_PATTERN.test(sentence))
+  const out = kept.join('').replace(/\n{3,}/g, '\n\n').trim()
   return out === '' ? output : out
 }
 
