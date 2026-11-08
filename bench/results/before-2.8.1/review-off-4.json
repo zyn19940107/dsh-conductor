@@ -1,0 +1,66 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 4,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 106947,
+  "timedOut": false,
+  "sessionId": "session-15592c1d-bc0e-4d4d-862a-e027c527c405",
+  "stderr": "",
+  "steps": 11,
+  "toolCalls": 24,
+  "tools": [
+    "glob",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "read",
+    "pwsh",
+    "grep",
+    "grep",
+    "read",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "read",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 97743,
+    "outputTokens": 14451,
+    "cacheReadTokens": 688137,
+    "totalTokens": 800331
+  },
+  "formation": {
+    "agents": 1,
+    "input": 97743,
+    "output": 14451,
+    "cacheRead": 688137,
+    "total": 800331,
+    "steps": 11
+  },
+  "mainPrompt": 107326,
+  "correctness": {
+    "passed": 5,
+    "total": 6,
+    "missing": [
+      "说清了触发条件(缺:触发/条件是/条件:/条件：/何时/什么时候)"
+    ]
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 34585,
+  "thinkingPreview": "The user wants me to independently review three parts of D:\\code\\vibe\\dsh-refine-loop. This is a read-only review task. Let me start by exploring the directory.\n\nLet me look at the structure first.\n\nThe AGENTS.md says to use the dsh-plugin-sandbox skill before modifying/debugging any DSH plugin. But this is a read-only review, no modification. The task doesn't require building or running the plugin. Still, the skill says \"改/调任何 DSH 插件前先调用它\" — we're not modifying. We just need to read code. I think it's fine to skip, but let me consider... The task is purely static review of source files. I'll do the review directly. Actually, to be safe and compliant, the skill trigger is \"当你要开发、调试、修改一个 DSH 插件\" — we're not doing that. Read-only review doesn't need it.\n\nLet me explore the repo.\n\nI'll do parallel calls: list files, read package.json, etc.\n\nLet me start.\nLet me read the source files. The re",
+  "finalText": "三部分都读完了（`src/plan.ts`、`src/tool.ts`、`src/policy.ts`、`src/rounds.ts`、`src/fork.ts`、`src/batch.ts`、`src/concurrency.ts`、`src/repair.ts`、`src/index.ts`，加上 `verify/*.spec.ts` 与 README 交叉核对）。未修改任何文件。\n\n---\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**结论：计划是一个「判据 + 一层节点」的 JSON，节点只有四种，调用参数在计划层完全不做校验、原样透传给目标工具。**\n\n- **结构**：`PlanArgs = { criteria: string[], nodes: PlanNode[] }`（plan.ts:93-98）。`criteria` 是「可观察的成败判据」，是这份计划唯一的验收依据。\n- **节点**：`PlanNode = { id, kind, calls, task, order, writes, budgetMs }`（plan.ts:65-87）。\n- **四种节点**（plan.ts:24）：`tools`（参数已定好的调用批次）、`worker`（继承本对话、自己干活、不画图）、`spawner`（空上下文起步、按本插件循环画图）、`forker`（继承本对话、按本插件循环画图）。`AGENT_NODE_KINDS`/`WORKER_NODE_KINDS`/`NODE_AGENT_KINDS` 三个常量里，前两个在 `tool.ts` 几乎没被用上，`NODE_AGENT_KINDS` 全仓无人引用。\n- **一层，没有 `after`、没有依赖**：节点之间没有边，依赖别的节点输出的活属于下一轮；有顺序要求的活塞进一个节点（`tools` 节点写 `\"order\": \"sequential\"`，或交给 `worker`）。唯一会拆层的是 `writes` 重叠——`buildGroups`（plan.ts:200-225）贪心地把不写同一个文件的节点并进一组，**没声明 `writes` 的节点一律当成不写文件**（插件无从得知一次调用动了什么）。\n- **参数处理**：`parsePlanArgs`（plan.ts:121-183）是**全有全无**式校验——任何一处不合规就返回 `undefined`，工具随后抛 `refine_plan needs criteria, and nodes that each have an id and a kind`。\n  - `criteria`：必须是数组，去掉空串后不能为空；\n  - `id`：非空字符串，**全计划内不得重名**；\n  - `kind`：只认这四个，其余一律拒绝；\n  - `tools` 节点：`calls` 必须非空，每条 `name` 必须非空；`arguments` **原样保留**（只有 `undefined → {}`，plan.ts:168），**不校验形状**——字符串、数字、数组都能过计划这一层；\n  - agent 节点：`task` 必须非空字符串（注意：工具的 JSON schema 并没有把 `task` 标成 required，但 `parsePlanArgs` 拒收空 task，所以**运行时比 schema 更严**）；\n  - `order`：只认 `'sequential'`，其余一律落到 `'parallel'`；\n  - `writes`：只保留去空白后的非空字符串；\n  - `budgetMs`：必须是有限正数，四舍五入并**封顶 1 小时**（`MAX_NODE_BUDGET_MS`），否则记 0 = 「没声明」；\n  - 归一化：tools 节点的 `task` 被强制成 `''`，agent 节点的 `calls` 被强制成 `[]`（跨 kind 的字段直接丢弃）；\n  - **空计划合法**（有 criteria、无 nodes），模型据此交出「结论」结束这一轮。\n- **参数的下游**：计划层不管参数，由**目标工具自己**校验；失败时走修复回路（batch.ts:316-359）——用本对话自己的模型问一次「这条调用应该是什么」，拿回 `{name, arguments}` 重跑**这一条**，最多修 2 次（`MAX_REPAIRS`），其余节点不受影响。输出侧另有双重截断：单次调用结果 5000 字（头 3000 + 尾 2000），单个节点合并输出再封顶 5000 字。\n- **一处不一致**：`batch.ts` 里的 `parseBatchArgs` 现在只被测试引用，线上路径只有 `parsePlanArgs`；且两者的空计划语义相反（batch 拒绝空 `calls`，plan 接受空 `nodes`）。\n\n---\n\n## 2. 这个插件强制的那条规则\n\n**结论：强制的是「一轮 = 一张图；图跑完之后，模型只能写结论或交下一张图，不能再自己一个一个调工具」。反过来的那一半——「必须先交图再调工具」——只是教条（提示），没有机制。**\n\n- **规则的机制落点**：`applyJudgementGuard`（rounds.ts:433-441）挂的是 `ctx.tools.guard`。四个条件同时成立才拦截：\n  1. `execution.agent` 存在；\n  2. `isModelCall(execution)`，即 `execution.callId === execution.rootCallId`——**只有模型自己发起的调用算**，计划内部嵌套的调用原样放行；\n  3. 工具名不是 `refine_plan`；\n  4. `plans.waiting(sessionId)` 为 false——**即本次请求已经交过至少一张图**。\n     命中后返回 `JUDGE_ONLY`（rounds.ts:405-407）：「图已经跑完……这一轮是判断：写结论，或者交下一张图。」\n- **状态机**：`Plans`（rounds.ts:123-154）+ `applyRounds`（rounds.ts:165-176）——用户发言时 `expect()`（本请求尚未交图），计划跑完时 `done()`（index.ts:270-279）。因此**第一张图之前的直接工具调用一律不拦**，README 第 152-158、568-570 行也是这么写的（还专门说 v1.0 那条「没交图就拉回」的闸门已被删掉）。\n- **同一族的其它硬机制**（都是扩展点，不是提示）：\n  - `applyDelegationRule`（rounds.ts:369-396）：直调 harness 的 `subagent` / `subagent_fork` **无条件拒绝**（`DELEGATE_IN_GRAPH`），因为直调会绕过本轮的图和它的预算；`list_agents` / `send_message` / `interrupt_agent` 直接从工具表里摘掉。\n  - `applyWorkerRule`（rounds.ts:347-356）：worker 对话里 `refine_plan` 被拒（工具仍留在表里，为了让继承前缀的 KV cache 命中）。\n  - `applyReportRetention`（index.ts:312-323）：计划报告以 `value` 形式返回，绕开 harness 的 spill 截断——报告被剪掉中段等于节点静默消失。\n  - `ROUND_LOOP` 作为**该轮最后一条消息**注入（rounds.ts:190-232，只在 `step === 1`），因为系统提示词在前、模型说话前最后读到的才生效。\n  - `/dsh-conductor off`（policy.ts）：按会话摘掉工具与指导，规则随之失效。\n- **回合节奏**：`onPlanFinished` → `plans.done` → `rounds.bump()` 超过 `maxRounds`（默认 16）就停；否则 `agent.followup(NEXT_ROUND)` 并让 `exec.concludeTurn()` 结束本轮，好让下一轮开起来。\n\n---\n\n## 3. `src/tool.ts` —— 计划怎么跑起来 / 子代理受什么限制\n\n**结论：一个 `refine_plan` 调用 = 一轮；工具层做校验、分组、调度与子代理派生，子代理受深度、三层时间预算、角色限制和输出契约四重约束。**\n\n**跑起来的过程**\n- `applyPlanTool`（tool.ts:404-605）注册 `refine_plan`（`PLAN_TOOL`），工具自身超时 = `maxBatchTimeoutMs`（默认 900000 = 15 分钟），并声明 `criteria` / `nodes` 的 JSON schema。\n- `execute`（tool.ts:545-603）依次：解析（失败即抛）→ 节点数超 `maxBatchSize`（默认 8）即抛 → 取本对话请求头里的 call 配置搭出修复回路 → 汇总各节点 `budgetMs`，总和超过计划天花板时写一条 `budgetWarn`（模型没有钟，只能靠这个对齐）→ `runPlan` → 若还"
+}

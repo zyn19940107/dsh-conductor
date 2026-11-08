@@ -1,0 +1,43 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 180859,
+  "timedOut": false,
+  "sessionId": "session-64f3dd4b-abe1-407d-8478-40def75a053b",
+  "stderr": "",
+  "steps": 4,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 24762,
+    "outputTokens": 9364,
+    "cacheReadTokens": 48128,
+    "totalTokens": 82254
+  },
+  "formation": {
+    "agents": 7,
+    "input": 240162,
+    "output": 59367,
+    "cacheRead": 923904,
+    "total": 1223433,
+    "steps": 47
+  },
+  "mainPrompt": 26147,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 20489,
+  "thinkingPreview": "The user wants three read-only questions about D:\\code\\vibe\\dsh-refine-loop. Let me plan.\n\nFirst round plan: I need to discover files in verify/ and src/. Use glob to find files. Then read the .spec.ts files to determine entry functions. And count lines for src modules.\n\nLet me design a plan with independent nodes:\n- Node A: tools — glob verify/*.spec.ts and src/**/*.ts, plus maybe read package.json.\n- Actually I could do everything in one worker node. But better: first round, tools node to list files + package.json read. Second round: read each spec.\n\nActually let me think about efficiency. The plan is one layer per round. I could make a single worker node to do all the analysis (read all specs, count lines). That's simplest. But a worker node has access to tools? Workers are leaves that do work themselves — they presumably can call tools. Yes, agent nodes can use tools.\n\nBut maybe bett",
+  "finalText": "## 结论\n\n**全程只读，未修改任何文件。**\n\n---\n\n### 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n| spec 文件 | 实际被驱动的入口函数（来自 `src/`） | 主/辅 |\n|---|---|---|\n| `concurrency.spec.ts` | `isReadOnlyCommand` / `mayRunTogether` / `buildOverrides`（`src/concurrency.ts`）；另调 `runBatch`（`src/batch.ts`）做 exclusive 夹在并行调用前后的验证 | 主=concurrency 三函数 |\n| `repair.spec.ts` | `runBatch`（`src/batch.ts`，传 repair 回调走「失败→问模型→修复后重跑」）；`parseRepair`（`src/repair.ts`） | 主=`runBatch` |\n| `fork.spec.ts` | `buildSeedFromNow`（构造子代理种子日志）、`openTurnClosers`（补 turn 收尾），均 `src/fork.ts` | 主=`buildSeedFromNow` |\n| `refine.spec.ts` | `parseBatchArgs`、`renderBatch`（`src/batch.ts`）；`parsePolicyCommand`（`src/policy.ts`） | 主=`parseBatchArgs` |\n| `retain.spec.ts` | `applyReportRetention`（`src/index.ts`）——捕获其注册的 `tools/post-execute` listener 后手动调用 | 唯一入口 |\n| `batch.spec.ts` | `runBatch`（并发/独占/失败调度）；另有纯函数 `capOutput` / `capNodeOutput` / `scrubConclusion` | 主=`runBatch` |\n| `plan.spec.ts` | `runPlan`（`src/tool.ts`）；`parsePlanArgs`、`buildGroups`（`src/plan.ts`）；`renderPlan`（`src/tool.ts`） | 主=`runPlan` |\n| `rounds.spec.ts` | `applyTurnDoctrine`、`applyWorkerRule`、`Rounds`(used/bump/reset)、`Workers`(mark)、`isWorkerConversation`、`startOf`、`formatClock`（全在 `src/rounds.ts`） | 主=`applyTurnDoctrine`/`applyWorkerRule` |\n| `output-schema.spec.ts` | `applyPlanTool`（`src/tool.ts`）——注册工具后取 `output.schema` 校验 PlanOutput 形状 | 唯一入口 |\n\n无共享 harness：每个 spec 自带 `check()`，由 `verify/run-specs.mjs` 用 esbuild 打包后逐个 spawn 独立进程。\n\n---\n\n### 2. `src/` 下哪些模块没有对应的 spec\n\n`src/` 共 9 个模块，**每个都被至少一个 spec import 过**，但对应关系分三档：\n\n**A. 有同名专属 spec（6 个）**\n`concurrency.ts`↔concurrency、`batch.ts`↔batch、`plan.ts`↔plan、`rounds.ts`↔rounds、`fork.ts`↔fork、`repair.ts`↔repair。\n\n**B. 没有同名 spec，只被别的 spec 顺带触碰（3 个）**\n- **`policy.ts`** — 只有 `parsePolicyCommand` 被 `refine.spec.ts` 测到；`SessionPolicy`、`runPolicyCommand`、`applyPolicyCommand`、`applyPolicyMessage` 零覆盖。\n- **`tool.ts`** — 覆盖分散在 `plan.spec.ts`（`runPlan`/`renderPlan`）、`output-schema.spec.ts`（`applyPlanTool`）、`retain.spec.ts`（常量 `PLAN_TOOL`）；`PlanNodeResult`、`PlanForkOptions` 无人测。\n- **`index.ts`** — 仅 `applyReportRetention`（retain）+ 常量 `REFINE_GUIDANCE`（plan）被碰；**插件主入口 `apply(ctx, config)` 及 Config schema、所有 `DEFAULT_*` 常量完全没被调用过**。\n\n**C. 事实上的零覆盖（1 个）**\n- **`repair.ts`** — 它唯一的 spec `repair.spec.ts` **不在 `run-specs.mjs` 的 specs 数组里**（runner 只列了 refine、batch、concurrency、plan、rounds、fork、retain、output-schema 共 8 个），所以 `pnpm specs` 根本不执行它。其余 spec 调 `runBatch` 时都不传 repair 钩子，等于 `askForRepair`/`describeFailure`/`collectText`/`repairSystem` 全线未跑。\n  （注：`repair.spec.ts` 文件本身语法是好的，只是没被 runner 收录——这点前后两轮节点说法不一致，复核后确认文件可解析。）\n\n其余零覆盖导出还包括 `fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`（正是 `runNode` 真正调用的两个子代理启动口）、`rounds.ts` 的 `Plans`/`applyRounds`/`applyDelegationRule`/`applyJudgementGuard`、`plan.ts` 的 `MAX_NODE_BUDGET_MS`（真实分支却无断言）。\n\n---\n\n### 3. 行数最多的模块\n\n**`src/tool.ts` — 611 行**（非空 588 行）。它承载 `refine_plan` 工具本体：`runPlan`、`renderPlan`、`applyPlanTool`。\n\n全部行数排序：\n\n| 模块 | 总行数 | 非空 |\n|---|---|---|\n| **tool.ts** | **611** | 588 |\n| fork.ts | 549 | 520 |\n| batch.ts | 476 | 444 |\n| rounds.ts | 442 | 411 |\n| index.ts | 363 | 335 |\n| policy.ts | 241 | 228 |\n| concurrency.ts | 234 | 224 |\n| plan.ts | 225 | 207 |\n| repair.ts | 173 | 162 |"
+}

@@ -1,0 +1,63 @@
+{
+  "task": "coverage",
+  "condition": "off",
+  "index": 5,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 51022,
+  "timedOut": false,
+  "sessionId": "session-6febf7d5-14aa-4b28-b661-cecb1728e29c",
+  "stderr": "",
+  "steps": 11,
+  "toolCalls": 23,
+  "tools": [
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "pwsh",
+    "grep",
+    "pwsh",
+    "read",
+    "pwsh",
+    "glob",
+    "pwsh",
+    "read",
+    "grep",
+    "read",
+    "grep",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 46513,
+    "outputTokens": 7127,
+    "cacheReadTokens": 383965,
+    "totalTokens": 437605
+  },
+  "formation": {
+    "agents": 1,
+    "input": 46513,
+    "output": 7127,
+    "cacheRead": 383965,
+    "total": 437605,
+    "steps": 11
+  },
+  "mainPrompt": 60625,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 17128,
+  "thinkingPreview": "Let me read each spec file to determine the entry functions tested. Let me also check the src modules and their line counts.\n\nLet me read the spec files.\nNow let me read the remaining spec files.\nNow I need to check the src modules to see which ones are covered. Let me get line counts and exports for each src module.\n\nLet me look at the src files to identify their exports and line counts.\n\nLet me use a PowerShell command to count lines, and also grep exports.\n\nActually, let me first check the src files' exports via grep, and count lines via pwsh.\n\nAlso I should check whether there's a \"run-specs\" script that maps specs to modules — and check if there are other spec directories (e.g., src/*.spec.ts) elsewhere.\n\nLet me check the whole repo structure.\nThe PowerShell output was truncated with node_modules noise. Let me get a clean line count for just src and verify.\n\nLet me use a targeted co",
+  "finalText": "已完成读取，未修改任何文件。以下是三个问题的答案。\n\n---\n\n## 1. 每个 `.spec.ts` 实际测的入口函数\n\n这些 spec 不是 vitest/jest，是手写的独立脚本（各自 `check()` + `process.exit(1)`），由 `verify/run-specs.mjs` 用 esbuild 打包后逐个跑。\n\n| spec | 主入口函数（所在模块） | 顺带覆盖的入口 |\n|---|---|---|\n| `refine.spec.ts` | `parseBatchArgs` (batch.ts)、`renderBatch` (batch.ts) | `parsePolicyCommand` (policy.ts) |\n| `batch.spec.ts` | `runBatch` (batch.ts) | `capOutput` / `capNodeOutput` / `scrubConclusion` (batch.ts) |\n| `concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides` (concurrency.ts) | `runBatch` (batch.ts，仅测计划顺序) |\n| `plan.spec.ts` | `runPlan`、`renderPlan`、`PLAN_TOOL_DESCRIPTION` (tool.ts) | `parsePlanArgs`、`buildGroups`、`WORKER_MARKER` (plan.ts)；`REFINE_GUIDANCE` (index.ts) |\n| `rounds.spec.ts` | `applyTurnDoctrine`、`applyWorkerRule` (rounds.ts) | `Rounds`/`Workers` 两个类；常量 `ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN`；`startOf`/`formatClock`/`isWorkerConversation`；`WORKER_MARKER` (plan.ts) |\n| `fork.spec.ts` | `buildSeedFromNow` (fork.ts) | `openTurnClosers` (fork.ts) |\n| `retain.spec.ts` | `applyReportRetention` (index.ts) | `PLAN_TOOL` 常量 (tool.ts) |\n| `output-schema.spec.ts` | `applyPlanTool` (tool.ts) — 实际只取注册工具的 `output.schema` 去喂 `validateJsonSchemaValue` | — |\n| `repair.spec.ts` | `runBatch` 带 repair 回调 (batch.ts) | `parseRepair` (repair.ts) |\n\n⚠️ **一个实测发现**：`verify/run-specs.mjs:21` 的 specs 数组只有 8 个 —— refine / batch / concurrency / plan / rounds / fork / retain / output-schema，**`repair.spec.ts` 不在里面**。也就是说 `pnpm specs` 从来不跑 repair 这条 spec（`batch.spec.ts:200` 的文案 \"all 8 specs pass\" 也对得上）。这个文件目前是孤儿。\n\n## 2. 哪些模块没有对应的 spec\n\n**按\"同名的专有 spec\"标准：`policy.ts`、`index.ts`、`tool.ts` 这 3 个没有**（其余 6 个 batch / concurrency / fork / plan / repair / rounds 都有一一对应的同名 spec）。\n\n**按\"是否被任何 spec 导入\"标准：0 个** —— 9 个模块全部至少被一个 spec 导入。但覆盖是碎片化的，几个明显的空洞：\n\n- **policy.ts**（241 行）：只测了 `parsePolicyCommand` 一个函数。`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全无测试。\n- **index.ts**（363 行）：只测了 `applyReportRetention`（retain.spec）和 `REFINE_GUIDANCE`（plan.spec）。**插件真正的入口 `apply(ctx, config)` 完全没有测试**，`Config` schema 和一堆 `DEFAULT_*` 常量也没有。\n- **tool.ts**（611 行）：`runPlan`/`renderPlan`/`applyPlanTool` 都被测了，但没有独立的 tool.spec.ts，它的能力散在 plan.spec 和 output-schema.spec 两个文件里。\n- **fork.ts**（549 行）：只测了种子的构造（`buildSeedFromNow`/`openTurnClosers`），`spawnForkedChild`、`spawnEmptyChild` 这两个真正 spawn 子进程的函数没测。\n- **repair.ts**（173 行）：只测了 `parseRepair`，`askForRepair`、`repairSystem`、`describeFailure`、`collectText` 未测 —— 而且整个 spec 还没被 runner 跑到。\n- **rounds.ts**（442 行）：`Plans` 类、`applyRounds`、`applyDelegationRule`、`applyJudgementGuard`、`isModelCall` 未测。\n\n## 3. 行数最多的模块\n\n**`src/tool.ts`，611 行**（其中非空行 588）。\n\n完整排名：\n\n| 模块 | 总行数 | 非空行 |\n|---|---|---|\n| **src/tool.ts** | **611** | 588 |\n| src/fork.ts | 549 | 520 |\n| src/batch.ts | 476 | 444 |\n| src/rounds.ts | 442 | 411 |\n| src/index.ts | 363 | 335 |\n| src/policy.ts | 241 | 228 |\n| src/concurrency.ts | 234 | 224 |\n| src/plan.ts | 225 | 207 |\n| src/repair.ts | 173 | 162 |\n\n> 计数口径提醒：PowerShell 的 `Get-Content | Measure-Object -Line` 会把空行算作 0 行，对这批文件会少报 20~40 行（比如 tool.ts 会报 588）。上面的总行数用 `[System.IO.File]::ReadAllLines().Count` 统计，并已与 read 工具的 \"total N lines\" 交叉核对过（plan.spec.ts 448 行、tool.ts 611 行均一致）。"
+}

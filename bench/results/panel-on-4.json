@@ -4,39 +4,42 @@
   "index": 4,
   "profile": "bench-on",
   "exitCode": 0,
-  "wallMs": 684700,
+  "wallMs": 699879,
   "timedOut": false,
-  "sessionId": "session-5900f026-7017-44b4-b086-f544dd1d35cc",
+  "sessionId": "session-d010f3b8-fb27-48e4-a67a-fb68e36173da",
   "stderr": "",
-  "steps": 3,
-  "toolCalls": 2,
+  "steps": 4,
+  "toolCalls": 3,
   "tools": [
+    "refine_plan",
     "refine_plan",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 23886,
-    "outputTokens": 15054,
-    "cacheReadTokens": 27529,
-    "totalTokens": 66469
+    "inputTokens": 46681,
+    "outputTokens": 20423,
+    "cacheReadTokens": 55296,
+    "totalTokens": 122400
   },
   "formation": {
-    "agents": 4,
-    "input": 457979,
-    "output": 77203,
-    "cacheRead": 1760026,
-    "total": 2295208,
-    "steps": 39
+    "agents": 11,
+    "input": 743604,
+    "output": 295226,
+    "cacheRead": 12823424,
+    "total": 13862254,
+    "steps": 201
   },
-  "mainPrompt": 25869,
+  "mainPrompt": 46341,
   "correctness": {
-    "passed": 6,
+    "passed": 5,
     "total": 6,
-    "missing": []
+    "missing": [
+      "三份独立评审都给出(缺:评审一/评审二/评审三)"
+    ]
   },
   "planned": true,
-  "planAgentNodes": 1,
-  "thinkingChars": 13337,
-  "thinkingPreview": "The plan only had one node (my refine_plan call only included node A, I mistakenly only included one node). The request needs three independent reviews. Reviewer #1 is done. Now I need Reviewer #2 (bypass) and Reviewer #3 (harness conflict). Since reviewer A's result is already in the conversation, reviewers B and C will inherit it via the conversation... Hmm. That's a problem for \"independence.\"\n\nWait — the nodes start from the conversation as it stands when the plan is handed over. If I now dispatch B and C, they'd see reviewer A's report in the conversation context, which breaks independence for those two (though B and C still won't see each other).\n\nTo preserve independence properly, I should use \"spawner\" kind — a leader starting empty — for reviewers B and C. Spawner starts from nothing, so it won't inherit conversation context including A's report. That preserves independence for ",
-  "finalText": "三份独立评审已完成,下面是汇总。\n\n---\n\n# dsh-refine-loop「核心规则」三方独立评审汇总\n\n**评审对象**:`D:\\code\\vibe\\dsh-refine-loop`\n**核心规则**:每轮必须交一张图 → 交完图判断能不能给结论 → 派发只能走图里的节点\n**评审方式**:三份评审由三个互不知情的节点各自独立完成(后两份以空上下文启动,看不到第一份的结论),每份都自己读源码、点出实现文件;本次评审**全程只读**。\n\n---\n\n## 一、结论速览\n\n| 问题 | 评审一(过度限制) | 评审二(可绕过) | 评审三(harness 冲突) |\n|---|---|---|---|\n| 1. 是否过度限制 | **是**,但不是\"逼多想一层\",是\"图跑完不许增量干活、只能重画整图\"+ 每图固定填写成本 | **是**(worker 豁免有代价、图后全面冻结、硬上限) | **是**(开关语义不清、后台子代理起了管不了、原生流程不可达) |\n| 2. 是否可被绕过 | **有洞**(首轮无闸;关开关后机制仍在,文案与机制不一致) | **部分可绕过**(「必须交图」= 软强制;图内嵌套派发可逃逸;工具名单写死) | **有洞**(同上嵌套逃逸;委派工具名可配置导致守卫失效) |\n| 3. 与 harness 原生能力冲突 | **部分冲突**:轮次边界被接管、原生 plan mode 正面撞车;并发基本是叠加非覆盖 | **部分冲突**:原生委派工具在表里但每次必失败;插件另起一套子代理与深度账 | **部分冲突 + 一处真互斥**:原生委派通道被静默夺走、原生 plan mode 的审批出口被堵死、harness 深度阀对插件子代理不生效;并发\"影子化\" |\n| 自评严重度 | 3/5 | 3/5 | 3/5(口径不同,数值巧合) |\n\n---\n\n## 二、三方一致的地方\n\n**1. 规则的三块强度是分层的,而且\"每轮必须交一张图\"恰恰是唯一没有代码强制的一块。**\n三方独立得出同一结论:第一张图交出来之前,插件对模型调用**一个都不拦**。评审一指出 `Plans.waiting()` 为真时 `applyJudgementGuard` 直接放行;评审二指出 `applyTurnDoctrine` 只是把教义当作一条 `system-prompt` 来源的 user message 追加进去,并引 README 自陈「模型可以不交图……这一版没有加」以及**v1.0 前曾有一条\"没交图就拉回\"的闸门被删掉了**;评审三同样指出首张图前无任何拦截。也就是说,这一句规则的强度**只靠模型服从教条**,39/39 全交图是服从度,不是机制保证。\n\n**2. 「交完图只能判断」是硬强制,但\"能不能给结论\"没有任何代码判据。**\n`applyJudgementGuard` 用 `ctx.tools.guard` 拦下模型**直发**的全部工具调用(除 `refine_plan` 外一律返回 `JUDGE_ONLY`),这一层是真的代码闸。但三方一致指出:能不能下结论纯由模型自评,图里的 `criteria` 只被原样透传给子代理当说明文字、渲染进报告,插件**从不对账**。评审一的措辞最准确:它是**限制,不是判据**。\n\n**3. 图跑完后模型被冻结,任何补充性只读动作都必须重开一张完整图。**\n评审一说\"增量工作被升级成再写一张带 criteria/节点/预算/写集的图\";评审二说\"任何补充性只读调用都必须新开一张图\";评审三说\"harness 原生依赖'跑完再调一次工具'的流程(goal/todo/session_query、`exit_plan_mode`)全部不可达\"。\n\n**4. 存在\"合规外壳下的机制逃逸\":图里的 `tools` 节点嵌套调用 `subagent`,可以绕过直调判定。**\n评审二把它列为独立绕过路径(嵌套调用 `callId ≠ rootCallId`,不触发包装,起的是 harness 原生后台子代理,脱离插件的预算与句柄管理);评审三独立复现同一条并补上根因:委派包装只拒顶层。评审一未单独点出这条——**这是评审二、三相对评审一的增量**。\n\n**5. `/dsh-conductor off` 不能把 harness 原生能力还回来。**\n开关只是把 `refine_plan` 从该会话工具表摘掉(`SessionPolicy.turnOff`),但委派包装器与判断守卫都不看 `policy.appliesTo`——关掉后原生 `subagent` 直调**照样被 `DELEGATE_IN_GRAPH` 拒掉**。三方一致认定这是\"文案与机制不一致\"。\n\n**6. 插件自己造子代理,绕开 harness 的派发服务,深度是两套独立预算。**\n插件走 `agentLoop.createAgent` 自己 spawn,不走 harness 的 subagent 派发工具;harness 的深度上限只在 subagent 服务内生效,管不到 `agentLoop.createAgent` 派生的子代理,插件子代理只受自己的 `maxAgentDepth`(默认 3)约束。\n\n**7. 插件的核心机制落在 harness 的公开扩展点上,没有改 harness 的循环结构。**\n工具注册/守卫/裁剪、pre-step 与 created 事件、fork seed、并发分类、报告防截断,都是干净叠加。三方在\"整体架构是否打架\"上没有分歧。\n\n**8. 成本是实测出来的、且插件自己承认摊销不过来。**\n评审一和评审二都引 README 的实测:coverage 类短任务归一 **83s vs off 56s、token 509k vs 383k**,并自陈\"给每个节点估耗时这件事本身要推理成本,摊不回来\"。\n\n**9. worker 是唯一的层级豁免,但豁免方式带来自己的代价。**\n`applyWorkerRule` 对 worker 的 `refine_plan` 按名拒绝(`WORKER_NO_PLAN`),教义也不注入 worker 会话。评审一指出\"当领导\"的成本按层叠加(forker/spawner 子代理照样要交图,默认最多 3 层);评审二指出代价是 **worker 无法再拆一层**,要拆只能用 forker;评审三指出这个按名拒绝**是有意的 workaround(为保住 KV cache 的继承前缀)**,不是设计目标。\n\n---\n\n## 三、三方分歧的地方\n\n**分歧 1 —— 并发到底冲不冲突。**\n- 评审一:并发**不打架**。`mayRunTogether` 以工具自己的 `isConcurrencySafe` 为先,插件的 override 只对\"没声明安全\"的工具生效,是叠加而非覆盖。\n- 评审三:并发**基本叠加,但被影子化**,并列出三处具体后果:图内的并行全部走插件自建波次调度,原生并行派发路径在图内被绕开;插件波次 `Promise.all` **没有并发上限**;`DEFAULT_CONCURRENT_TOOLS=['glob','grep']` 已成冗余,因为 harness 侧 `glob`/`grep`/`read` 本身已声明并发安全,插件注释「The harness does not know that」**已过时**。\n- 评审二:未正面评并发,只指出插件与 harness 存在**两套轮次节奏、两套深度账**。\n→ 实质分歧在 A 与 C:A 认为原生并发是权威、插件是补丁;C 认为原生并发路径被静默绕开且插件注释已过期。\n\n**分歧 2 —— 「两边都放行才真的能派下一层」这句 README 说明是否成立。**\n- 评审一:成立。深度上要 harness 的 `subagent.maxDepth` 与插件 `maxAgentDepth` **两边都放行**(与关系)。\n- 评审三:**不成立**。插件自派人绕过 harness 的深度校验,插件默认深度(3)比 harness 默认(1)**更宽**,README 与代码不符。\n- 评审二:两者各走各的,是\"两套账\"。\n→ 评审一按 README 叙述接受,评审三按代码判定 README 有误;这是三方分歧中最硬的一处,直接影响\"改配置到底能不能限制嵌套深度\"。\n\n**分歧 3 —— 教义文本在开关关闭后的去留,各说各的载体。**\n- 评审一:关掉之后 `ROUND_LOOP` 教条**仍会被注入**(模型被要求\"第一句话必须是图\",工具却不在表里)。\n- 评审二:`REFINE_GUIDANCE` 系统提示段是**条件渲染**的,工具不在表里时这一段一起消失。\n→ 两者说的是**不同载体**(前者是 pre-step 注入的消息,后者是 system prompt 段),各自成立;但合起来是更糟的组合:开关只摘工具,规则文本的不同部分残留程度不一致,模型会收到\"必须先交图\"却发现没有交图工具。\n\n**分歧 4 —— 原生 plan mode 的冲突性质。**\n- 评审一:正面冲突——原生 plan mode 是\"先探索→出计划→审批\",插件是\"第一条消息就是图、交图前不调任何工具\";但教条是每轮最后注入的一条消息,位置比系统提示里的说明更靠后,**模型大概率照插件的做**。\n- 评审三:真互斥,更硬——原生 `plan:policy` 与插件 `refine-loop:policy` **同占 `PL"
+  "planAgentNodes": 0,
+  "thinkingChars": 27010,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the DSH plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nThe core rules: each round must submit a plan (\"图\" = plan), after submitting the plan judge whether a conclusion can be given; dispatch can only go through nodes in the plan.\n\nI need to:\n1. Read the plugin source code myself (to know what to look for and to synthesize the final report).\n2. Organize three mutually independent reviews — each must read relevant source and point out implementation files.\n\nThe three reviews should be independent — using spawner nodes (leaders starting empty) so they don't see each other's conclusions. Actually, for independence, I should use \"spawner\" kind nodes (leaders starting empty) so they don't inherit this conversation... but wait, the task says \"互相不知道对方结论\" (don't know",
+  "finalText": "# DSH 插件 `dsh-refine-loop` 核心规则 · 三方独立评审汇总\n\n只读完成：全程只用 read / grep / glob / 只读 pwsh 列表，**未修改、未新建、未删除仓库内任何文件**。三位评审者各自以「空上下文 + 各自任务」独立启动，互相看不到对方结论，各自读自己的源码；三人都在各自 9 分钟预算耗尽处交卷（因此都自报了未核项，见末尾）。\n\n---\n\n## 一、核心规则在代码里的落点（评审前先定位，这是三方共同的坐标）\n\n| 规则 | 文本/机制落点 |\n|---|---|\n| R1 每轮先交图、交图前不许调工具 | 教条文本 `src/rounds.ts` `ROUND_LOOP`(23–40)、`NEXT_ROUND`(48)；注入方式 `applyTurnDoctrine`(191)，经 `agent/pre-step` 追加为**用户消息**；静态说明 `src/index.ts` `REFINE_GUIDANCE`(56–91)，系统提示段 `refine-loop:policy`(254–266)，槽位取 `getSectionOrder('PLAN_POLICY')` |\n| R2 交完图才判断、才能给结论 | `applyJudgementGuard`(rounds.ts 471–479) + `JUDGE_ONLY`(443–445)；轮次推进 `src/index.ts` `onPlanFinished` → `exec.concludeTurn()` + `agent.followup(NEXT_ROUND)`(289–298)，`maxRounds` 默认 16 |\n| R3 派发只能走图里的节点 | `applyDelegationRule`(rounds.ts 407–434)：重注册原生 `subagent`/`subagent_fork`（`DELEGATION_TOOLS` 63）成「直连即抛」`DELEGATE_IN_GRAPH`(58)；`HIDDEN_TOOLS`(73–77) 摘掉 `list_agents`/`send_message`/`interrupt_agent`；插件自有派生通道 `src/fork.ts` `spawnChild`(475–632) → `host['agentLoop'].createAgent`(503–543) |\n| 图与工具本体 | `src/tool.ts` `PLAN_TOOL='refine_plan'`(48)、`PLAN_TOOL_DESCRIPTION`(396)、`runPlan`；`src/plan.ts` `parsePlanArgs`(121–183)、`WORKER_MARKER`(109)、`buildGroups`(200–208)；`src/batch.ts` `runBatch`；`src/concurrency.ts` `mayRunTogether`(222–234)；`src/policy.ts` `SessionPolicy`(45)/`POLICY_TOOLS`(38–40)；`src/repair.ts` `askForRepair`；`src/background.ts` `bg`(310–353) |\n\n---\n\n## 二、三份评审各自说了什么\n\n**评审 A（入口角度：规则文本与强制点）**\n1. 过度限制：**部分成立**。成本 = 每轮固定提示税（`ROUND_LOOP` 约 2.4KB 经 `applyTurnDoctrine` 每轮注入 + `REFINE_GUIDANCE` 每请求重发）；真正的过度在 R2 —— `applyJudgementGuard` 拒掉所有非 `refine_plan` 直连工具，「再读一个文件」被迫开新一轮图。\n2. 可绕过：**成立，且分条性质不同**。机制强制：R2 的 `JUDGE_ONLY`、R3 对 `subagent`/`subagent_fork` 的拒绝、worker 禁画图（`applyWorkerRule` → `WORKER_NO_PLAN`）、报告阶段禁工具（`applyReportGuard`）。**只是教条**：R1 本身 —— `Plans.waiting()` 只被 `applyJudgementGuard` 当作「已交过图」的闸门，**第一张图之前 guard 全放行**；`workflow`/`todo_write`/`create_goal`/`exit_plan_mode`/`bg` 都不在拦截名单里；`/dsh-conductor off` 只摘 `refine_plan`，doctrine 照注、guard 照在。\n3. harness 冲突：**部分成立**。原生 `subagent` 被插件收走却没复用（插件自建第三套派生，绕开 harness 的 provider/depth/投影/预算）；原生「后台 subagent + `send_message` 续跑」被 `HIDDEN_TOOLS` 整条掐断；并发是**叠加而非冲突**（`order:sequential` 与 `writes` 分组是原生表达不了的业务顺序）；但原生 plan mode 与插件的图「两套 plan 同屏竞争」；插件 `maxRounds` 与原生 goal 的 `maxGoalRounds` 是两套并行轮次预算。独有硬证据：harness 侧 `packages/core/tools/src/index.ts` 的 `guardReason`(767–773)/`prepareExecution`(1519–1529) 证明 `ctx.tools.guard` 确是**拒绝执行**而非仅注入说明。\n\n**评审 B（入口角度：绕过面与模型可走的路径）**\n1. 过度限制：**部分成立**。自动续轮 `onPlanFinished` 无条件 `followup(NEXT_ROUND)`，模型不能选择不发消息；`JUDGE_ONLY` 只放行 `refine_plan`；不成立的部分：节点数模型自定、「被逼出的无用拆解」不成立；真正机制性的过度在 `src/batch.ts` `scrubConclusion` 会**物理删掉含回执词的整行**。空图是官方合法出口（`PLAN_TOOL_DESCRIPTION` 明写 \"A plan may be empty\"）。\n2. 可绕过：**成立，首轮有完整洞**。四条硬拦截只在 `src/rounds.ts`（`applyJudgementGuard`/`applyDelegationRule`/`applyWorkerRule`/`applyReportGuard`）。首轮可走：纯文本直答、先调工具再交图（`applyRounds` 在用户消息到达时置 `waiting`，首轮守卫整轮不生效）、`bg` 后台、`todo_write`/`create_goal`、审批类交互、**`src/repair.ts` 的裸 llm 修复环**（不过 agent loop、不过任何 guard，就能产出会被执行的调用）、forker/spawner 内部再画图（未登记为 worker）。图内旁路：图内 tools 节点点名原生 `subagent` 因 `callId !== rootCallId` 被放行 → 生成插件管不到的原生子代理。off 开关是混合态：`turnOff` 只摘 `refine_plan`，`plans.done` 不执行 → `waiting` 永真 → 图后拦截永不触发。\n3. harness 冲突：**部分成立**。两套派发通道共用一个工厂（`agentLoop.createAgent`），但种子/预算/报告协议分叉；并发是**加宽而非替换**（宿主把「未声明」当 exclusive，插件更宽松；`respectConcurrencySafety=false` 时连宿主判定也不看；两套不一致时**无仲裁点**）；插件提示段挂宿主 `PLAN_POLICY` 槽位、靠顺序而非机制；插件 `bg` 与宿主 `bg` 同名不同语义却复用同一 job registry；插件 `Rounds`/`Plans` 按 session 记内存、用户一说话就 reset，与宿主 todo/goal 持久化是两条线；`applyPlanTool` 的 900 秒 timeout 在 `defineTool` 注册时求值一次；`applyReportRetention` 用 `tools/post-execute` 把图报告换成 `value`，**绕开宿主 spill 截断**。\n\n**评审 C（入口角度：harness 接口面）**\n1. 过度限制：**部分成立**。成本不在画图，而在**结论被强制推到下一轮**（`onPlanFinished` 的 `exec.concludeTurn()` 结束本轮、插件再排 `NEXT_ROUND`），一轮 = 一个新 turn、历史整段重读；每轮固定税 ≈6.3k 字符（教条 1.8–1.9k + `REFINE_GUIDANCE` 2.8–2.9k + 工具描述 1.5k）≈1.5k token；**「空图逃生口」不成立** —— `parsePlanArgs` 中 criteria 为空直接 `return undefined`（工具抛"
 }

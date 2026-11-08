@@ -21,7 +21,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { decodeLog } from './sessions.mjs'
 
-const RESULTS = 'D:/code/vibe/dsh-refine-loop/bench/results'
+const RESULTS = process.env.DSH_RESULTS ?? 'D:/code/vibe/dsh-refine-loop/bench/results'
 const SESSIONS = 'D:/code/vibe/dsh-sandbox/home/sessions/--D-code-vibe--'
 
 const PRICE = {
@@ -31,7 +31,7 @@ const PRICE = {
 
 const TASKS = process.argv.length > 2
   ? process.argv.slice(2)
-  : ['coverage', 'review', 'humeval', 'humeval-hard', 'quixbugs', 'panel', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower']
+  : ['coverage', 'review', 'humeval', 'humeval-hard', 'quixbugs', 'panel', 'lhtb-nbody', 'lhtb-matpower']
 
 /**
  * @param record - the bench record.

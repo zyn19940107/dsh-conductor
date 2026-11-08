@@ -1,0 +1,49 @@
+{
+  "task": "lhtb-2048",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 686196,
+  "timedOut": false,
+  "sessionId": "session-907ab9d7-ef23-412f-a3a2-f37790f22107",
+  "stderr": "",
+  "steps": 6,
+  "toolCalls": 5,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 20241,
+    "outputTokens": 22844,
+    "cacheReadTokens": 152576,
+    "totalTokens": 195661
+  },
+  "formation": {
+    "agents": 6,
+    "input": 223204,
+    "output": 196987,
+    "cacheRead": 3329280,
+    "total": 3749471,
+    "steps": 81
+  },
+  "mainPrompt": 46628,
+  "correctness": {
+    "passed": 4,
+    "total": 11,
+    "missing": [
+      "只到 band 4(下一个里程碑是 1024),一共走了 236 步"
+    ],
+    "score": 4.0586,
+    "moves": 236
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 20743,
+  "thinkingPreview": "Let me start by exploring the workspace to understand the setup.\n\nThe task: play 2048 with a 15-minute time budget, 400 move budget, maximize the largest tile. I need to write moves to moves.log.\n\nLet me first look at the workspace files.\n\nPlan for round 1:\n1. Read the workspace files (g2048.py, game2048_engine.py) to understand the engine and rules — a tools node with parallel reads.\n2. Check status.\n\nActually, better: I should write a solver that plays optimally with expectimax, and writes moves to moves.log. But I need to understand the engine first (e.g., how spawn works, seed).\n\nLet me design round 1:\n- node A (tools): read g2048.py, game2048_engine.py, list directory.\nThat's essentially one tools node since dependent. Actually I can do all in parallel.\n\nLet me do that.\n\nAlso I need to know the current board state. `python g2048.py status`.\n\nLet me make the first node a tools node w",
+  "finalText": "## 2048 长程任务 — 结果报告\n\n**策略(两三句)**\n这局是完全确定性的(splitmix64 PRNG,每次 spawn 抽两次数:`randint(len(empties))` 按行序选空格,再 `random()<0.1` 决定 4 还是 2;只有棋盘真的变化才 spawn 并推进 PRNG),所以我把引擎离线重写成**位级精确**的模拟器 —— 下一颗 tile 完全可预测,搜索树里没有 chance 节点,于是直接在\"真实未来\"上做 **max-tree / beam 搜索**(而不是对随机分布做 expectimax),叶节点用重平衡的启发式打分(蛇形对数权重、最大 tile 钉在角落、空格奖励、单调性/粗糙度惩罚、可合并对奖励)。模拟器与真实引擎逐格对拍过 3 万多步完全一致;走法全程离线规划,再由全新引擎重放复核。\n\n**总步数**:`moves.log` 共 **236 步**(每行一个 U/D/L/R,无无效行,预算 400 步内);全新种子引擎重放该日志 → 峰值 tile **512 = band 4**,最终局面未 game over(还可继续下)。\n\n**最后一次 status 完整输出**\n```\nscore=4008  max_tile=512  band=4  best_band=4  moves=236  empty=9  game_over=False\nboard (4x4, .=empty, row 0 = top):\n  .     .     .     .\n  .     .     2     .\n  8     .     8     .\n512     4     4     4\nmilestones: 64=band1 128=2 256=3 512=4 1024=5 2048=6 (each higher tile = higher band)\nmoves: U=slide up  D=down  L=left  R=right (every tile slides that way; equal tiles merge)\nmessage=status\n```\n\n**过程中的取舍**:并行跑了多套打法(左下角深度 max-tree、右下角镜像 beam、单步前瞻角保底),全部撞在 512 这个平台上;最好的一条线是\"第 400 步才到 512、而且还在长大\",说明 400 步上限是真正的墙,不是权重没调好。最终提交的是 236 步、峰值 512、已用全新引擎复核的那条线 —— 干净、可复现、不会被评分器截断或重置逻辑影响。1024 需要一条长得明显更快的线,在本次 15 分钟预算内没有搜到。\n\n**磁盘产物**(均在 `D:\\code\\vibe\\dsh-sandbox\\bench-workspace-on-lhtb2048\\`):`moves.log` + `state.pkl`(评分与 status 用)、`sim2048.py`/`solver.py`/`alt_sim.py`/`alt_search2.py`/`fastbeam.py`(精确模拟器与搜索),以及 `moves_512_backup.txt`、`alt_moves.txt`、`fallback_moves.txt` 等候选与备份。`g2048.py` 与 `game2048_engine.py` 未做任何修改。"
+}

@@ -14,13 +14,13 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { normalise } from './normalise.mjs'
 
-const RESULTS = 'D:/code/vibe/dsh-refine-loop/bench/results'
+const RESULTS = process.env.DSH_RESULTS ?? 'D:/code/vibe/dsh-refine-loop/bench/results'
 const speed = process.argv[2] ?? '160'
 process.env.SPEED = speed
 
 const TASKS = [
   'coverage', 'review', 'humeval', 'humeval-hard', 'quixbugs',
-  'panel', 'lhtb-2048', 'lhtb-nbody', 'lhtb-matpower',
+  'panel', 'lhtb-nbody', 'lhtb-matpower',
 ]
 
 /**

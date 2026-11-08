@@ -1,0 +1,63 @@
+{
+  "task": "review",
+  "condition": "off",
+  "index": 1,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 133909,
+  "timedOut": false,
+  "sessionId": "session-4a013c63-7b64-41ba-bb3e-c00f92dfdb56",
+  "stderr": "",
+  "steps": 14,
+  "toolCalls": 23,
+  "tools": [
+    "glob",
+    "read",
+    "glob",
+    "glob",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "read",
+    "read",
+    "glob",
+    "read",
+    "read",
+    "grep"
+  ],
+  "usage": {
+    "inputTokens": 81101,
+    "outputTokens": 13419,
+    "cacheReadTokens": 631296,
+    "totalTokens": 725816
+  },
+  "formation": {
+    "agents": 1,
+    "input": 81101,
+    "output": 13419,
+    "cacheRead": 631296,
+    "total": 725816,
+    "steps": 14
+  },
+  "mainPrompt": 83000,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 29376,
+  "thinkingPreview": "The user wants a read-only review of three parts of D:\\code\\vibe\\dsh-refine-loop. Let me explore the directory.\n\nThis is a read-only analysis task. The skill `dsh-plugin-sandbox` applies to modifying/debugging plugins — here we're only reading/reviewing. The user says \"只读不改\" — no modifications. The skill description says \"改/调任何 DSH 插件前先调用它\" — we're not modifying. But maybe still relevant? The task is review, not modify. I'll just read files. Actually, the AGENTS.md says \"改/调任何 DSH 插件前**先调用它**\". We are only reviewing. I think reading is fine without loading skill, but loading it is cheap and might contain relevant context. However the skill is about development/validation with sandbox. Since it's read-only review, no need. Let me just explore.\n\nLet me start with glob to find files.\n\nI could delegate to 3 subagents for independent reviews, but the task is relatively small. Let me first exp",
+  "finalText": "已完成只读审查（未修改任何文件）。读了 `src/plan.ts`、`tool.ts`、`rounds.ts`、`fork.ts`、`batch.ts`、`concurrency.ts`、`policy.ts`、`index.ts`，并交叉核对了 `verify/plan.spec.ts`、`verify/rounds.spec.ts`、`README.md`。\n\n---\n\n## 一、`src/plan.ts` —— 计划的数据结构\n\n**结论：计划是「判据 + 一层节点」的两段结构，节点是同一个扁平接口上的四种 kind；调用参数在计划层完全不校验、原样透传。**\n\n**数据结构**（`plan.ts:93-98`）\n- `PlanArgs = { criteria: string[], nodes: PlanNode[] }` —— `criteria` 是「可观测的判据」，节点是这一轮的全部工作。\n- `PlanNode`（`plan.ts:65-87`）是**一个扁平接口带七个字段**，而不是按 kind 拆成联合类型：\n  `id` / `kind` / `calls` / `task` / `order` / `writes` / `budgetMs`。\n  parse 之后按 kind 填零：tools 节点 `task=''`，agent 节点 `calls=[]`（`plan.ts:170,176`）。\n\n**四种节点**（`plan.ts:24`）\n\n| kind | 上下文 | 是否自己画图 | 说明 |\n|---|---|---|---|\n| `tools` | 就是本 agent | — | 一批参数已定的调用，零额外模型调用 |\n| `worker` | 继承本对话（含本轮） | **否** | 叶子，自己干活自己交结论 |\n| `forker` | 继承本对话（含本轮） | 是 | 小领导，自己再派节点 |\n| `spawner` | **空** | 是 | 同上，但不带任何上下文 |\n\n`AGENT_NODE_KINDS` / `WORKER_NODE_KINDS` / `NODE_AGENT_KINDS` 三个导出里后两个与第一个内容重复（`plan.ts:27,35,44`），而 `WORKER_NODE_KINDS` 在 `tool.ts:38` 被 import 却从未使用 —— 属于死代码。\n\n**调用参数怎么处理**（关键：`plan.ts:57-62,158-171`）\n- `PlanToolCall.arguments` 的类型是 **`unknown`**，计划层**只检查 `name` 是非空字符串**，参数本体既不校验 schema、也不校验类型、不做白名单；`undefined` 被兜底成 `{}`，其余原样透传。\n- 参数错误的兜底发生在**调用时而不是计划时**：harness 执行时报错 → `batch.ts:316-358` 的 `runOne` 用**本对话自己的模型**问一次「这条调用应该是什么」，修好后只重跑这一条，最多修 2 次（`MAX_REPAIRS=2`）；其余节点不受影响。\n- 参数还参与**并发判定**：`concurrency.ts:222-233` 里 `ops_bash` 的 `command` 要过「只读命令」分类器（白名单可执行文件 + 无元字符 + 无危险 flag），判不出来就独占串行。\n- 另：`order` 只对 tools 节点有意义（`plan.ts:151`，非 `sequential` 一律当 `parallel`）；`budgetMs` 为非有限数/≤0 时归 0（= 没声明预算），上限被夹到 1 小时（`plan.ts:90,148-150`）。\n\n**分组**（`plan.ts:200-225`）：`buildGroups` 把「声明了同一个 `writes` 路径」的节点拆进不同 group；group 之间串行、group 内并行。**没声明 `writes` 的节点一律被信任**（插件无从得知一次调用动了磁盘）。注意分组是「加入第一个能加入的 group」，所以 `writes` 实际上会造出隐式的串行层，而不是单纯的并行隔离。\n\n**验证**：`verify/plan.spec.ts` 覆盖了空计划、重复 id、未知 kind、tools 缺 calls、agent 缺 task、写冲突分组等。\n\n---\n\n## 二、这个插件强制的那条规则\n\n**结论：规则是「一轮 = 一张图，跑完图只能判断」；但代码里真正被机制强制的只有后半句——图跑完之后模型自己发起的工具调用一律被拒，前半句「第一句话必须是图」只是提示，不是拦截。**\n\n**规则原文**：`index.ts:19-21` 概括为「the rule makes a turn one plan: the first call of a turn is the plan, and after the plan has run the turn is over」。`README.md:152-158` 明确把「必须交图」排除在强制清单之外（\"它是一个教条，不是拦截\"）。\n\n**实现分两半**：\n\n*提示（不拦）* —— `rounds.ts:190-232` `applyTurnDoctrine`：在每轮 `step === 1` 时，把 `ROUND_LOOP`（四步循环）作为**模型开口前最后读到的消息**注入；worker 会话被跳过。系统提示词里的 `REFINE_GUIDANCE`（`index.ts:54-85`）只是背景。\n\n*机制（真拦）* —— `rounds.ts:433-442` `applyJudgementGuard`，注册在 `ctx.tools.guard` 上：\n\n```\n触发条件（四个同时满足才拒）：\n  1. execution.agent 存在\n  2. isModelCall(execution)：execution.callId === execution.rootCallId —— 即“模型自己发起的”；\n     计划内部嵌套的调用（callId ≠ rootCallId）一律放行\n  3. execution.name !== 'refine_plan'（再交一张图是允许的）\n  4. plans.waiting(agent.session.id) === false —— 即“本请求已经跑过一张图”\n```\n返回的拒绝理由是 `JUDGE_ONLY`（`rounds.ts:405-407`）：只能写结论，或者交下一张图。\n\n**状态机**（决定条件 4 何时翻转）：\n- `applyRounds`（`rounds.ts:165-177`）：一轮 step 里只要带 `user` 消息（= 新请求），就 `rounds.reset(sessionId)` + `plans.expect(sessionId)` → 重新「等一张图」。\n- `plans.done(sessionId)` 在 `index.ts:270-279` 的 `onPlanFinished` 里调用，即计划工具返回时 → `waiting` 变 false，**判断守卫开始生效**。\n- 因此一个请求里，只要跑过第一张图，**直到用户再次说话之前**，模型都不能直接调工具。\n\n**同一套代码里另外几条被强制的**（都在扩展点上，不靠提示）：\n- 派发只能走图：`rounds.ts:369-396`，模型直接调 `subagent`/`subagent_fork` 抛 `DELEGATE_IN_GRAPH`（`exec.callId === exec.rootCallId` 才拒，嵌套调用照常）。\n- worker 不能画图：`rounds.ts:347-356` `applyWorkerRule`，worker 会话里调 `refine_plan` 返回 `WORKER_NO_PLAN`（工具仍留在表里，为了请求头/KV cache 不变）。\n- 后台子代理管理工具整张表移除：`HIDDEN_TOOLS = list_agents/send_message/interrupt_agent`（`rounds.ts:72-76`，`agent/created` 里 `restrict({deny})`）。\n- 计划报告不截断：`index.ts:312-323` `applyReportRetention` 在 `tools/post-execute` 用带 `value` 的决定返回，绕开 harness 的 spill 策略。\n- 总开关：`policy.ts` 的 `/dsh-conductor off` 把 `refine_plan` 从该会话的 scope 里摘掉，指导语随之从系统提示词消失、守卫也就无从谈起（`policy.ts:68-74`、`index.ts:248`）。\n\n**留一个诚实的缺口**：判断守卫的判据是「已经跑过一张图」，不是「这一轮交过图」。所以如果模型第一轮就压根不交图，`plans.waiting` 一直为 true，**这一整个请求里插件一个工具调用都不拦** —— 机制在这一路上是空的（README 已承认「模型可以不交图」，只是靠提示强约束）。\n\n---\n\n## 三、`src/tool.ts` —— 计划怎么跑起来、子代理"
+}

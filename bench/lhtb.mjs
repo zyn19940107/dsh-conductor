@@ -221,4 +221,13 @@ export const LHTB2048 = {
   },
 }
 
-export const LHTB_TASKS = { 'lhtb-2048': LHTB2048 }
+// lhtb-2048 is retired (2026-11-08). The judge's scale runs to band 11 (32768), but
+// the task's own 400-move budget caps play at band 4 (512): a beam search over the
+// deterministic engine reaches 512 by move 237 and cannot go higher, and the same
+// search finds 1024 (band 5) at move 487 once the budget is raised to 800. So both
+// arms score exactly 4/11 in every run — the metric has no headroom and cannot
+// separate a better plan from a worse one. The judge never checked the move count
+// either: 400 was a rule the model kept and the grader did not enforce.
+// Kept here with its reason; re-enable only after raising MOVE_BUDGET (e.g. to 800)
+// and enforcing it in the judge.
+export const LHTB_TASKS = {}
