@@ -1,0 +1,62 @@
+{
+  "task": "coverage",
+  "condition": "off",
+  "index": 1,
+  "profile": "bench-off",
+  "exitCode": 0,
+  "wallMs": 63251,
+  "timedOut": false,
+  "sessionId": "session-084e98c7-e84b-4eb9-9292-1ef5c09df96d",
+  "stderr": "",
+  "steps": 11,
+  "toolCalls": 22,
+  "tools": [
+    "glob",
+    "glob",
+    "pwsh",
+    "read",
+    "pwsh",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "read",
+    "grep",
+    "grep",
+    "read",
+    "pwsh",
+    "read",
+    "grep",
+    "read"
+  ],
+  "usage": {
+    "inputTokens": 62370,
+    "outputTokens": 7670,
+    "cacheReadTokens": 306432,
+    "totalTokens": 376472
+  },
+  "formation": {
+    "agents": 1,
+    "input": 62370,
+    "output": 7670,
+    "cacheRead": 306432,
+    "total": 376472,
+    "steps": 11
+  },
+  "mainPrompt": 66149,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": false,
+  "planAgentNodes": 0,
+  "thinkingChars": 17651,
+  "thinkingPreview": "Let me explore the directory structure.\n\nThis is a read-only task. Let me list files.\n\nLet me use glob and read tools.\nLet me look at the directory structure more broadly, and read the spec files to see what entry functions they test.\n\nLet me first get line counts of src files and then read each spec.\n\nLet me do parallel reads.\nNote: the pwsh line count using Measure-Object -Line gives slightly different counts than actual file lines (Get-Content | Measure-Object -Line counts lines... hmm, actually Measure-Object -Line counts non-empty lines? No — Measure-Object -Line counts lines of input. Actually for strings, `-Line` counts the number of lines in each input string. Empty lines are... Let me check: Measure-Object -Line on strings counts lines; empty strings count as 0 lines? That could explain differences. index.ts read shows 392 total lines but pwsh says 364. So there are ~28 blank li",
+  "finalText": "已完成全程只读核查（未修改任何文件）。\n\n## 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n先说框架：这不是 vitest/jest。每个 spec 自己手写 `check()`，失败时 `process.exit(1)`；`verify/run-specs.mjs` 用 esbuild 把每个 spec 打成 ESM 后**单独一个 node 进程**跑。入口函数由 import 行 + 实际调用点确定，不是按文件名猜的。\n\n| spec 文件（行数） | 主入口函数（来源模块） | 同文件另外调用的导出 |\n|---|---|---|\n| `plan.spec.ts` (501) | **`runPlan`** — `src/tool.ts`（注意不在 plan.ts） | `renderPlan`、`PLAN_TOOL_DESCRIPTION` (tool.ts)；`parsePlanArgs`、`buildGroups`、`WORKER_MARKER` (plan.ts)；`REFINE_GUIDANCE` (index.ts) |\n| `rounds.spec.ts` (268) | **`applyTurnDoctrine`** — `src/rounds.ts` | `applyReportGuard`、`applyWorkerRule`、`Rounds`、`Workers`、`isWorkerConversation`、`startOf`、`formatClock`，常量 `ROUND_LOOP`/`NEXT_ROUND`/`WORKER_NO_PLAN`/`REPORT_ONLY`；`WORKER_MARKER` (plan.ts)、`Reporters` (fork.ts) |\n| `batch.spec.ts` (217) | **`runBatch`** — `src/batch.ts` | `capOutput`、`capNodeOutput`、`scrubConclusion`、`MAX_CALL_OUTPUT_CHARS`、`MAX_NODE_OUTPUT_CHARS` |\n| `repair.spec.ts` (162) | **`parseRepair`** — `src/repair.ts` | 带 repair 回调的 `runBatch` 重试分支 (batch.ts) |\n| `background.spec.ts` (158) | **`Background` 类** — `src/background.ts` | 其 `start`/`handlesOf`/`noteRoot`/`noteChild`/`reap` |\n| `fork.spec.ts` (149) | **`buildSeedFromNow`** — `src/fork.ts` | `openTurnClosers`、`reportPrompt`、`Reporters` |\n| `concurrency.spec.ts` (123) | **`isReadOnlyCommand`** — `src/concurrency.ts`（断言最密集） | `mayRunTogether`、`buildOverrides`；末段借 `runBatch` (batch.ts) 验独占串行顺序 |\n| `retain.spec.ts` (120) | **`applyReportRetention`** — `src/index.ts` | `PLAN_TOOL` 常量 (tool.ts) |\n| `output-schema.spec.ts` (82) | **`applyPlanTool` 的 output schema** — `src/tool.ts` | `PlanOutput` 类型 |\n| `refine.spec.ts` (81) | **`parseBatchArgs` / `renderBatch`** — `src/batch.ts` | `parsePolicyCommand` (policy.ts) |\n\n两个会误导解读的点：\n\n- **文件名 ≠ 归属**：`plan.spec.ts` 测的是 `tool.ts` 的 `runPlan`；`refine.spec.ts` 名字像 refine 循环，实际只测 policy/batch 的解析与渲染，**src 下根本没有 `refine.ts`**。\n- **两个 spec 从不执行**：`verify/run-specs.mjs:21` 的名单硬编码为 8 个 — `refine / batch / concurrency / plan / rounds / fork / retain / output-schema`。`repair.spec.ts` 和 `background.spec.ts` 在盘上但不在名单里，`npm run specs`（= 该脚本）永远跑不到它们。\n\n## 2. `src/` 下没有对应 spec 的模块\n\n`src/` 是平铺目录，10 个 `.ts`，无子目录、无 `.d.ts`：`background, batch, concurrency, fork, index, plan, policy, repair, rounds, tool`。\n\n**按\"有没有同名 spec 文件\"（这是唯一能支撑 Q3 的口径）：`index.ts`、`policy.ts`、`tool.ts` 三个没有。**\n其余 7 个有：`background.spec.ts` / `batch.spec.ts` / `concurrency.spec.ts` / `fork.spec.ts` / `plan.spec.ts` / `repair.spec.ts` / `rounds.spec.ts`。\n\n**但按\"有没有被某个 spec import 并断言\"：10 个模块全都被覆盖了，一个不缺** —— index.ts 由 retain.spec.ts 覆盖，policy.ts 由 refine.spec.ts 覆盖，tool.ts 由 plan.spec.ts + output-schema.spec.ts 覆盖。所以真正的空洞在**函数级别**，不在模块级别：\n\n- **`src/index.ts`：`apply()` —— 插件真正的装配入口 —— 完全没有 spec。** 只测了 `applyReportRetention` 和 `REFINE_GUIDANCE`。整条装配链（注册 plan 工具、注入 system prompt 段、回合 doctrine、轮次钩子、guard、策略命令）没有回归保护。这是最大的洞。\n- `src/policy.ts`：只测了 `parsePolicyCommand`；`SessionPolicy` 类、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全未测。\n- `src/fork.ts`：`spawnForkedChild` / `spawnEmptyChild`（真正的子代理启动：预算、取消、报告流程，占该文件约一半篇幅）未测，只测了 seed 构造和 prompt 文案。\n- `src/rounds.ts`：`applyRounds`、`applyJudgementGuard`、`applyDelegationRule`、`Plans` 类未测。\n- `src/repair.ts`：`askForRepair`、`repairSystem`、`describeFailure`、`collectText` 未测（且该 spec 根本不运行）。\n- `src/background.ts`：`applyBackgroundTool`（`bg` 工具注册）未测。\n\n## 3. 行数最多的模块\n\n`src` 全量行数（含空行 / 非空行）：\n\n| 模块 | 总行 | 非空行 | 同名 spec |\n|---|---|---|---|\n| `fork.ts` | **640** | 608 | 有 |\n| `tool.ts` | **633** | 610 | **无** |\n| `rounds.ts` | 480 | 447 | 有 |\n| `batch.ts` | 476 | 444 | 有 |\n| `index.ts` | 392 | 364 | **无** |\n| `background.ts` | 354 | 334 | 有 |\n| `policy.ts` | 241 | 228 | **无** |\n| `concurrency.ts` | 234 | 224 | 有 |\n| `plan.ts` | 225 | 207 | 有 |\n| `repair.ts` | 173 | 162 | 有 |\n\n- **在\"没有同名 spec\"的三个模块里（Q2 的口径）：`src/tool.ts` 最多，633 行**（非空行 610，25 806 字节）。\n- 补充口径：如果把 Q2 理解成\"完全没被任何 spec 覆盖的模块\"，那个集合是**空的**（10 个模块都被 import 过），此时若问整个 `src` 里最大的文件，则是 **`src/fork.ts`，640 行"
+}

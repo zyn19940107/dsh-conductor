@@ -4,12 +4,12 @@
   "index": 5,
   "profile": "bench-off",
   "exitCode": 0,
-  "wallMs": 78308,
+  "wallMs": 106202,
   "timedOut": false,
-  "sessionId": "session-4cb34c8e-843c-4850-8259-dd6cec7f4b70",
+  "sessionId": "session-2492d848-82ad-4482-96ab-6ef54d54dcc5",
   "stderr": "",
-  "steps": 13,
-  "toolCalls": 29,
+  "steps": 12,
+  "toolCalls": 26,
   "tools": [
     "glob",
     "glob",
@@ -23,47 +23,46 @@
     "read",
     "read",
     "read",
-    "pwsh",
-    "grep",
-    "pwsh",
-    "pwsh",
+    "read",
     "pwsh",
     "read",
     "pwsh",
     "grep",
-    "glob",
+    "pwsh",
+    "pwsh",
+    "read",
+    "pwsh",
     "read",
     "read",
     "read",
     "grep",
-    "read",
-    "glob",
-    "grep",
-    "read"
+    "grep"
   ],
   "usage": {
-    "inputTokens": 43857,
-    "outputTokens": 9621,
-    "cacheReadTokens": 427008,
-    "totalTokens": 480486
+    "inputTokens": 60106,
+    "outputTokens": 9122,
+    "cacheReadTokens": 449280,
+    "totalTokens": 518508
   },
   "formation": {
     "agents": 1,
-    "input": 43857,
-    "output": 9621,
-    "cacheRead": 427008,
-    "total": 480486,
-    "steps": 13
+    "input": 60106,
+    "output": 9122,
+    "cacheRead": 449280,
+    "total": 518508,
+    "steps": 12
   },
-  "mainPrompt": 50973,
+  "mainPrompt": 75700,
   "correctness": {
-    "passed": 5,
+    "passed": 4,
     "total": 5,
-    "missing": []
+    "missing": [
+      "src 的 11 个模块(缺:parked.ts)"
+    ]
   },
   "planned": false,
   "planAgentNodes": 0,
-  "thinkingChars": 23632,
-  "thinkingPreview": "Let me read the spec files to determine the entry functions they test. And read the src files for line counts.\n\nLet me read each spec file's imports.\nNow let me read the remaining specs.\nNow let me get line counts for the src files, and check what's exported from each src module, and check the src/index.ts and src/policy.ts, src/tool.ts, src/plan.ts, src/batch.ts, etc.\n\nLet me count lines with PowerShell.\nNow let me check the src/index.ts and src/policy.ts for the parts not tested.\n\nQuestion 2: Which .ts modules under src have no corresponding spec? Let's map:\n\n- src/batch.ts → tested by batch.spec.ts, refine.spec.ts (parseBatchArgs, renderBatch), concurrency.spec.ts (runBatch), repair.spec.ts (runBatch)\n- src/concurrency.ts → concurrency.spec.ts\n- src/policy.ts → refine.spec.ts (parsePolicyCommand) — partially. The spec only tests `parsePolicyCommand`. Other exports of policy.ts (Sessio",
-  "finalText": "只读完成,没有改动任何文件。以下是三个问题的答案。\n\n---\n\n## 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n每个 spec 是一个独立进程脚本(由 `verify/run-specs.mjs` 用 esbuild 打包后逐个跑),每个 `console.log('xxx')` 段落对应一个被测入口。\n\n| spec 文件 | 实际测的入口函数 | 来源模块 |\n|---|---|---|\n| `batch.spec.ts` | **`runBatch`**(主入口)+ `capOutput` / `capNodeOutput` / `scrubConclusion` / `MAX_CALL_OUTPUT_CHARS` / `MAX_NODE_OUTPUT_CHARS` | `src/batch.ts` |\n| `concurrency.spec.ts` | **`isReadOnlyCommand` / `mayRunTogether` / `buildOverrides`**;末段顺带用 `runBatch` 验「批次顺序 = 计划顺序」 | `src/concurrency.ts` + `src/batch.ts` |\n| `repair.spec.ts` | **`runBatch` 的修复路径**(注入 repair hook)+ **`parseRepair`** | `src/batch.ts` + `src/repair.ts` |\n| `refine.spec.ts` | **`parseBatchArgs` / `renderBatch`** + **`parsePolicyCommand`** | `src/batch.ts` + `src/policy.ts` |\n| `plan.spec.ts` | **`parsePlanArgs` / `buildGroups`**;**`runPlan` / `renderPlan` / `PLAN_TOOL_DESCRIPTION`**;`REFINE_GUIDANCE` | `src/plan.ts` + `src/tool.ts` + `src/index.ts` |\n| `rounds.spec.ts` | **`Rounds`(类)**、**`applyTurnDoctrine`**、**`applyReportGuard`**、**`applyWorkerRule`**、**`isWorkerConversation`**、**`startOf`**、**`formatClock`** + 常量 `ROUND_LOOP` / `NEXT_ROUND` / `REPORT_ONLY` / `WORKER_NO_PLAN` | `src/rounds.ts`(外借 `src/plan.ts` 的 `WORKER_MARKER`、`src/fork.ts` 的 `Reporters`) |\n| `fork.spec.ts` | **`buildSeedFromNow` / `openTurnClosers` / `reportPrompt` / `Reporters`(类)** | `src/fork.ts` |\n| `background.spec.ts` | **`Background`(类)**:`start` / `handlesOf` / `reap` / `noteRoot` / `noteChild` | `src/background.ts` |\n| `retain.spec.ts` | **`applyReportRetention`**(注册 `tools/post-execute` 监听器并验证「按 value 交付、不过截断链」) | `src/index.ts`(用 `src/tool.ts` 的 `PLAN_TOOL`) |\n| `output-schema.spec.ts` | **`applyPlanTool`**(只取它注册的 `output.schema`,用 harness 自己的 `validateJsonSchemaValue` 校验) | `src/tool.ts` |\n\n> ⚠️ 顺带发现一处不一致:`verify/run-specs.mjs:21` 的 specs 数组只列了 **8 个**,**`repair.spec.ts` 和 `background.spec.ts` 不在里面** —— 这两个文件存在但 `npm run specs` 不会跑它们。\n\n---\n\n## 2. `src/` 下没有对应 spec 的模块\n\n`src/` 共 **10** 个 `.ts`(无子目录):`batch / background / concurrency / fork / index / plan / policy / repair / rounds / tool`。\n\n**按「同名 spec」这个口径**(spec 文件名 = 模块名),缺 spec 的是 **3 个**:\n\n- **`src/policy.ts`** —— 没有 `policy.spec.ts`\n- **`src/tool.ts`** —— 没有 `tool.spec.ts`\n- **`src/index.ts`** —— 没有 `index.spec.ts`\n\n但这三个模块**并非完全没被测**,只是被别的 spec 顺手覆盖了一部分:\n\n- `policy.ts` ← `refine.spec.ts` 只测了 `parsePolicyCommand`\n- `tool.ts` ← `plan.spec.ts`(`runPlan`/`renderPlan`/`PLAN_TOOL_DESCRIPTION`)、`output-schema.spec.ts`(`applyPlanTool`)、`retain.spec.ts`(`PLAN_TOOL`)\n- `index.ts` ← `plan.spec.ts`(`REFINE_GUIDANCE`)、`retain.spec.ts`(`applyReportRetention`)\n\n**按「入口函数级」这个更有意义的口径**,`src/` 里 **没有一个模块是零覆盖的**——10 个模块全部至少被一个 spec 导入过。真正的缺口是模块内部**没被任何 spec 触达的导出**:\n\n| 模块 | 未被任何 spec 测到的导出 |\n|---|---|\n| `policy.ts` | `SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand`(**只测了 `parsePolicyCommand`,7 个导出里漏了 6 个**) |\n| `repair.ts` | `askForRepair`、`repairSystem`、`describeFailure`、`collectText`(只测了 `parseRepair`) |\n| `rounds.ts` | `Plans`、`applyRounds`、`applyDelegationRule`、`isModelCall`、`applyJudgementGuard`,常量 `DELEGATE_IN_GRAPH`/`DELEGATION_TOOLS`/`HIDDEN_TOOLS`/`JUDGE_ONLY` |\n| `fork.ts` | `spawnForkedChild`、`spawnEmptyChild`(两个真正 spawn 子代理的入口) |\n| `background.ts` | `applyBackgroundTool`、`BG_TOOL`、`BG_TOOL_DESCRIPTION` |\n| `index.ts` | `apply`(插件主装配入口)、`Config` 及其默认值 |\n\n导出全部被测到的是:`batch.ts`、`plan.ts`、`concurrency.ts`、`tool.ts`。\n\n---\n\n## 3. 行数最多的模块\n\n按**文件总行数**:\n\n| 排名 | 文件 | 总行数 | 空行 | 非空代码行 |\n|---|---|---|---|---|\n| 1 | **`src/fork.ts`** | **640** | 33 | 607 |\n| 2 | `src/tool.ts` | 633 | 24 | 609 |\n| 3 | `src/rounds.ts` | 480 | 34 | 446 |\n| 4 | `src/batch.ts` | 476 | 33 | 443 |\n| 5 | `src/index.ts` | 392 | 29 | 363 |\n| 6 | `src/background.ts` | 354 | 20 | 334 |\n| 7 | `src/policy.ts` | 241 | 14 | 227 |\n| 8 | `src/concurrency.ts` | 234 | 11 | 223 |\n| 9 | `src/plan.ts` | 225 | 19 | 206 |\n| 10 | `src/repair.ts` | 173 | 12 | 161 |\n\n**答案:`src/fork.ts`,640 行。**\n\n一个口径提醒:若按**非空代码行**计,`"
+  "thinkingChars": 22557,
+  "thinkingPreview": "Let me read each spec file to see what entry function it tests, and read the src files.\n\nNote: src has 11 .ts files. verify has 11 .spec.ts files. But names don't align exactly: spec has `refine.spec.ts`, `repair.spec.ts`, `retain.spec.ts`, `output-schema.spec.ts` which don't have direct src counterparts (no refine.ts, retain.ts, output-schema.ts). And src has `policy.ts`, `index.ts`, `tool.ts` which don't have direct spec counterparts.\n\nLet me read them.\nLet me read the remaining spec files and the src files.\nNow let me read the remaining spec files: parked.spec.ts, tools-tool.spec.ts, batch.spec.ts.\nNow let me read the src files to determine coverage and line counts.\n\nLet me get the line counts of each src file first, and read them to determine what's covered.\n\nNote the question asks:\n1. Each .spec.ts under verify — what entry function does it actually test?\n2. Which .ts modules under ",
+  "finalText": "已读完 `verify/` 下 11 个 spec 和 `src/` 下 11 个模块（全程只读，未修改任何文件）。\n\n---\n\n## 1. 每个 `.spec.ts` 实际测的入口函数\n\n先说一个前提：这些不是测试框架的 spec，是**独立脚本**（每个文件自己定义 `check()` 断言 + 顶层代码），由 `node verify/run-specs.mjs`（`pnpm specs`）用 esbuild 打包成 `.mjs` 后**一个 spec 一个进程**运行。\n\n| spec | 实际被调用的 src 入口函数 |\n|---|---|\n| `verify/refine.spec.ts` | `parseBatchArgs`、`renderBatch`（batch.ts）；`parsePolicyCommand`（policy.ts） |\n| `verify/batch.spec.ts` | `runBatch`、`capOutput`、`capNodeOutput`（+ `MAX_CALL_OUTPUT_CHARS`/`MAX_NODE_OUTPUT_CHARS`） |\n| `verify/concurrency.spec.ts` | `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`（concurrency.ts）；`runBatch`（batch.ts，只测批次顺序/独占调用） |\n| `verify/plan.spec.ts` | `parsePlanArgs`、`buildGroups`（plan.ts）；`runPlan`、`renderPlan`、`PLAN_TOOL_DESCRIPTION`（tool.ts）；`REFINE_GUIDANCE`（index.ts） |\n| `verify/rounds.spec.ts` | `Rounds`、`applyTurnDoctrine`、`applyWorkerRule`、`applyReportGuard`、`startOf`、`formatClock`、`isWorkerConversation` + `ROUND_LOOP`/`NEXT_ROUND`/`REPORT_ONLY`/`WORKER_NO_PLAN`（rounds.ts）；`WORKER_MARKER`（plan.ts）；`Reporters`（fork.ts） |\n| `verify/fork.spec.ts` | `buildSeedFromNow`、`openTurnClosers`、`reportPrompt`、`Reporters`（fork.ts） |\n| `verify/retain.spec.ts` | `applyReportRetention`（index.ts）；`PLAN_TOOL` 常量（tool.ts） |\n| `verify/output-schema.spec.ts` | `applyPlanTool`（**只取注册下来的 `output.schema`**，从不调用它的 `execute`） |\n| `verify/parked.spec.ts` | `Parked` 类（`park`/`list`/`resume`/`retain`/`disposeAll`） |\n| `verify/tools-tool.spec.ts` | `applyToolsTool`、`readToolsCalls`、`TOOLS_TOOL`（tools-tool.ts）；`Workers` 仅作类型导入 |\n| `verify/repair.spec.ts` | `parseRepair`（repair.ts）；`runBatch` 的 repair 分支（batch.ts） |\n\n⚠️ **一个实测发现**：`verify/run-specs.mjs:21` 的 specs 列表只有 10 个，**`repair.spec.ts` 没被收录** —— 文件存在，但 `pnpm specs` 根本不会运行它。\n\n---\n\n## 2. 没有对应 spec 的 src 模块\n\n### 按文件名对应（最直接的口径）\n\n`src` 有 11 个模块、`verify` 有 11 个 spec，但不是一一对应：\n\n- **无同名 spec 的 3 个模块**：`src/index.ts`、`src/policy.ts`、`src/tool.ts`\n- 反过来，**无同名模块的 3 个 spec**：`refine.spec.ts`（→ batch+policy）、`retain.spec.ts`（→ index）、`output-schema.spec.ts`（→ tool）\n\n这三个模块其实**都被别的 spec 间接覆盖**了，但覆盖深度差别很大。\n\n### 按\"入口函数是否被测\"（更严格的口径）\n\n所有 11 个模块至少被一个 spec import，但按导出函数算，未被任何 spec 调用的入口有：\n\n| 模块 | 未被测的入口 |\n|---|---|\n| `src/index.ts` | **`apply()`（插件主入口，完全没测）**、全部 `DEFAULT_*` 常量、`Config` schema |\n| `src/policy.ts` | `runPolicyCommand`、`policyConfirmation`、`applyPolicyCommand`、`applyPolicyMessage`、`SessionPolicy`（**只有 `parsePolicyCommand` 被测**） |\n| `src/repair.ts` | `askForRepair`、`repairSystem`、`describeFailure`、`collectText`（**只有 `parseRepair` 被测**） |\n| `src/rounds.ts` | `Plans`、`applyRounds`、`applyDelegationRule`、`applyJudgementGuard`、`isModelCall`、`JUDGE_ONLY` |\n| `src/fork.ts` | **`spawnForkedChild`、`spawnEmptyChild`**（plan.spec 用 `fakeFork` 把真实现整个替掉了） |\n| `src/tool.ts` | `applyPlanTool` 的 **`execute` 主体**（节点数上限、`budgetWarn` 计算、`parked.retain`、`onPlanFinished`/`concludeTurn`）——output-schema.spec 只看注册下来的 schema，从不调用它 |\n| batch / concurrency / plan / parked / tools-tool | 导出函数全覆盖 |\n\n---\n\n## 3. 行数最多的模块\n\n**按第 2 问的文件名口径**（index.ts / policy.ts / tool.ts）：\n\n> **`src/tool.ts` —— 671 行**（含空行 25，非空 646）\n\n三个候选：`tool.ts` 671 行 > `index.ts` 395 行 > `policy.ts` 241 行。\n\n**如果按\"入口函数未被测\"的口径**（第 2 问后半张表的 6 个模块）：\n\n> **`src/fork.ts` —— 712 行**（含空行 34，非空 678）\n\n六个候选：`fork.ts` 712 > `tool.ts` 671 > `rounds.ts` 481 > `index.ts` 395 > `policy.ts` 241 > `repair.ts` 173。\n\n补充一行全项目行数（总计 / 非空）：fork 712/678、tool 671/646、rounds 481/448、batch 448/417、index 395/366、policy 241/228、concurrency 234/224、plan 225/207、tools-tool 174/168、repair 173/162、parked 156/148。"
 }
