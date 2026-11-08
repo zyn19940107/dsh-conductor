@@ -1,5 +1,47 @@
 # Changelog
 
+## 2.10.0
+
+### 新工具：`tools` —— plan 的 tools 节点，不需要 plan
+
+`tools` 节点原来只能存在于图里：worker 是叶子，`refine_plan` 被拒，所以"调用打包"和
+"结果截断"这两件事它一样也拿不到。这两件事和图没有关系，只是调度器与上限。
+
+现在插件直接注册一个 `tools` 工具：
+
+```json
+{"calls": [{"name": "grep", "arguments": {"pattern": "rule", "path": "src"}},
+           {"name": "read", "arguments": {"file_path": "src/rounds.ts"}}],
+ "order": "parallel"}
+```
+
+- 走**同一套** `runBatch` 调度（并发安全、屏障、修复）和**同一个**截断
+  （`capNodeOutput`，5,000 字符，头 + 尾 + 标记列名每个调用）；
+- 返回一个合并摘要，而不是每个调用的原始输出；
+- **只对不能建图的会话（worker）开放**：能建图的会话调用会被拒绝，并被告知用 refine_plan
+  把调用放进 tools 节点 —— plan-first 规则不变；
+- worker 提示词改为指向它："call `tools` with the calls you would have put in that node…
+  use the direct tools for what the task names, so the cap never takes away a file it asked
+  you to cover."
+
+### 实测（review，5 对，2.10.0）
+
+| | 基线（无）| 2.9.2（纯提示词）| **2.10.0（tools 工具）** |
+|---|---|---|---|
+| 正确率 | 6/6 × 5 | 6/6 × 5 | 6/6 × 4，1 次 5/6 |
+| token 中位 | 1,430k | 1,086k | **1,013k（−29%）** |
+| 未缓存输入 | 157k | 149k | **127k（−19%）** |
+| 成本 | ¥0.275 | ¥0.247 | **¥0.227（−17%）** |
+| 墙钟中位 | 88s | 73s | 84s |
+
+那次 5/6 缺的是 `delegationDepth`：worker 的报告里**有**这个字段，是父代理汇总时丢的，
+不是 worker 没看到。基线 5 次全 6/6，这里还有待观察。
+
+### specs
+
+新增 `verify/tools-tool.spec.ts`：注册名与参数形状、calls 严格校验、能建图的会话被拒绝
+并指向 refine_plan、worker 会话放行。
+
 ## 2.9.2
 
 ### worker 提示词：不能建图，就把"收集"做成一个批次

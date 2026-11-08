@@ -1,0 +1,42 @@
+{
+  "task": "review",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 70972,
+  "timedOut": false,
+  "sessionId": "session-407cc43f-9049-44e1-b3e0-a45c147a8470",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 2,
+  "tools": [
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 19194,
+    "outputTokens": 5398,
+    "cacheReadTokens": 27953,
+    "totalTokens": 52545
+  },
+  "formation": {
+    "agents": 5,
+    "input": 126910,
+    "output": 25159,
+    "cacheRead": 751074,
+    "total": 903143,
+    "steps": 27
+  },
+  "mainPrompt": 22119,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 5812,
+  "thinkingPreview": "The output was truncated. I only got the tail of tool.ts. I need to read the files properly. Let me re-read plan.ts and tool.ts with offset/limit, and also find the \"forced rule\" — likely in a patch file or AGENTS.md of the plugin.\n\nLet me plan a round: read plan.ts in full (chunks), read tool.ts in chunks, glob for non-node_modules files.\n\nLet me do a tools node with multiple read calls using offset/limit, plus glob excluding node_modules.\n\nActually the glob output was truncated too. Let me be targeted.\n\nPlan:\n- node A: read plan.ts fully (offset 1, limit 400 and 400-800 etc.)\n- node B: read tool.ts fully in chunks\n- node C: glob for src/** and *.yml/*.md at root to find the forced rule implementation.\n\nBut reading chunks: each read call can have offset/limit. Let me estimate file sizes. plan.ts and tool.ts — tool.ts has 673 lines. plan.ts unknown.\n\nLet me make a tools node with sequent",
+  "finalText": "三部分审查完成（全程只读，未改动任何文件）。\n\n## 1. `src/plan.ts` —— 计划的数据结构\n\n**顶层结构**：`PlanArgs = { criteria: string[]; nodes: PlanNode[] }`。`criteria` 是判定本轮成功与否的可观测标准，`nodes` 是节点列表。\n\n**节点结构**：`PlanNode = { id, kind, calls, task, order, writes, budgetMs }`\n- `id: string` —— 非空且计划内唯一，重复即解析失败\n- `kind: PlanNodeKind` —— 四值枚举\n- `calls: PlanToolCall[]` —— **仅 tools 节点有意义**，agent 节点恒为空数组；`PlanToolCall = { name: string; arguments: unknown }`\n- `task: string` —— **仅 agent 节点有意义**，必须非空；tools 节点恒为空串\n- `order: 'parallel' | 'sequential'` —— 只管 tools 节点内多个 call 的跑法\n- `writes: string[]` —— 声明该节点会写哪些文件，供 `buildGroups`/`canRunTogether` 判定写冲突；不声明就一律信任\n- `budgetMs: number` —— 模型声明的预期耗时，解析时用 `Math.min(round(v), MAX_NODE_BUDGET_MS)` 夹紧（上限 3,600,000ms），0 表示未声明\n\n**节点四种**：`tools`（参数已定的一批调用，无子代理，必须带非空 `calls`）、`worker`（继承当前对话干活的叶子，自己不能画计划）、`spawner`（从空上下文起步的 leader）、`forker`（继承当前对话的 leader）。后三者统称 `AGENT_NODE_KINDS = ['worker','spawner','forker']`，一律走插件自己的 spawn，因为需要 child handle 才能按预算叫停子代理。\n\n**调用参数的处理**：入口是 `parsePlanArgs(value): PlanArgs | undefined`，纯手写校验（不是 zod）。它校验 `criteria` 是非空字符串数组、`nodes` 是数组、每个 node 有唯一非空 `id`、`kind` 属于四值之一、tools 节点有非空 `calls` 且每个 call 的 `name` 非空、agent 节点有非空 `task`；任何一条不满足就返回 `undefined`（整个计划被拒）。**`arguments` 整体透传、类型是 `unknown`**：只有为 `undefined` 时被换成 `{}`，plan.ts 完全不管它内部形状；工具 schema 里声明为 `type: 'json'`（自由 JSON），真正的按工具校验发生在派发那一刻。空计划 `nodes: []` 是合法的。\n\n## 2. 插件强制的那条规则\n\n**规则本体：「一个 turn 就是一个计划」** —— 一轮的第一条消息必须是图本身（先交图、再动手）；图跑完后这一轮只剩两件事：写结论，或者再交下一张图；派发子代理只能作为图里的节点发生，模型不许绕过计划直接调。\n\n**实现方式**（全部落在 `src/rounds.ts`，配合 `src/index.ts` 与 `src/policy.ts`）：\n- `REFINE_GUIDANCE`（`index.ts`）注册成 system prompt 段 `refine-loop:policy`，常驻告知\"只有一层、节点同起同落、节点间无依赖\"\n- `ROUND_LOOP`（`rounds.ts`）每轮开头作为最后一条 user 消息注入，只在 `step === 1` 且非 worker 会话时生效，附带节点数上限句\n- `applyJudgementGuard` —— **硬拦截**：模型自己发起的调用（`isModelCall`：`callId === rootCallId`）除 `refine_plan` 外，只要本次请求已交过计划（`Plans.waiting(sessionId)` 为 false），一律返回 `JUDGE_ONLY` 拒掉\n- `applyDelegationRule` —— `subagent`/`subagent_fork` 被重注册，模型直调时抛 `DELEGATE_IN_GRAPH`，计划内部的嵌套调用照常放行；`HIDDEN_TOOLS`（`list_agents`/`send_message`/`interrupt_agent`）被 restrict 掉\n- `applyWorkerRule`（worker 会话调 `refine_plan` → `WORKER_NO_PLAN`）、`applyReportGuard`（写报告阶段 → `REPORT_ONLY`）\n- `applyRounds` 状态机：`onPlanFinished` 后 `rounds.bump`，超过 `maxRounds`（默认 16）就 `parked.disposeAll` 结束回合，否则用 `agent.followup` 排 `NEXT_ROUND` 开下一轮\n- 开关：`SessionPolicy.turnOff` 把 `refine_plan` 从工具表摘掉，规则随之失效（`/refine-loop off|on`）\n\n**触发条件**：参数不合法 → 抛 `refine_plan needs criteria, and nodes that each have an id and a kind`；节点数超 `maxBatchSize`（默认 8）→ 抛 \"This plan has N nodes and the limit is M\"；声明预算总和超过计划上限 → 不拒绝，结果里加 `budgetWarn` 提醒下一轮改预算；节点 `budgetMs` 超上限只是截断不报错。**一处不对称**：「交图之前不许直接调工具」这半条只有教（`ROUND_LOOP` 文字），没有对应的硬 guard —— 被硬拒的是「计划之后」那半条。\n\n## 3. `src/tool.ts` —— 计划怎么跑、子代理受什么限制\n\n**执行流程**：工具名 `PLAN_TOOL = 'refine_plan'`，`applyPlanTool` 注册，参数 schema 只有 `criteria` 和 `nodes`（节点 `additionalProperties: false`）。`execute` 的流水线是 `parsePlanArgs` → 校验 → 节点数上限检查 → `options.onPlanStarted` 通知规则层 → `options.parked.retain(sessionId, ids)`（本轮仍在写的节点 id 视为「继续」，被省略的 id 视为「结束」）→ 造 `repair` 和 `fork` → 比较各节点 `budgetMs` 之和与 `options.timeoutMs()` 生成 `budgetWarn` → `runPlan(...)` → 若 `onPlanFinished` 返回 true 则 `exec.concludeTurn()`。\n\n**runPlan 的执行模型**：`buildGroups` 先按 `writes` 交集把写同一文件的节点拆开（`canRunTogether`），**组内 `Promise.all` 同跑，组与组之间有 barrier 顺序跑**。节点失败不掀翻计划 —— 每个调用各自 try/catch，失败变成 `ok:false` + `error` 文本，其余节点照跑完。返回 `PlanOutput = { criteria, groups, nodes: PlanNodeResult[], budgetWarn? }`，节点输出经 `capNodeOutput`（5000 字符）压缩后由 `renderPlan` 渲染。\n\n**子代理的限制**：\n- **深度**：`runNode` 取 `agent.session.header.delegationDepth`，`>= maxAgentDepth`（默认 3）时该节点直接失败；子会话 depth 由 `spawnChild` 按父 depth + 1 写入 meta\n- **时间**：`agentNodeTimeoutMs`（默认 540,000ms）是硬顶；节点自报的 `budgetMs`（封顶 3,600,000ms）是工作停止点 —— 预算耗尽时子代理被叫去写报告（`driveChild` → `reportPrompt`），写报告期间所有工具调用被 `REPORT_ONLY` 拒掉，报告本身不限时。tools 节点的 `budgetMs` 则是中止仍在跑的调用、保留已完成的- **上下文**：`worker`/`forker` 继承当前会话状态（`spawnForkedChild` → `buildSeedFromNow`），`spawner` 从空白开始（`spawnEmptyChild`）；三者都由插件"
+}

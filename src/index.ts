@@ -34,6 +34,7 @@ import { Reporters } from './fork.js'
 import { Parked } from './parked.js'
 import { applyPolicyCommand, applyPolicyMessage, SessionPolicy } from './policy.js'
 import { applyPlanTool, PLAN_TOOL } from './tool.js'
+import { applyToolsTool } from './tools-tool.js'
 import { describeFailure, parseRepair, repairSystem } from './repair.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
@@ -306,6 +307,21 @@ export function apply(ctx: Context, config: Config): void {
   applyReportGuard(ctx, reporters)
   applyDelegationRule(ctx)
   applyReportRetention(ctx)
+
+  // The plan's tools node, without the plan: the conversations that cannot draw
+  // a graph are exactly the ones that cannot use a node, so they get the batch
+  // and its cap directly.
+  applyToolsTool(ctx, {
+    workers,
+    respectConcurrencySafety: () => config.respectConcurrencySafety.get(),
+    overrides: () => buildOverrides(
+      config.concurrentTools.get(),
+      config.concurrentShell.get(),
+      config.shellTool.get(),
+    ),
+    timeoutMs: () => config.maxBatchTimeoutMs.get(),
+    repair: (callConfig: LlmCallConfig) => (failed, error, signal) => repairFailedCall(ctx, callConfig, failed, error, signal),
+  })
 
   applyPolicyCommand(ctx, policy)
   applyPolicyMessage(ctx, policy)

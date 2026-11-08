@@ -553,7 +553,7 @@ dsh plugin add /path/to/dsh-conductor
 
 # 或打包
 pnpm pack
-dsh plugin add ./zyn19940107-dsh-conductor-2.9.2.tgz
+dsh plugin add ./zyn19940107-dsh-conductor-2.10.0.tgz
 ```
 
 装完请开一个新会话 —— 已开着的会话不会刷新模型看到的工具表。
