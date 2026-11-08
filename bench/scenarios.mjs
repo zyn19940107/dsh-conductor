@@ -343,7 +343,7 @@ const REPO = resolve(HERE, '..')
  * @returns {string} the absolute workspace path.
  */
 function workspace() {
-  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}`)
+  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-${process.env.DSH_BENCH_INDEX ?? '0'}`)
 }
 
 /**

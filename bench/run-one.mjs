@@ -66,6 +66,10 @@ async function run() {
   // conditions start from the same state. The condition goes into the fixture's
   // name so the two conditions can run in parallel without sharing it.
   process.env.DSH_BENCH_CONDITION = condition
+  // The workspace is per (condition, index): two repetitions of the same arm must
+  // never share one, because setup() recreates it and the two runs would wipe
+  // each other's files. With this in the path, repetitions can run in parallel.
+  process.env.DSH_BENCH_INDEX = String(index)
   task.setup?.()
   const args = [
     '--expose-internals',

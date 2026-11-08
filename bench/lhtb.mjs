@@ -104,7 +104,7 @@ print('MAX_TILE %d' % game.max_tile())
  * @returns {string} the absolute workspace path.
  */
 function workspace() {
-  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-lhtb2048`)
+  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-${process.env.DSH_BENCH_INDEX ?? '0'}-lhtb2048`)
 }
 
 /**

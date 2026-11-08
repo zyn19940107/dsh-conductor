@@ -48,7 +48,7 @@ const TEST_COUNT = 12
  * @returns {string} the absolute workspace path.
  */
 function workspace() {
-  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-lhtbmatpower`)
+  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-${process.env.DSH_BENCH_INDEX ?? '0'}-lhtbmatpower`)
 }
 
 /**

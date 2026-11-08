@@ -75,7 +75,7 @@ const EXPECTED_TOTAL = 784
  */
 function workspace() {
   const suffix = process.env.DSH_BENCH_SUFFIX ?? 'lhtbcommit0'
-  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-${suffix}`)
+  return resolve(REPO, '..', 'dsh-sandbox', `bench-workspace-${process.env.DSH_BENCH_CONDITION ?? 'one'}-${process.env.DSH_BENCH_INDEX ?? '0'}-${suffix}`)
 }
 
 /**
