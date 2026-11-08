@@ -147,6 +147,10 @@ ${criteria.map(criterion => `- ${criterion}`).join(String.fromCharCode(10))}
       + 'digest, joined and capped the way a plan report is. Make that one call your looking-around — listing, '
       + 'searching, reading a range — and use the direct tools for what the task names, so the cap never takes '
       + 'away a file it asked you to cover.'
+      + String.fromCharCode(10)
+      + 'Never wait for another node: if what you were sent to use is not on disk yet, say so in one line and '
+      + 'stop — sleeping, polling or re-reading until it appears is not progress, and it spends the budget you '
+      + 'were given for the work.'
       + String.fromCharCode(10) + String.fromCharCode(10)
     : ''
   // The last line a worker reads, and the one that has to survive the system

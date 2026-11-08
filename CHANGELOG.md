@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.10.3
+
+### 修正：同层"写 → 验"依赖，以及判据窄于验收脚本
+
+nbody 上插件臂的正确性从 5/5 掉到 3/5，查下来是两件事：
+
+1. **同层的"写 → 验"依赖。** 父代理把 `impl[tools]`（写 `simulator.py`）和 `edge[worker]`（验证）
+   放进了同一层——它们只能靠轮询（实测 5 次 `Start-Sleep`，25–50 秒）等文件出现。这不是并行，
+   是伪装成并行的等待；更糟的是验证节点验到的是中间版本（那一轮写了 14 次文件），最终版本
+   从未在 `global` 档跑过。
+2. **判据窄于验收脚本。** 判分器有 4 个档，而 criteria 写的是"`check --scale 1k` 通过"——
+   1k 档只走局部交互，`global` 档（所有粒子两两交互）从未被执行。
+
+提示词改了三处（+1 处判据）：
+
+- 规划侧（系统提示词）："waiting is not a way out of it: a node may not read, poll or sleep until
+  another node of the same round has written something. Write-then-check is one job — put the write
+  and its check inside the same node … or check in the next round."
+- 每轮教条："a node never waits for another node of its own round — write-then-check is one node
+  (or two rounds), never a writer and a reader side by side."
+- worker 提示词："Never wait for another node: if what you were sent to use is not on disk yet, say so
+  in one line and stop."
+- 判据："When the workspace ships a verifier or a checker, the round is judged on that checker's whole
+  output: run every stage, scale and case it has."
+
+### 验证（nbody on 臂，新提示词，3 次）
+
+| 指标 | 改前（5 次）| 改后（3 次）|
+|---|---|---|
+| 判据 4/4 | 3/5 | **3/3** ✅ |
+| 轮询/等待调用 | 5 次（1 次运行）| **0** ✅ |
+| 墙钟 | 1200s ×5 | 555s / 603s / 1200s |
+
+改后 node 的形状变成"一个 tools 节点里 `order: sequential` 依次 write → pwsh(check) → pwsh(check)"，
+不再有写者和读者并排。
+
 ## 测量修正（2.10.2 之后，无代码改动）
 
 三处测量错误修掉之后，用 2.10.2 重跑了全部 8 个任务（每臂 5 次，4 路并发，80 次运行）：

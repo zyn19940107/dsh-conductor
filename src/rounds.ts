@@ -36,9 +36,10 @@ export const ROUND_LOOP = 'Every round is the same four steps. (1) Design the pl
   + 'come back — the standard for a node lives in its task, not in a check after the fact, so a node is '
   + 'trusted to do what it was told. Do not spend a node on checking another node: no review node, no '
   + 'independent re-derivation, no hardening pass over what already worked. When a result is incomplete, the '
-  + 'missing work is new work, never a re-check of work that came back. There is no dependency between the nodes of one round: work that needs '
-  + 'another node output belongs to the next round, and work that must happen in order belongs inside one '
-  + 'node.'
+  + 'missing work is new work, never a re-check of work that came back. There is no dependency between the '
+  + 'nodes of one round: work that needs another node output belongs to the next round, work that must happen '
+  + 'in order belongs inside one node, and a node never waits for another node of its own round — '
+  + 'write-then-check is one node (or two rounds), never a writer and a reader side by side.'
 
 /**
  * What the model is told when a plan has run and another round is open.

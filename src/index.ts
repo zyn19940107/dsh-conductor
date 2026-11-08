@@ -68,9 +68,12 @@ export const REFINE_GUIDANCE = [
   + 'that same leader starting empty, so its task carries the whole background.',
   '- If the work is one person\'s job, use "worker"; if parts of it could be handed to someone else, use a '
   + 'leader — "forker", or "spawner" when it should start from nothing.',
-  '- There is no dependency between the nodes of one round: work that needs the output of another node belongs '
-  + 'to the next round. Work that has to happen in order belongs inside one node — a tools node with '
-  + '"order": "sequential", or a worker.',
+  '- There is no dependency between the nodes of one round, and waiting is not a way out of it: a node may '
+  + 'not read, poll or sleep until another node of the same round has written something. Write-then-check is '
+  + 'one job — put the write and its check inside the same node (a worker that writes the file and runs the '
+  + "verification itself), or check in the next round. A node whose task begins with another node's output "
+  + 'is a dependency in the wrong layer, and the only way it runs is by waiting, which is exactly what the '
+  + 'budget was for spending on work.',
   '- An agent node answers with its conclusion, and that conclusion goes into your answer. Ask for the '
   + 'substance, compactly: what it found out — named exactly, the '
   + 'file or the field when that is the answer — roughly how, and what came of it. No receipts: no line '
@@ -80,6 +83,10 @@ export const REFINE_GUIDANCE = [
   '- Never spend a node on checking another node. No review node, no independent re-derivation, no hardening '
   + 'pass: a node is trusted to do what its task said, and its result is used as it comes back. When a result '
   + 'is incomplete, the missing work is new work — not a re-check of what already came back.',
+  '- When the workspace ships a verifier or a checker, the round is judged on that checker\'s whole output: '
+  + 'run every stage, scale and case it has, and write the criteria as those stages — not as the one slice '
+  + 'you happened to try. A criterion narrower than the checker is how a round passes its own criteria and '
+  + 'still fails the task.',
   '- Say which files a node writes in "writes": two nodes that write the same file do not run together.',
   '- Write paths in a tool call relative to the workspace root. The plan runs in this workspace, so the '
   + 'tools resolve them there.',
