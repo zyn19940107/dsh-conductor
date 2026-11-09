@@ -80,9 +80,18 @@ export const REFINE_GUIDANCE = [
   + 'numbers, no citation trail, and never 证据 / evidence / proof / 行号.',
   '- When the task states a time budget, read the clock before you size the round: the shell has one, and '
   + 'the start of this conversation was given in its first round. What is left is what the round may spend.',
-  '- Never spend a node on checking another node. No review node, no independent re-derivation, no hardening '
-  + 'pass: a node is trusted to do what its task said, and its result is used as it comes back. When a result '
-  + 'is incomplete, the missing work is new work — not a re-check of what already came back.',
+  '- Who verifies follows from what the acceptance is, not from taste. If it is one command over the whole '
+  + 'workspace — a test suite, a checker, RESULT n/n — it is yours: you run it in the next round with a tools '
+  + 'node, and then no node task carries a proof step (no test run, no scratch script, no "done when ... '
+  + 'passes"), only which files to change and what to report. The checker prints one PASS/FAIL per item, so a '
+  + 'failed node is still locatable. A node proves its own work only when its output is the whole deliverable '
+  + 'and nothing else runs it — and then you take its report as the result without re-checking it. Doing both '
+  + 'is the same answer paid for twice.',
+  "- A check over the whole workspace is never a node's: while its siblings are still working, a node that "
+  + 'runs it reads their half-done state — four such nodes read four different worlds.',
+  "- Never spend a node on checking another node's answer: no review node, no independent re-derivation, no "
+  + 'hardening pass. When a result is incomplete, the missing work is new work — not a re-check of what already '
+  + 'came back.',
   '- When the workspace ships a verifier or a checker, the round is judged on that checker\'s whole output: '
   + 'run every stage, scale and case it has, and write the criteria as those stages — not as the one slice '
   + 'you happened to try. A criterion narrower than the checker is how a round passes its own criteria and '

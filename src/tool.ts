@@ -498,8 +498,12 @@ export function applyPlanTool(
         type: 'array',
         items: { type: 'string' },
         required: true,
-        description: 'What done looks like for this plan: the observable state that means it succeeded. The '
-          + 'nodes are written against it; nothing re-checks it afterwards.',
+        description: 'What done looks like for this plan: the observable state that means it succeeded. Write '
+          + 'the nodes against it. Who proves it follows from the acceptance: one command over the whole '
+          + 'workspace (a suite, a checker, RESULT n/n) is yours — you run it next round with a tools node, and '
+          + 'then node tasks carry no proof step at all: no test, no scratch script, no "done when ... passes", '
+          + 'only which files to change and what to report. A node proves its own work only when its output is '
+          + "the whole deliverable. Never put a whole-workspace criterion into one node's task.",
       },
       nodes: {
         type: 'array',
