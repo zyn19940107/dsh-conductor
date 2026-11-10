@@ -4,39 +4,44 @@
   "index": 5,
   "profile": "bench-on",
   "exitCode": 0,
-  "wallMs": 844665,
+  "wallMs": 381548,
   "timedOut": false,
-  "sessionId": "session-b9c457af-586a-4929-bc19-f449da43077d",
+  "sessionId": "session-3cde4702-7fe6-4340-8298-6bfa0e4fda7a",
   "stderr": "",
-  "steps": 3,
-  "toolCalls": 2,
+  "steps": 8,
+  "toolCalls": 7,
   "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
     "refine_plan",
     "refine_plan"
   ],
   "usage": {
-    "inputTokens": 15140,
-    "outputTokens": 15188,
-    "cacheReadTokens": 43776,
-    "totalTokens": 74104
+    "inputTokens": 38672,
+    "outputTokens": 22613,
+    "cacheReadTokens": 222720,
+    "totalTokens": 284005
   },
   "formation": {
-    "agents": 5,
-    "input": 352729,
-    "output": 88348,
-    "cacheRead": 7841408,
-    "total": 8282485,
-    "steps": 109
+    "agents": 4,
+    "input": 206000,
+    "output": 77649,
+    "cacheRead": 2658560,
+    "total": 2942209,
+    "steps": 41
   },
-  "mainPrompt": 30022,
+  "mainPrompt": 55024,
   "correctness": {
     "passed": 6,
     "total": 6,
     "missing": []
   },
   "planned": true,
-  "planAgentNodes": 1,
-  "thinkingChars": 15842,
-  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nCore rules: every round must submit a diagram/plan; after submitting the diagram, judge whether a conclusion can be given; dispatch can only go through nodes in the diagram.\n\nThree independent reviews (mutually unaware), each judging:\n1. Whether it's overly restrictive for the model — will it force the model to do redundant planning?\n2. Whether it can be bypassed — can the model get a conclusion without submitting the diagram?\n3. Whether it conflicts with harness native capabilities — subagent / plan mode / tool concurrency?\n\nEach review must read relevant source code and point out implementation files. Finally summarize: where the three agree, where they diverge.\n\nSince the reviews must be mutually independ",
-  "finalText": "三份评审已独立完成（各自单独读源码，彼此不可见结论，全程只读，未修改任何文件）。注：本次评审本身就运行在该插件之下——系统提示里的四步循环、`refine_plan`/`tools` 描述与 `src/` 源码逐字一致。\n\n---\n\n# 一、三方独立评审\n\n## 评审 A — 执行路径／守门点审计\n\n**规则落点**\n| 规则 | 实现文件 | 强制类型 | 关键依据 |\n|---|---|---|---|\n| 每轮必交图 | `src/rounds.ts`（`ROUND_LOOP`、`applyTurnDoctrine`，`agent/pre-step` step===1）+ `src/index.ts`（`REFINE_GUIDANCE`，系统提示词段 `refine-loop:policy`） | **仅提示词** | `applyJudgementGuard` 只在 `plans.waiting(sessionId)` 为假时拦；`Plans.expect` 在用户消息到达时置位 → **第一张图之前什么都能调** |\n| 交图后判断能否给结论 | `src/rounds.ts`（`JUDGE_ONLY`）+ `src/tool.ts`（`exec.concludeTurn()`）+ `src/index.ts`（`onPlanFinished` → `agent.followup(NEXT_ROUND)`） | **半机制**：强制\"只能判断\"，判据仍是提示词 | `JUDGE_ONLY`：「Direct tool calls belong inside a graph, not after one.」 |\n| 派发只能走图里的节点 | `src/rounds.ts`（`applyDelegationRule`，`agent/created` 内 scoped 重注册）+ `src/fork.ts`（插件自建孩子） | **有机制、有洞** | `exec.callId === exec.rootCallId` → 抛 `DELEGATE_IN_GRAPH`；`list_agents`/`send_message`/`interrupt_agent` 被 `restrict({deny})` 摘掉 |\n\n**问题一（过度限制）**：会，且集中在图跑完之后——模型只剩\"写文字\"或\"再交一张图\"两个动作，连\"再读一个文件\"都要付一次完整图；`ROUND_LOOP` 还禁轮内依赖（B 用 A 的输出只能推下一轮），`DEFAULT_MAX_BATCH_SIZE=8`（harness 原生并行上限是 10）把稍大的扇出拆成多轮。最小合规成本是**空图**：`src/plan.ts` 的 `parsePlanArgs` 明确允许 `nodes: []`，`src/tool.ts` 描述写「A plan may be empty」，教条写「hand over the empty plan and go straight to the conclusion」——已会答的问题也要多一次工具调用＋一次模型往返。提示词自相矛盾：教条说\"第一条消息就是图、之前不调工具\"，`NEXT_ROUND` 说判断轮可直接写结论。\n\n**问题二（可被绕过）**，按成立性：① 不交图直接调工具/直接给结论——成立，零机制（README 自述\"模型可以不交图：插件不强制\"）；② 空图——成立；③ `workflow` 工具——成立，第二条派发通道（`DELEGATION_TOOLS` 只有 `subagent`/`subagent_fork`）；④ 在图内 `tools` 节点直接调 `subagent`——成立，嵌套调用 `rootCallId` 不同即放行，孩子绕过节点预算/parked 续跑/交付契约；⑤ `/dsh-conductor off`——成立但属设计内。\n\n**问题三（原生冲突）**：subagent——工具仍在表内、模型照原生建议委派会先浪费一步在拒绝上；原生 `run_in_background` + `send_message` 续跑能力被整体中和，而 harness 自己的提示词段仍在说「Start independent subagent delegations together in one assistant message」，与插件改写的「Not called directly」正面对打；插件 `fork.ts` 自建孩子与 harness provider 是两套并行实现，深度策略各算各的。plan 模式——**最硬的一处**：`REFINE_GUIDANCE` 与 `plan:policy` 同占 `PLAN_POLICY` 槽位，且 `exit_plan_mode` 是模型级调用，图跑完后被 `JUDGE_ONLY` 当普通调用拒掉，**plan 模式的人审出口不可达**。并发——harness 原生同一 step 并发 + 插件 `batch.ts`/`concurrency.ts` 平行重实现，两套调度器并存，插件的 `respectConcurrencySafety` 可把 harness 判为独占的调用改成可并发；净效果是图跑完后顶层原生并行不可用。附带发现：`restrict({deny: HIDDEN_TOOLS})` 遇到全局未知工具名会抛错（`packages/core/tools/src/index.ts`），未装 subagent-control 的部署会在 `agent/created` 抛，agent 建不起来。\n\n**风险排序**：①「必须交图」零机制（承重墙最软）；② plan 模式下 `exit_plan_mode` 被拒，人审流断；③ `workflow` 与图内直调 `subagent` 两条未封通道；④ 图后过度限制（一步动作一整张图 + 8 节点上限）；⑤ 提示词自相矛盾 + 工具表挂着一个必然报错的 `tools`（`src/tools-tool.ts`：主会话调用必抛「This conversation can draw a plan…」）。\n\n---\n\n## 评审 B — 模型视角的指令与体感\n\n**模型实际读到的指令**（均亲自读过原文）：`src/rounds.ts` 的 `ROUND_LOOP`（「your first message of the round IS the plan… no tool call comes first」「If you already have what you need, hand over the empty plan and go straight to the conclusion」）、`NEXT_ROUND`（「The plan has run — every result is above. Judge it… write the conclusion… or hand it over with refine_plan」）、`JUDGE_ONLY`、`DELEGATE_IN_GRAPH`、被改写的 `subagent` 描述（「Not called directly: delegation happens inside refine_plan…」）、`src/tool.ts` 的 `PLAN_TOOL_DESCRIPTION`（「A plan may be empty…」）、`src/tools-tool.ts` 的 `TOOLS_TOOL_DESCRIPTION`、`src/tool.ts` `buildAgentPrompt` 给 worker 的末行禁令、harness 原生 `packages/subagent/tool-subagent/src/index.ts` 与 `packages/workflow/tool-workflow/src/index.ts`（「For one or two delegations, prefer plain subagent calls.」）。\n\n**问题一**：中等，但有两个尖角。① 判断阶段禁止一切普通调用，一次核对被放大成一轮（每张图消耗 `DEFAULT_MAX_ROUNDS=16` 预算）；② 简单问题被制度化成两次模型往返；③ `REFINE_GUIDANCE` 写「Never spend a node on checking another node」而 `JUDGE_ONLY` 又不许模型自己核对 → 验证只能以节点形式存在，模型没有\"顺手确认一下\"的合法位置。**实测反驳**：插件自己的 bench（on/off 两臂）on 臂 27 次全部交图、平均 3.3 步 / 217 秒；off 臂 30 次全部不交图、平均 25.2 步 / 429 秒 —— 在这些非平凡任务上图不是多余规划，而是把 25 步链压成 3 步；但 on 臂 9 次运行的图里一个 agent 节点都没有，其中 6 次是连续 3–5 次 `refine_plan` —— 循环退化成\"交一张图→再交一张图\"的连发，这是过度限制的直接表征；bench 没有\"一句话问题\"这一类场景，小任务真实开销未被测量。\n\n**问题二**：① 「必须交图」零机制（`Plans.expect` 用户消息置位、`Plans.done` 图跑完才清）——成立；② 空计划是官方退路（`src/plan.ts` 注释「An empty pl"
+  "planAgentNodes": 0,
+  "thinkingChars": 38890,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nCore rules: every round must submit a diagram/plan; after submitting the plan, judge whether a conclusion can be given; dispatch can only go through nodes in the plan.\n\nI need to:\n1. Read relevant source code (I should do this in one tools node first, since all three reviewers need the same source files).\n2. Then in the next round, spawn three independent reviewers (spawner/forker nodes) that don't know each other's conclusions.\n3. Then summarize.\n\nPer the round structure: my first message of the round IS the plan. So I should call refine_plan first with a tools node to read source code.\n\nActually let me think about the layer structure. Round 1: tools node reads the source files (shared context). Round 2: th",
+  "finalText": "三方评审已全部完成,工作区经两轮 git 基线比对确认零改动。以下是完整汇总。\n\n---\n\n# 三方独立评审汇总:「每轮一图 / 交图后判断 / 派发只走图内节点」\n\n## 评审组织\n\n三名评审者**并行启动、互不可见对方结论**,各自独立读源码后作答:\n\n| 视角 | 切面 | 结论侧重 |\n|---|---|---|\n| A 行为与提示词层 | 模型实际会付出什么代价 | 规则的「教条 vs 机制」落差、正确性代价 |\n| B 强制机制与可绕过性 | 代码到底强制了什么 | 守卫清单、绕过路径穷举、规格缺口 |\n| C 集成与原生能力冲突 | 与 harness 原生能力的关系 | 能力对照表、并存的「两份真相」 |\n\n三人被要求真实读源码、点名文件与符号、区分「提示词里写着」与「代码里强制」、并诚实标注推断与事实。\n\n## 0. 我复核过的事实基线(亲自核对,非转述)\n\n- `src/rounds.ts` 的 `applyJudgementGuard`:`isModelCall` 为假(嵌套调用)、工具名为 `refine_plan`、或 `plans.waiting(sessionId)` 为真时一律放行,否则返回 `JUDGE_ONLY`。\n- `src/rounds.ts` 的 `DELEGATION_TOOLS = ['subagent', 'subagent_fork']`;`applyDelegationRule` 重注册这两个工具的 `execute`,**仅当** `exec.callId === exec.rootCallId` 时抛 `DELEGATE_IN_GRAPH`;取不到原工具则 `continue`(闸门静默失效)。\n- `HIDDEN_TOOLS`(`list_agents`/`send_message`/`interrupt_agent`)经 `agent.ctx.tools.restrict({ deny })` 整块摘除。\n- `src/plan.ts` 的 `parsePlanArgs` 要求 criteria 非空,但 **nodes 为空合法**;`PLAN_TOOL_DESCRIPTION` 明写 \"A plan may be empty\"。\n- 提示词侧:`src/rounds.ts` 每轮第 1 步注入 `ROUND_LOOP`,`src/index.ts` 的 `REFINE_GUIDANCE` 常驻系统提示词,插件占的是 harness 的 `PLAN_POLICY` 段位。\n\n## 1. 三份评审各自的立场\n\n**A(行为层)**:三条规则成立,但成立方式不对称——R1 只是提示词教条,R2/R3 才有代码强制。**真正的过度限制不在「每轮出图」**,而在「节点之间不许互相检查」和「判断轮不许零散补刀」两处禁令;README 自己测到它们让 nbody 正确性从 5/5 掉到 3/5、matpower 掉到 4/5。绕过面有两个窗口:第一轮完全放行、原生 fan-out 工具不在拦截名单。结论:「不打架,是覆盖」。\n\n**B(机制层)**:规则是「形状靠机制管、内容靠提示词管」的半强制体系。真正被拦的只有三件:图后不许再逐个调工具、worker 不许画图、顶层直调两个派发工具被拒;**R1 在代码里完全没有强制**,插件 README 自己就写明「这条是提示,不是机制」。R3 是名字表而非能力判定,且**图内 tools 节点可以点名原生 `subagent`**(嵌套 callId ≠ rootCallId,顶层判定不生效),连带绕过节点预算、深度闸与停泊机制。结论:冲突是「以覆盖而非组合的方式」,并给出唯一一份具体的坏覆盖——shell 并发覆盖键写死 `ops_bash`,本部署叫 `pwsh`,默认配置下静默不生效。\n\n**C(集成层)**:R2、R3 落在代码里,R1 只是教条;R3 的闸只拦「模型自己发起」这一层,图内 `tools` 节点可点名原生派发工具,所以**「派发只能走图里的节点」在语义上成立、在计数上不成立**。与 harness 原生能力没有正面互斥,但插件在提示词层、工具层、并发层、深度层各复制了一套并行真相,冲突以「谁先被模型读到」的形式出现。若必须取舍:**保 R2**。\n\n## 2. 三问对照\n\n| 问题 | A | B | C |\n|---|---|---|---|\n| **Q1 过度限制?** | 部分。罪魁不是「每轮出图」(交图率 40/40),是「不许节点互查」+「不许补刀」 | 部分。固定税(每轮 ~2.4k 字符教条)+ 形状被压平(一次小复查要开一整张图) | 是。代价主要是 token 与一次往返;最重的是 R3 把原生派发与后台管理都掐了 |\n| **Q2 可绕过?** | 能。两个窗口:第一轮全放行、原生 fan-out 工具不在名单;另图内 tools 节点可直调 subagent | 能,且不止一条。最薄一环是 R1(无机制 **且不消耗回合预算**) | 能,是设计选择。第一轮无闸 + 空图是官方逃生门 + R3 只挂顶层调用 |\n| **Q3 与原生能力冲突?** | 不打架,是覆盖(占 `PLAN_POLICY` 段位、摘工具、覆写描述) | 有,以覆盖而非组合的方式(提示词层已被实测逼出改法;并发双实现;深度双轨) | 没有正面互斥,但有四处并列真相(提示词/工具/并发/深度) |\n\n## 3. 三方一致的地方\n\n1. **R1(每轮必交图)在代码里没有任何强制**——纯提示词教条;插件 README 自己承认「模型可以不交图」,v1.0 的「没交图就拉回」闸门已删除。\n2. **R2 是三条里唯一真正成立的硬机制**:`applyJudgementGuard` + `JUDGE_ONLY` 拦住图跑完后模型自己发起的顶层工具调用,连一次廉价确认都得包成新图(且空图合法)。\n3. **「第一轮完全放行」是三方一致确认的最大缺口**:`Plans.waiting` 为真时守卫全放行,模型可以整轮不交图、直接调工具再写结论,而且这条路径**连回合预算都不消耗**。\n4. **R3 是名字表而非能力判定**,且**图内 `tools` 节点是侧门**:可以点名原生 `subagent`,绕过顶层判定,同时丢掉节点预算、`maxAgentDepth`、停泊机制。\n5. **空图是合法输入**,「交一张空图 + 写结论」是最便宜的守法路径——教条可以完全退化成仪式。\n6. **R2 只拦工具、不拦结论**:插件不识别结论(`scrubConclusion` 已在 2.10.2 删除),「能不能给结论」完全交给模型;节点输出直接进图报告,父代理几乎是被迫采纳节点结论。\n7. **与 harness 原生能力是「覆盖/并存」,不是正面互斥**;冲突以「两份真相」形式出现:提示词层(插件占 `PLAN_POLICY` 段位,harness 那条「直接派发」建议仍在别处)、工具层(原生派发留表但顶层抛错、后台管理整块摘除、新增一个对父会话必然报错的 `tools` 工具)、并发层(插件 `mayRunTogether` 在 harness `isConcurrencySafe` 之上再判一遍)、深度层(插件 `maxAgentDepth` 3 vs harness `subagent.maxDepth` 1)。\n8. **插件自建子代理**(`src/fork.ts` 的 `spawnChild`/`spawnForkedChild`/`spawnEmptyChild`)绕开 harness 的 `subagent` 生命周期与深度闸。\n9. **代价是真实的、且形状敏感**:插件臂归一化时间 1.19×、成本 1.14×,quixbugs 一项 3.00×/2.25×;收益集中在天然可并行的题;反而「父代理一人不派」又快又便宜(91s vs 135s)——**规则最好的形态有时是少派,而规则本身鼓励派发**。\n10. **正确性代价大于 token 代价**:同层并行压平写→验依赖,导致非独立任务上「没人收口」。\n\n## 4. 三方分歧的地方\n\n| # | 分歧 | A | B | C | 分歧根源 |\n|---|---|---|---|---|---|\n| 1 | **过度限制的主要来源在哪** | 指「节点间不许互查」+「不许补刀」两处结构禁令 | 指固定税 + 形状被压平(一次小复查被放大成一次完整规划) | 指 R3 造成的路径收窄(原生派发顶层被拒、后台管理被摘、长程工作被迫走同步节点) | 视角不同:A 看模型行为链,B 看成本结构,C 看能力收窄。同为「部分成立」,但指认的靶子不同 |\n| 2 | **R1 是否已足够合规** | 是,README v2.10.2 实测交图率 40/40 | 否,R1 无机制、不耗回合预算 | 否,但认为「维持教条形态即可」 | A 采信了插件自报数据,B/C 更看重机制缺失;B 额外指出这条路径「连闸门都不消耗」 |\n| 3 | **R3 闸门的存在强度** | 「闸基本只覆盖两个名字」 | 「闸存在但有洞」,并给出坏覆盖实例 | 「闸只挂顶层调用」,并追加**闸可能整个是空的**——`ctx.tools.get(name)` 取不到就跳过,是否生效取决于运行时挂了谁 | C 的独特发现:整条闸是**部署依赖**的;B 的独特发现:一个覆盖实现本身是坏的 |\n| 4 | **Q3 冲突的性"
 }

@@ -1,0 +1,43 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 1191996,
+  "timedOut": false,
+  "sessionId": "session-c8e4b377-36d8-4c95-ac5b-392b9e727e92",
+  "stderr": "",
+  "steps": 4,
+  "toolCalls": 3,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 25059,
+    "outputTokens": 34170,
+    "cacheReadTokens": 117504,
+    "totalTokens": 176733
+  },
+  "formation": {
+    "agents": 6,
+    "input": 385179,
+    "output": 133602,
+    "cacheRead": 6384128,
+    "total": 6902909,
+    "steps": 94
+  },
+  "mainPrompt": 58800,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 1,
+  "thinkingChars": 30558,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of the plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nCore rules: every round must submit a \"图\" (plan/diagram); after submitting the plan, judge whether a conclusion can be given; dispatch can only go through nodes in the plan.\n\nEach of the three reviewers must:\n1. Judge whether the rule over-constrains the model (does it force unnecessary planning?)\n2. Whether it can be bypassed (can the model get a conclusion without submitting a plan?)\n3. Whether it conflicts with harness native capabilities (subagent / plan mode / tool concurrency)\n\nEach must read relevant source code and point out implementation files. Finally aggregate: where do the three agree, where do they disagree.\n\nI need to first explore the plugin directory. The workspace instruction says to load t",
+  "finalText": "# 三方独立评审：`dsh-refine-loop` 核心规则\n\n> 对象：`D:\\code\\vibe\\dsh-refine-loop`（npm 包 `@zyn19940107/dsh-conductor` v2.10.2）\n> 规则：**R1** 每轮必须交一张图 → **R2** 交完图判断能不能给结论 → **R3** 派发只能走图里的节点\n> 过程：Round 1 建事实底座 → Round 2 三名评审**同轮并行、互不可见**独立出具意见 → Round 3 用 harness 源码给分歧定锚\n> **全程只读，零文件改动。**\n\n---\n\n## 0. 总评（一句话）\n\n这套规则**不是一套闭环机制，而是「提示层教条 + 两道按工具名做的守卫」**：R1 完全没有机制、R2 是唯一被机制化的部分且只在\"交过图之后\"才生效、R3 按工具名枚举封了两个名字却漏掉整片原生编排入口。三方在**判定严重度**上罕见地一致（Q1 中等 / Q2 严重 / Q3 中等），分歧集中在**事实锚点**上，而 Round 3 已把两处分歧用 harness 源码钉死。\n\n---\n\n## 1. 三份独立评审\n\n> 三位评审在同一轮并行启动，**任一评审启动时另两位的结论尚不存在**，prompt 中明令不得猜测或对齐。\n\n### 评审 A · 机制强制视角\n\n**总判断**：规则实际是\"提示层教条 + 两道按工具名做的守卫\"，不是闭环机制。R1 完全靠 prompt；R2/R3 有守卫，但触发前提既无验收断言、也无\"模型不听话\"的兜底。问题不是自欺，而是**宣称被强制的部分比实际被强制的部分多出一截**。\n\n| 问题 | 判定 | 依据与失效场景 |\n|---|---|---|\n| Q1 过度限制 | **中等** | 真正贵的不是\"画图\"，而是每轮强推的 `budgetMs` 估时与四类节点选择指导。插件自己量化过：短任务 coverage 归一 83s vs off 56s、token 509k vs 383k（README「代价：短任务上收不回来」）。失效场景：用户只问\"config.json 里 port 是多少\" → 模型仍须先交图、再交结论、还须给节点估时间，一次工具调用变成两次模型往返。 |\n| Q2 可被绕过 | **R1 严重 / R2 中等 / R3 严重** | R1：`applyJudgementGuard` 在 `plans.waiting` 为真时直接放行，第一张图之前无任何守卫；README 明写\"模型可以不交图……画第一张图之前什么都不拦\"。R2：`refine_plan` 被守卫显式豁免，模型可以一直\"再画一张图\"，也可把该串行做的活塞进只有单个 tools 节点的图。R3：`DELEGATION_TOOLS` 只有 `subagent`/`subagent_fork`，全仓无 workflow/todo/job 引用 → 模型可在图外用 `workflow` 铺开一批子代理，插件一句不拦。 |\n| Q3 与 harness 冲突 | **中等**（多为职责重叠，两处实质问题） | 原生 plan 模式与 `refine_plan` 是两套并行\"计划出口\"；插件自建子代理（`src/fork.ts`）与 harness `subagent` 两套并行实现；`src/concurrency.ts` 的 `buildOverrides` 用插件判断**覆盖**工具自报的并发安全，判错方向是\"放行\"。 |\n\n**A 的关键证据**：`src/rounds.ts` — `applyTurnDoctrine`（把 `ROUND_LOOP` 作为每轮 step 1 的**最后一条消息**注入）、`applyJudgementGuard`、`applyDelegationRule`、`DELEGATION_TOOLS`/`HIDDEN_TOOLS`；`src/tool.ts` — `PLAN_TOOL_DESCRIPTION` 明写 \"A plan may be empty\"、`exec.concludeTurn()`；`src/plan.ts` — `parsePlanArgs` 允许 `nodes: []`；`src/index.ts` — `onPlanFinished`（`plans.done` → `rounds.bump` → 超 `maxRounds` 停，否则 `agent.followup(NEXT_ROUND)`）；`src/policy.ts` — `SessionPolicy.appliesTo` **在 src/ 内无调用方**，三个钩子都不查 policy → `/dsh-conductor off` 后教条照旧、守卫照旧，而 `refine_plan` 已从工具表被摘掉，模型被指向一个用不了的工具；`verify/` — grep 全目录，`applyJudgementGuard`/`applyRounds`/`applyDelegationRule`/`Plans`/`DELEGATION_TOOLS`/`HIDDEN_TOOLS` **一处断言都没有**。\n\n**A 的独到观察**：作为插件 spawn 的 worker，其实测工具表里**没有 `refine_plan`**，与代码和 `src/fork.ts` 注释里\"工具留在表里\"的说法对不上；且 `fork.ts` 注释称\"不做工具限制，子会话请求头必须与父一致才能命中继承前缀的缓存\"，但 `applyDelegationRule` 对每个 agent（含子会话）restrict 掉三个工具——两处自相矛盾。\n\n**A 的\"只改一处\"**：把 R1 从教条变机制——按 README 自己指出的补法，在 `agent/turn-stopping` 上把\"本轮没交过图\"的模型拉回来，并给三个钩子各补一条 `verify` 断言。理由：地基是 prompt 位置，R1 不硬则 R2/R3 的守卫永远等不到\"第一张图之后\"那一刻。\n\n---\n\n### 评审 B · 模型行为与绕过视角\n\n**总判断**：提示层立规矩、守卫层只堵两处。核心风险不在\"规则太严\"，而在\"**规则可以被绕过而无人察觉**\"。\n\n| 问题 | 判定 | 依据与失效场景 |\n|---|---|---|\n| Q1 过度限制 | **中等** | 浪费源不是\"画图\"，是\"`budgetMs` 估时被写进同一段教条\"。模型每轮被强加三处额外规划：必须先写非空 `criteria`、每个节点必须估时长、轮末必须先判\"够不够给结论\"。空图是官方出口，但只覆盖\"已经够了\"的情形；活很少时仍得为一件小事画一张只有一个 tools 节点的图——**固定开销无法用出口规避**。 |\n| Q2 可被绕过 | **严重**（本次最重项） | 八条通道，逐条见下表。 |\n| Q3 与 harness 冲突 | **中等**（职责重叠多于实现冲突） | 两个计划出口并存；两套派发体系并存；两套轮次记账并行；并发安全判定被插件代声明。 |\n\n**B 的绕过通道清单**：\n\n| # | 通道 | 有人挡吗 | 挡在哪 / 需要多不听话 |\n|---|---|---|---|\n| 1 | 不交图直接干活、直接下结论 | **完全没人挡** | `applyJudgementGuard` 在 `plans.waiting` 为真时放行；README 自认\"这条是提示，不是机制\"，并记载 v1.0 曾有\"没交图就拉回\"的闸门、已删 |\n| 2 | 空图当交图凭证 | 合法 | `parsePlanArgs` 允许 `nodes: []`；两次空图即可满足\"交过图\"的字面要求而零产出 |\n| 3 | 图外派发 `workflow` | 首轮不挡 | `DELEGATION_TOOLS` 只有两个名字；`workflow` 的 `agent()` 能起一大队子代理；**第一张图之前完全可用**（waiting 为真） |\n| 4 | 图外派发：worker 里的 `tools` 批处理 | 不挡 | `src/tools-tool.ts` 的 `tools` 只对 worker 开放；批处理里调用在 `src/batch.ts` 的 `runOne` 带自己的 `callId` → `isModelCall` 为假 → `exec.callId === exec.rootCallId` 不成立 → **名为叶子的 worker 能经 `tools`→`subagent` 拉起图外子代理** |\n| 5 | 图内但不受插件账管的派发 | 不挡 | 图的 tools 节点里直接写 `{\"name\":\"subagent\"}` 是嵌套调用、允许；但这条子代理不受 `maxAgentDepth` 与节点预算约束 |\n| 6 | 换一条计划出口 `exit_plan_mode` | 不挡 | 人开 `/plan` 后，模型可把 markdown 计划交给 `exit_plan_mode`，**图根本没进插件的账** |\n| 7 | `/dsh-conductor off` 不是真开关 | — | `src/policy.ts` 的 `SessionPolicy.turnOff` 只摘 `refine_plan`；`SessionPolicy.appliesTo` 全仓无调用方 → 教条照旧、守卫照旧、直调 `subagent` 照旧被拒"
+}

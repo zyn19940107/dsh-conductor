@@ -1,0 +1,41 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 1,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 86795,
+  "timedOut": false,
+  "sessionId": "session-04a64d8e-0c62-4033-a1f8-87bacdc39d31",
+  "stderr": "",
+  "steps": 2,
+  "toolCalls": 1,
+  "tools": [
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 16472,
+    "outputTokens": 5016,
+    "cacheReadTokens": 15104,
+    "totalTokens": 36592
+  },
+  "formation": {
+    "agents": 3,
+    "input": 76476,
+    "output": 24627,
+    "cacheRead": 450048,
+    "total": 551151,
+    "steps": 19
+  },
+  "mainPrompt": 20175,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 2,
+  "thinkingChars": 8736,
+  "thinkingPreview": "Let me plan. The user wants three questions answered, read-only.\n\nLet me first look at the directory structure.\n\nThe plan should be my first message. Let me design a plan with a tools node for listing files, and worker nodes to analyze.\n\nActually, let me think about what's needed:\n1. For each .spec.ts in verify/, what entry function does it actually test (the import + the function under test)?\n2. All .ts modules in src/ — which have no corresponding spec?\n3. Among those modules (the ones without spec? or all modules in src?), which has the most lines and how many?\n\nQuestion 3: \"这些模块里行数最多的是哪一个?多少行?\" — \"这些模块\" likely refers to the modules mentioned in question 2 (those without specs). Hmm, ambiguous. It could mean all modules in src. I'll compute both to be safe, but present primarily... Actually \"这些模块\" most naturally refers to the modules without specs from Q2. But it could be all modules ",
+  "finalText": "三个问题都有结果了。以下是结论（全程只读，未改动任何文件）。\n\n---\n\n## 1. verify 下每个 .spec.ts 实际测的入口函数\n\n**11 个 spec 文件，文件名不能直接当模块名用** —— 有三处命名陷阱。\n\n| spec 文件 | 实际测试的入口（模块 → 函数/命令） |\n|---|---|\n| `batch.spec.ts` | `src/batch.ts` → `runBatch`（主入口）；另直接测 `capOutput`、`capNodeOutput` |\n| `concurrency.spec.ts` | `src/concurrency.ts` → `isReadOnlyCommand`、`mayRunTogether`、`buildOverrides`；末尾借 `src/batch.ts` 的 `runBatch` 验证批内顺序 ⚠️ 文件名不指入口模块 |\n| `fork.spec.ts` | `src/fork.ts` → `buildSeedFromNow`、`openTurnClosers`、`reportPrompt`，以及 `Reporters` 类 |\n| `output-schema.spec.ts` | `src/tool.ts` → `applyPlanTool`，被测对象其实是它注册出的工具定义里的 `output.schema` |\n| `parked.spec.ts` | `src/parked.ts` → `Parked` 类：`park`/`list`/`resume`/`retain`/`disposeAll` |\n| `refine.spec.ts` | `src/batch.ts` → `parseBatchArgs`、`renderBatch`；加 `src/policy.ts` → `parsePolicyCommand` ⚠️ 不测 refine 本身 |\n| `repair.spec.ts` | `src/repair.ts` → `parseRepair`；修复闭环走 `src/batch.ts` 的 `runBatch` 回调路径 |\n| `retain.spec.ts` | `src/index.ts` → `applyReportRetention`（注册在 `tools/post-execute` 的监听器） |\n| `rounds.spec.ts` | `src/rounds.ts` → `applyTurnDoctrine`、`applyReportGuard`、`applyWorkerRule`、`Rounds`、`Workers`、`isWorkerConversation`、`startOf`、`formatClock`；从 `src/plan.ts` 取常量 `WORKER_MARKER`，从 `src/fork.ts` 取 `Reporters` |\n| `tools-tool.spec.ts` | `src/tools-tool.ts` → `applyToolsTool`（及其 `execute` 拒绝路径）、`readToolsCalls` |\n| `plan.spec.ts` | `src/plan.ts` → `parsePlanArgs`、`buildGroups`；加 `src/tool.ts` → `runPlan`、`renderPlan`、`PLAN_TOOL_DESCRIPTION`；加 `src/index.ts` → `REFINE_GUIDANCE` |\n\n所有 import 的符号在测试体里都有实际调用，没有\"导进来没调用\"的死引用。\n\n⚠️ 顺带发现：`verify/run-specs.mjs` 的 specs 列表只有 10 项，**`repair.spec.ts` 不在其中** —— `node verify/run-specs.mjs` 根本不会跑它。\n\n---\n\n## 2. src 下没有对应 spec 的模块\n\nsrc 共 11 个 .ts 模块（`batch` `concurrency` `fork` `index` `parked` `plan` `policy` `repair` `rounds` `tool` `tools-tool`），src 内部没有自带 spec 文件。\n\n按\"spec 是否 import 该模块并调用其导出\"这个口径：**11 个全部被至少一个 spec 触及，零遗漏**。\n\n但覆盖是不齐的，两种口径给出两种答案：\n\n- **按\"有无同名专属 spec 文件\"**：缺专属文件的是 `src/index.ts`（被 retain/plan 测）、`src/policy.ts`（被 refine 测）、`src/tool.ts`（被 plan/output-schema/retain 测）。\n- **按\"主入口是否被测\"**：以下入口**从未被任何 spec 调用** —— `src/index.ts` 的插件 `apply` 入口（连同全部 `DEFAULT_*` 配置和 `Config`）、`src/fork.ts` 的 `spawnForkedChild`/`spawnEmptyChild`、`src/policy.ts` 的 `runPolicyCommand`/`applyPolicyCommand`/`applyPolicyMessage`/`policyConfirmation`、`src/rounds.ts` 的 `applyRounds`/`applyDelegationRule`/`applyJudgementGuard`/`Plans`、`src/repair.ts` 的 `askForRepair`/`collectText`/`describeFailure`、`src/tools-tool.ts` 的 `TOOLS_TOOL_DESCRIPTION`。按这个口径，最尖的答案是 **`src/index.ts`、`src/fork.ts`、`src/policy.ts`**。\n\n---\n\n## 3. 行数最多的模块\n\n| 口径 | 最多者 | 行数 |\n|---|---|---|\n| src 全部模块 | **`src/fork.ts`** | **712** 行（678 非空行） |\n| 无同名专属 spec 的模块（index/policy/tool） | `src/tool.ts` | 671 行 |\n| 主入口未被测的模块 | `src/fork.ts` | 712 行 |\n\n完整排行：fork 712 · tool 671 · rounds 481 · batch 448 · index 395 · policy 241 · concurrency 234 · plan 225 · tools-tool 174 · repair 173 · parked 156。"
+}

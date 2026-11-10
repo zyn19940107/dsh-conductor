@@ -1,0 +1,45 @@
+{
+  "task": "panel",
+  "condition": "on",
+  "index": 2,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 746169,
+  "timedOut": false,
+  "sessionId": "session-b28e2b84-7ec3-4201-be1a-47a831512125",
+  "stderr": "",
+  "steps": 6,
+  "toolCalls": 5,
+  "tools": [
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 31766,
+    "outputTokens": 17176,
+    "cacheReadTokens": 109568,
+    "totalTokens": 158510
+  },
+  "formation": {
+    "agents": 4,
+    "input": 188839,
+    "output": 80091,
+    "cacheRead": 5476352,
+    "total": 5745282,
+    "steps": 80
+  },
+  "mainPrompt": 41553,
+  "correctness": {
+    "passed": 6,
+    "total": 6,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 0,
+  "thinkingChars": 25254,
+  "thinkingPreview": "Let me start by understanding the task. The user wants a three-way independent review of the \"core rules\" of a DSH plugin at D:\\code\\vibe\\dsh-refine-loop. Read-only, no modifications.\n\nThe plan first message must be the plan — I should hand over to refine_plan first, no tool calls before.\n\nBut I need to understand the plugin first... Actually, the loop structure says: first message of the round IS the plan, hand it over before calling anything else. But I can do a tools node inside refine_plan that reads files. So the plan should include discovery of the plugin source.\n\nLet me design: Round 1: a tools node that discovers the plugin structure and reads key files. Actually I need to know the file layout to write good worker tasks. Hmm. But I could make round 1 a discovery round with tools nodes (glob + read), then round 2 with three independent worker nodes for the three reviews, then roun",
+  "finalText": "三份评审已各自完成（各自读源码、互不可见对方结论、均未读 `bench\\scenarios.mjs`——该文件第 296 行正是本题原文与预设答案，读了就不算独立评审）。全程只读，未改动任何文件。\n\n---\n\n# 三方独立评审汇总\n\n**总体结论**：三方在**同一个根因**上完全一致——这条规则里只有两句有机制牙齿，**\"每轮必须交一张图\"在每个请求的第一轮完全是提示级**，因为插件没有回合结束钩子，且判断守卫在\"本请求尚未交图\"时直接放行。但三方的**主要担忧各不相同**：A 认为是「代价」（模型被迫做多余规划），B 认为是「保证强度不足」（规则可被稳定绕过），C 认为是「与原生能力的口径不一致」（嵌套判定、并发契约、PTC 呈现模式）。这三者其实是同一枚硬币：**规则的成本集中在\"每轮一图\"的粒度，而它的保证只覆盖\"图跑完之后\"。**\n\n---\n\n## 三份意见各自要点\n\n### A｜过度限制视角 —— 结论：**存在真实过度限制，严重度中（短任务/一次性问答/只差一步为高）**\n\n- 机制 vs 教条的边界在 `src\\rounds.ts`：`applyJudgementGuard` 返回 `JUDGE_ONLY`、`applyDelegationRule` 抛 `DELEGATE_IN_GRAPH`、`applyWorkerRule` 返回 `WORKER_NO_PLAN`、`applyReportGuard` 返回 `REPORT_ONLY` —— 这四条是代码真拦；而\"第一条消息就是图\"只是 `applyTurnDoctrine` 注入的 `ROUND_LOOP` 消息。插件只注册了 `agent/pre-step`×3、`agent/created`、`tools/post-execute`，**没有 turn-stopping**。\n- **第一轮完全无约束**：`applyJudgementGuard` 在 `plans.waiting(sessionId)` 为真时直接放行，而 `applyRounds` 在收到真实用户消息时就置真。\n- 多余规划的具体场景：一次性问答仍须交一张空图（`src\\plan.ts` 的 `parsePlanArgs` 允许 `nodes: []`）；探索型任务里 tools 节点的 calls 要求\"参数已定\"，模型只能盲猜或花钱起 worker 探索，猜错由 `src\\repair.ts` 的 `MAX_REPAIRS` 买单；\"只差一步\"的最小单位是**一整张图**。\n- schema 负担：节点 7 字段 + 必填 criteria + 四种 kind，且 kind 语义在 `REFINE_GUIDANCE`（系统提示词段）、工具描述指向 \"the policy section above the tools\"，要跨两处拼装。固定提示开销实测：`ROUND_LOOP` 1569 字符/轮、`REFINE_GUIDANCE` 2165 字符/轮、`PLAN_TOOL_DESCRIPTION` 938 字符（进请求头）≈ **4.7k 字符 / 1.3–1.4k token，每轮都付**。\n- 逃逸阀只有两个：空图、`/dsh-conductor off`（`src\\policy.ts` 的 `SessionPolicy.turnOff` + `ctx.tools.restrict`）。**没有 trivial 特判**；`src\\index.ts` 的 `Config` 里还留着\"pulled back after it handed over its plan\"的悬空注释——拉回机制已删，注释没删。\n- 成本有仓库自己的实测支撑：并行型任务赢（humeval 89s、panel 580s/4788k、nbody 646s/642k），短任务输（coverage 383k token/56s → 509k/83s；quixbugs 240k/86s → 698k/184s），超长程输得更惨（commit0 执行者 4→10，token 21.8M→37.4M）。**\"值得组织才快\"**。\n\n### B｜可绕过性视角 —— 结论：**混合强度；\"每轮必须交图\"可稳定绕过**\n\n- 「每轮必须交图」= **提示级**（消息级，无 turn-stopping）；「交完图才能给结论」= 机制级但**只在第一张图跑过之后**；「派发只走图里节点」= 对 `subagent`/`subagent_fork` 两个**硬编码名字**是机制级。\n- 绕过路径（可行性分级）：①直接给结论不交图（可靠）②先用别的工具干完再交空图或不交（可靠，第一轮全放行）③用 `workflow` 工具派发——`DELEGATION_TOOLS` 只有两个名字，全仓 grep 不到 `workflow`/`ralph`（第一轮可靠，之后被判断守卫连带挡住）④走原生 `exit_plan_mode`（`dsh-plan-mode`，不在 `HIDDEN_TOOLS`、不受任何 guard 约束）⑤子代理内部交结论——**不可行**。\n- **B 独有的绕过发现**：`isWorkerConversation`（`src\\rounds.ts`）扫**整份已装配上下文**，任一文本块以 `[refine-loop worker]` 开头即判为 worker；模型自己发这么一条消息，教条就静默停止注入，而 `applyWorkerRule` 判的是插件自己的 `workers.has()`，此时 `refine_plan` 并不被拒。\n- 「派发只走图」的洞：按名字硬编码（原生工具名是 `config.toolName ?? \"subagent\"`，改名即失效），且 `ctx.tools.get(name)` 找不到时**静默 `continue`** 无告警；worker 的\"不许派发\"只是提示，机制上仍能直接调 `workflow`。\n- 自述核对：「模型可以不交图」「第一步是图是提示不是强制」**与实现一致**；但强制表里\"每轮开始就想图 ✅\"**表述过头**，紧跟的注解又标成 ✗，表格自相矛盾。\n- 另指出：`verify\\` 里**没有** `applyJudgementGuard`/`JUDGE_ONLY`/`applyDelegationRule` 的任何用例——最关键的两个 guard 没有测试保护。\n\n### C｜与 harness 原生能力冲突视角 —— 结论：**冲突程度中等；多为\"表面重叠可共存\"，三处真咬人**\n\n- **原生 subagent**：不是重复实现，是**入口替换**（`src\\fork.ts` 的 `spawnChild` → `host.agentLoop.createAgent`，seed 自建 `buildSeedFromNow`，边界是\"此刻\"而非 harness 的\"仅已完成轮次\"）；原生委派工具在 agent 作用域被同名重写、直调必失败、后台三件套被 deny。共存成本：模型工具表里留下\"**看得见、直调必失败**\"的原生委派工具。\n- **原生 plan 模式**：**真冲突**，且插件注释自陈其提示段原先挂在工具段时**被原生\"直接派发\"的建议压过**——指令竞争已被实证过一次。现挂在 `dsh-system-prompt` 的 `PLAN_POLICY: 500` 槽，与原生 plan 段落同槽并存；原生\"先出计划等批准\"与插件\"第一条消息就是图、交完图这一轮就结束\"**语义相反**，插件完全不探测它是否开启。\n- **工具并发**：插件复用 harness 的 `ctx.tools.executionMode`，再用 `src\\concurrency.ts` 的 overrides 把 glob/grep/只读 ops_bash 放成并行 → **同一工具原生一步内独占、图内并行，两套契约并存（不矛盾但不一致）**；原生 PTC 传输 `run_code` 里另有 exclusive 屏障 + maxParallel，插件这层是第三套。\n- **回合循环与 park**：**无冲突**。`exec.concludeTurn()` + `agent.followup`，轮预算自数（maxRounds），`src\\parked.ts` 到点不杀而是 park、靠\"下一张图复用同一 node id\"续跑。副作用：原生\"回合数\"与插件\"轮数\"不是一回事。\n- **指令优先级**：教条以 `source=system-prompt` 的 user message 塞在每轮第 1 步**前**、messages 末尾，刻意抢\"模型开口前最后读到的位置\"；与原生提示段、AGENTS.md、skill 同级竞争，插件只能压住自己那段。\n- **C 独有的两处硬伤**：①**嵌套判定口径不一致**——插件用 `callId ≠ rootCallId`，原生用 `exec.parent` 是否存在，导致两条规则只拦一半（worker 可在 tools 批次里嵌套 `refine_plan` 自己画图；原生 subagent 可在图的 tools 节点里被调用，绕过节点预算与 park 管理）；②**PTC 呈现模式不兼容**——原生 ptc 下非 `run_code` 工具判 UNKNOWN_TOOL，而教条仍要求先交图；插件 plan 内部调用未带 parent，原生会当成模型直呼而拒绝，*"
+}

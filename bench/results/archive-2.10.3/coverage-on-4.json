@@ -1,0 +1,43 @@
+{
+  "task": "coverage",
+  "condition": "on",
+  "index": 4,
+  "profile": "bench-on",
+  "exitCode": 0,
+  "wallMs": 75716,
+  "timedOut": false,
+  "sessionId": "session-0545938d-0db7-4d88-8bb8-e9124e67a804",
+  "stderr": "",
+  "steps": 3,
+  "toolCalls": 3,
+  "tools": [
+    "glob",
+    "glob",
+    "refine_plan"
+  ],
+  "usage": {
+    "inputTokens": 15821,
+    "outputTokens": 2546,
+    "cacheReadTokens": 24500,
+    "totalTokens": 42867
+  },
+  "formation": {
+    "agents": 4,
+    "input": 154630,
+    "output": 30218,
+    "cacheRead": 1362487,
+    "total": 1547335,
+    "steps": 41
+  },
+  "mainPrompt": 17155,
+  "correctness": {
+    "passed": 5,
+    "total": 5,
+    "missing": []
+  },
+  "planned": true,
+  "planAgentNodes": 3,
+  "thinkingChars": 2871,
+  "thinkingPreview": "Let me look at the whole directory structure first, and read files. Let me plan the work: this is a read-only analysis task. I'll read all spec files and all src files.\n\nLet me do a plan with refine_plan as instructed. But first, per the loop protocol, my first message of the round should be the plan. I already made a tool call (glob) — slight deviation but fine; let me now hand over the plan.\n\nActually the instructions say: \"your first message of the round IS the plan: you hand it over before you call anything else\". I already called glob. Let me now hand over a plan properly.\n\nPlan:\n- Node A (worker): Read all verify/*.spec.ts and determine which entry function each tests (imports from src, and the function under test).\n- Node B (worker): Read all src/*.ts and map modules to specs, determine which modules have no corresponding spec, and compute line counts of each src module, identify ",
+  "finalText": "三个问题都已由本轮结果完整回答。以下是结论。\n\n## 1. `verify/` 下每个 `.spec.ts` 实际测的入口函数\n\n| spec | 实际测的入口函数（来自 `src/`） |\n|---|---|\n| `batch.spec.ts` | `runBatch`（主）+ `capOutput` / `capNodeOutput` / `MAX_CALL_OUTPUT_CHARS` / `MAX_NODE_OUTPUT_CHARS` — batch.ts |\n| `concurrency.spec.ts` | `isReadOnlyCommand`（主，断言最密）+ `mayRunTogether` / `buildOverrides` — concurrency.ts；末段借 `runBatch` — batch.ts |\n| `fork.spec.ts` | `buildSeedFromNow`（主）+ `openTurnClosers` / `reportPrompt` / `Reporters` — fork.ts |\n| `output-schema.spec.ts` | `applyPlanTool` — tool.ts（只借注册副作用抓 `output.schema` 喂 harness 的 `validateJsonSchemaValue`，execute 体从未运行） |\n| `parked.spec.ts` | `Parked` 类的 `park` / `list` / `resume` / `retain` / `disposeAll` — parked.ts |\n| `plan.spec.ts` | `runPlan`（主）+ `renderPlan` / `PLAN_TOOL_DESCRIPTION` — tool.ts；`parsePlanArgs` / `buildGroups` / `WORKER_MARKER` — plan.ts；`REFINE_GUIDANCE` — index.ts |\n| `refine.spec.ts` | `parseBatchArgs`（主）+ `renderBatch` — batch.ts；`parsePolicyCommand` — policy.ts |\n| `repair.spec.ts` | `runBatch`（带 repair 回调的失败重跑路径）— batch.ts；`parseRepair` — repair.ts |\n| `retain.spec.ts` | `applyReportRetention` — index.ts（捕获其注册的 `tools/post-execute` listener 后手动调用）+ `PLAN_TOOL` — tool.ts |\n| `rounds.spec.ts` | `applyTurnDoctrine` / `applyWorkerRule` / `applyReportGuard` / `Rounds`(`used/bump/reset`) / `Workers`(`mark/has/unmark`) / `isWorkerConversation` / `startOf` / `formatClock` + `ROUND_LOOP`·`NEXT_ROUND`·`REPORT_ONLY`·`WORKER_NO_PLAN` — rounds.ts；`WORKER_MARKER`（plan.ts）、`Reporters`（fork.ts）仅作场景构造 |\n| `tools-tool.spec.ts` | `applyToolsTool`（注册 + execute 拒绝路径）/ `readToolsCalls` / `TOOLS_TOOL` — tools-tool.ts；类型 `Workers` — rounds.ts |\n\n## 2. `src/` 下没有对应 spec 的模块\n\n**按「同名 spec」约定（`src/X.ts` ↔ `verify/X.spec.ts`）——三个没有自己的 spec：**\n\n- **`src/index.ts`**（cordis 插件入口/聚合装配）\n- **`src/policy.ts`**（会话内开关）\n- **`src/tool.ts`**（真正的业务模块，671 行，其行为被拆进 `plan.spec.ts` 与 `output-schema.spec.ts`）\n\n反向还有三个 spec 没有同名模块：`output-schema.spec.ts`、`refine.spec.ts`、`retain.spec.ts`。\n\n**按「是否被任一 spec import」——11 个模块全部被碰到，没有零覆盖模块**，但上面三个覆盖很薄：`policy.ts` 只测了 `parsePolicyCommand`（`SessionPolicy`、`runPolicyCommand`、`policyConfirmation`、`applyPolicyMessage`、`applyPolicyCommand` 全未测）；`index.ts` 只测了 `applyReportRetention` 与 `REFINE_GUIDANCE`（`apply`、`Config`、全部 `DEFAULT_*` 未测）；`tool.ts` 只测了 `runPlan`/`renderPlan`/`PLAN_TOOL_DESCRIPTION`/`applyPlanTool`/`PLAN_TOOL`。\n\n另：虽有 spec 却**从不执行**的缺口 —— `verify/run-specs.mjs` 里硬编码的 specs 数组只列了 10 个，`repair.spec.ts` 不在其中，`pnpm specs` 根本跑不到它。\n\n## 3. 行数最多的模块\n\n`src` 全部模块行数：fork.ts **712**、tool.ts 671、rounds.ts 481、batch.ts 448、index.ts 395、policy.ts 241、concurrency.ts 234、plan.ts 225、tools-tool.ts 174、repair.ts 173、parked.ts 156。\n\n- **整个 `src` 下最长：`src/fork.ts`，712 行。**\n- 若「这些模块」特指第 2 问里无同名 spec 的那三个（index/policy/tool），则最长的是 **`src/tool.ts`，671 行**。\n\n全程只读，未修改任何文件。"
+}
